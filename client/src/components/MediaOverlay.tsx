@@ -427,6 +427,22 @@ function EmbedMediaItem({
   // the controller's 250ms tick can read it synchronously.
   const vimeoSampleRef = useRef<{ t: number; playing: boolean }>({ t: 0, playing: false });
 
+  // Track the last play/pause we issued to the SDK. Repeatedly calling
+  // playVideo() on YouTube while audio is unmuted freezes the decoder, so we
+  // only issue a transition when it actually changes — same pattern as
+  // NativeMediaItem's `if (timeSync.playing && v.paused)` guard.
+  const lastIssuedPlayingRef = useRef<boolean | null>(null);
+  const setPlaying = (playing: boolean) => {
+    const p = playerRef.current;
+    const s = inputsRef.current;
+    if (!p || !readyRef.current) return;
+    if (s.kind !== "youtube" && s.kind !== "vimeo") return;
+    if (lastIssuedPlayingRef.current === playing) return;
+    lastIssuedPlayingRef.current = playing;
+    if (playing) playPlayer(p, s.kind);
+    else pausePlayer(p, s.kind);
+  };
+
   const emitTimeSync = () => {
     const p = playerRef.current;
     const s = inputsRef.current;
@@ -441,20 +457,50 @@ function EmbedMediaItem({
     }
   };
 
+  // Browsers block audio playback that wasn't started by a user gesture. On
+  // the controller, the toggle click counts as that gesture; on viewers,
+  // however, a remote websocket message asking us to unmute does NOT — YouTube
+  // responds by pausing the iframe and showing its play overlay (the freeze
+  // the user reported). So on viewers we keep the player muted until the
+  // audience taps the "enable audio" overlay; that tap is a real gesture and
+  // lets us unmute.
+  const [audioGestureGranted, setAudioGestureGranted] = useState(false);
+  const needsAudioGesture = role === "viewer" && !muted && !audioGestureGranted;
+  const applyMute = () => {
+    const p = playerRef.current;
+    if (!p || !readyRef.current) return;
+    if (placement.kind !== "youtube" && placement.kind !== "vimeo") return;
+    const allowed = role !== "viewer" || audioGestureGranted;
+    const effectiveMuted = !muted && !allowed ? true : muted;
+    setPlayerMuted(p, placement.kind, effectiveMuted);
+  };
+  const handleEnableAudio = () => {
+    // Flip state first so the next render reflects the granted gesture; we
+    // also unmute the player directly here so the synchronous click handler
+    // (a valid user gesture) carries through to the SDK call.
+    setAudioGestureGranted(true);
+    const p = playerRef.current;
+    if (p && readyRef.current && (placement.kind === "youtube" || placement.kind === "vimeo")) {
+      setPlayerMuted(p, placement.kind, false);
+    }
+  };
+
   const applyState = () => {
     const p = playerRef.current;
     const s = inputsRef.current;
     if (!p || !readyRef.current) return;
     if (s.kind !== "youtube" && s.kind !== "vimeo") return;
-    setPlayerMuted(p, s.kind, s.muted);
     if (s.autostart && s.autoplay && s.mediaState.id === null) {
-      playPlayer(p, s.kind);
+      setPlaying(true);
       return;
     }
     if (!s.targeted) return;
-    if (s.mediaState.action === "play") playPlayer(p, s.kind);
-    else if (s.mediaState.action === "pause") pausePlayer(p, s.kind);
-    else if (s.mediaState.action === "reset") seekPlayer(p, s.kind, 0);
+    if (s.mediaState.action === "play") setPlaying(true);
+    else if (s.mediaState.action === "pause") setPlaying(false);
+    else if (s.mediaState.action === "reset") {
+      seekPlayer(p, s.kind, 0);
+      lastIssuedPlayingRef.current = null;
+    }
   };
 
   // Lazy-load the SDK and attach a player to the iframe. Re-runs if the
@@ -476,6 +522,7 @@ function EmbedMediaItem({
               onReady: () => {
                 if (cancelled) return;
                 readyRef.current = true;
+                applyMute();
                 applyState();
                 emitTimeSync();
               },
@@ -525,6 +572,7 @@ function EmbedMediaItem({
             .then(() => {
               if (cancelled) return;
               readyRef.current = true;
+              applyMute();
               applyState();
               emitTimeSync();
             })
@@ -541,6 +589,7 @@ function EmbedMediaItem({
       const p = playerRef.current;
       playerRef.current = null;
       readyRef.current = false;
+      lastIssuedPlayingRef.current = null;
       try {
         (p as { destroy?: () => unknown } | null)?.destroy?.();
       } catch { /* ignore */ }
@@ -548,13 +597,19 @@ function EmbedMediaItem({
     // applyState reads inputsRef each call, so it is stable for these deps.
   }, [placement.kind, placement.videoId, src]);
 
-  // Re-apply playback state whenever the controller's mediaState, mute, or
-  // autostart inputs change.
+  // Re-apply playback state whenever the controller's mediaState or autostart
+  // inputs change. Mute is handled separately so toggling audio doesn't
+  // re-issue play (which freezes YouTube's decoder when unmuted).
   useEffect(() => {
     applyState();
     // applyState pulls from inputsRef (kept in sync above on every render),
     // so this effect's deps just need to fire on actual input changes.
-  }, [mediaState, targeted, autostart, muted, placement.kind, placement.autoplay]);
+  }, [mediaState, targeted, autostart, placement.kind, placement.autoplay]);
+
+  useEffect(() => {
+    applyMute();
+    // applyMute reads `muted`/`role`/gesture state; deps trigger on input change.
+  }, [muted, placement.kind, role, audioGestureGranted]);
 
   // Controller: periodically emit current playback time + sample timestamp,
   // mirroring the native <video> path. Seek/play/pause via the iframe's own
@@ -583,8 +638,7 @@ function EmbedMediaItem({
     const expectedT = timeSync.playing ? timeSync.t + latencyS : timeSync.t;
     const HARD = 1.5;
 
-    if (timeSync.playing) playPlayer(p, placement.kind);
-    else pausePlayer(p, placement.kind);
+    setPlaying(timeSync.playing);
 
     if (placement.kind === "youtube") {
       const drift = (p as YTPlayer).getCurrentTime() - expectedT;
@@ -610,19 +664,45 @@ function EmbedMediaItem({
 
   if (!placement.videoId) return null;
 
+  const overlayStyle: React.CSSProperties = {
+    position: "absolute",
+    left: `${placement.xPct * 100}%`,
+    top: `${placement.yPct * 100}%`,
+    width: `${placement.wPct * 100}%`,
+    height: `${placement.hPct * 100}%`,
+    pointerEvents: "auto",
+    background: "rgba(0,0,0,0.55)",
+    color: "white",
+    border: 0,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 14,
+    fontWeight: 500,
+    gap: 8,
+  };
+
   return (
-    <iframe
-      ref={iframeRef}
-      src={src}
-      style={style}
-      allow={
-        placement.kind === "youtube"
-          ? "autoplay; encrypted-media; picture-in-picture"
-          : "autoplay; fullscreen; picture-in-picture"
-      }
-      allowFullScreen
-      title={placement.kind === "youtube" ? "YouTube video" : "Vimeo video"}
-    />
+    <>
+      <iframe
+        ref={iframeRef}
+        src={src}
+        style={style}
+        allow={
+          placement.kind === "youtube"
+            ? "autoplay; encrypted-media; picture-in-picture"
+            : "autoplay; fullscreen; picture-in-picture"
+        }
+        allowFullScreen
+        title={placement.kind === "youtube" ? "YouTube video" : "Vimeo video"}
+      />
+      {needsAudioGesture && (
+        <button type="button" onClick={handleEnableAudio} style={overlayStyle}>
+          Tap to enable audio
+        </button>
+      )}
+    </>
   );
 }
 
