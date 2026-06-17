@@ -12,6 +12,10 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { MobileControllerMenu } from "@/components/MobileControllerMenu";
 import { PresentationTimer } from "@/components/PresentationTimer";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
+import { LoginDialog } from "@/components/LoginDialog";
+import { SyncShareOverlay } from "@/components/SyncShareOverlay";
+import { useAuth } from "@/lib/useAuth";
+import { useClaim } from "@/lib/useClaim";
 import { ControllerCard } from "@/components/controller/ControllerCard";
 import { CurrentSlideCard } from "@/components/controller/CurrentSlideCard";
 import { NextSlideCard } from "@/components/controller/NextSlideCard";
@@ -165,6 +169,7 @@ interface ControllerViewProps {
   onGoTo: (slide: number) => void;
   onSyncAll: () => void;
   onEnd: () => void;
+  onSynced: () => void;
   currentCanvasRef: React.RefObject<HTMLDivElement | null>;
   settings: PresentationSettings;
   onSettingsChange: (settings: PresentationSettings) => void;
@@ -190,6 +195,7 @@ export function ControllerView({
   onGoTo,
   onSyncAll,
   onEnd,
+  onSynced,
   currentCanvasRef,
   settings,
   onSettingsChange,
@@ -212,6 +218,15 @@ export function ControllerView({
   const [timerSettingsOpen, setTimerSettingsOpen] = useState(false);
   const [keymap, setKeymap] = useState<Keymap>(loadKeymap);
   const [viewerBlocked, setViewerBlocked] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
+
+  const { user } = useAuth();
+  const loggedIn = !!user;
+  const { syncing, syncError, sync } = useClaim(id);
+
+  const syncOnline = async () => {
+    if (await sync(currentSlide)) onSynced();
+  };
 
   // Opening the controller auto-opens the viewer in its own window. The named
   // target is reused across reloads/re-renders, so it never spawns duplicates.
@@ -415,6 +430,7 @@ export function ControllerView({
             <Settings size={15} />
           </button>
           <ThemeToggle />
+          <span className="text-muted-foreground/40">|</span>
           <button
             type="button"
             onClick={() => {
@@ -422,7 +438,7 @@ export function ControllerView({
               setViewerBlocked(!w);
             }}
             title={viewerBlocked ? "Viewer window blocked — click to open it" : "Open viewer window"}
-            className={`ml-2 inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-semibold rounded-md transition-colors ${
+            className={`inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-semibold rounded-md transition-colors ${
               viewerBlocked
                 ? "text-amber-500 bg-amber-500/10 hover:bg-amber-500/20"
                 : "text-foreground hover:bg-accent"
@@ -507,22 +523,37 @@ export function ControllerView({
       {shareDialogOpen && (
         <DialogOverlay onClose={() => setShareDialogOpen(false)} maxWidth="max-w-[50%]">
           {local ? (
-            <p className="text-sm text-muted-foreground text-center">
-              Local presentation — viewers can only join in another window on this
-              device. Log in to share online.
-            </p>
+            <>
+              <SyncShareOverlay
+                id={id}
+                viewerUrl={viewerUrl}
+                loggedIn={loggedIn}
+                syncing={syncing}
+                syncError={syncError}
+                onLogin={() => setLoginOpen(true)}
+                onSync={syncOnline}
+              />
+              <p className="text-sm text-muted-foreground text-center">
+                This presentation is local to this browser. Sync it online to let
+                viewers join from any device.
+              </p>
+            </>
           ) : (
-            <SessionQRCode sessionId={id} />
+            <>
+              <SessionQRCode sessionId={id} />
+              <div className="space-y-2">
+                <CopyField label="Viewer link" value={viewerUrl} />
+                <CopyField label="Controller link" value={controllerUrl} />
+              </div>
+            </>
           )}
-          <div className="space-y-2">
-            <CopyField label="Viewer link" value={viewerUrl} />
-            {!local && <CopyField label="Controller link" value={controllerUrl} />}
-          </div>
           <Button className="w-full" variant="ghost" onClick={() => setShareDialogOpen(false)}>
             Close
           </Button>
         </DialogOverlay>
       )}
+
+      {loginOpen && <LoginDialog onClose={() => setLoginOpen(false)} />}
 
       {passphraseDialogOpen && (
         <DialogOverlay onClose={() => setPassphraseDialogOpen(false)} maxWidth="max-w-xs">

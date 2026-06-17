@@ -5,19 +5,19 @@ import { Card, CardContent } from "@/components/ui/card";
 import { QRCodeSVG } from "qrcode.react";
 import { idbGet } from "@/lib/localStore";
 import { useAuth } from "@/lib/useAuth";
+import { useClaim } from "@/lib/useClaim";
 import { LoginDialog } from "@/components/LoginDialog";
+import { SyncShareOverlay } from "@/components/SyncShareOverlay";
 
 export default function Share() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user, session } = useAuth();
+  const { user } = useAuth();
   const loggedIn = !!user;
+  const { syncing, syncError, sync } = useClaim(id!);
 
   const [local, setLocal] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncError, setSyncError] = useState("");
 
   const controllerUrl = `${window.location.origin}/s/${id}?role=controller`;
   const viewerUrl = `${window.location.origin}/s/${id}?role=viewer`;
@@ -54,68 +54,40 @@ export default function Share() {
     navigate(`/s/${id}?role=${role}`);
   };
 
-  // Upload the local PDF and turn this into a normal synced session (same code).
   const syncOnline = async () => {
-    if (!session) return;
-    setSyncError("");
-    setSyncing(true);
-    try {
-      const rec = await idbGet(id!);
-      if (!rec) throw new Error("Local copy not found on this device");
-      const form = new FormData();
-      form.append("pdf", rec.blob, `${rec.filename}.pdf`);
-      const res = await fetch(`/api/sessions/${id}/claim`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        body: form,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || "Failed to sync presentation");
-      }
-      setLocal(false);
-    } catch (e: unknown) {
-      setSyncError(e instanceof Error ? e.message : "Failed to sync presentation");
-    } finally {
-      setSyncing(false);
-    }
+    if (await sync()) setLocal(false);
   };
 
-  const showOverlay = local && !dismissed;
+  const showOverlay = local;
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
       <Card className="w-full max-w-lg">
         <CardContent className="pt-6 space-y-6">
           <div className="text-center space-y-4">
-            <div className="relative">
-              <div className={showOverlay ? "blur-sm pointer-events-none select-none" : ""}>
+            {showOverlay ? (
+              <SyncShareOverlay
+                id={id!}
+                viewerUrl={viewerUrl}
+                loggedIn={loggedIn}
+                syncing={syncing}
+                syncError={syncError}
+                onLogin={() => setLoginOpen(true)}
+                onSync={syncOnline}
+              />
+            ) : (
+              <>
                 <div className="flex justify-center">
                   <QRCodeSVG value={viewerUrl} size={180} className="rounded" />
                 </div>
-                <div className="space-y-1 mt-4">
+                <div className="space-y-1">
                   <p className="text-sm text-muted-foreground">Session Code</p>
                   <p className="text-5xl font-bold tracking-widest font-mono select-all">
                     {id}
                   </p>
                 </div>
-              </div>
-
-              {showOverlay && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4">
-                  {loggedIn ? (
-                    <>
-                      <Button onClick={syncOnline} disabled={syncing}>
-                        {syncing ? "Syncing…" : "Sync online to share"}
-                      </Button>
-                      {syncError && <p className="text-sm text-destructive text-center">{syncError}</p>}
-                    </>
-                  ) : (
-                    <Button onClick={() => setLoginOpen(true)}>Log in to share</Button>
-                  )}
-                </div>
-              )}
-            </div>
+              </>
+            )}
 
             <p className="text-sm text-muted-foreground">
               {local
@@ -136,7 +108,7 @@ export default function Share() {
               <Button
                 variant="ghost"
                 className="text-muted-foreground hover:text-foreground"
-                onClick={() => setDismissed(true)}
+                onClick={() => start("controller")}
               >
                 {loggedIn ? "Keep it local" : "Continue without login"}
               </Button>

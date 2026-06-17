@@ -388,6 +388,7 @@ export default function Presentation() {
       onGoTo={goTo}
       onSyncAll={syncAll}
       onEnd={endPresentation}
+      onSynced={() => setLocal(false)}
       currentCanvasRef={currentCanvasRef}
       settings={settings}
       onSettingsChange={(s) => {

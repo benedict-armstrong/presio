@@ -144,7 +144,7 @@ app.post("/api/sessions/:id/claim", upload.single("pdf"), async (req, res) => {
 
     const { data: row, error: rowError } = await supabase
       .from("sessions")
-      .select("id, local")
+      .select("id, local, controller_token, passphrase")
       .eq("id", req.params.id)
       .single();
     if (rowError || !row) {
@@ -169,16 +169,32 @@ app.post("/api/sessions/:id/claim", upload.single("pdf"), async (req, res) => {
       return;
     }
 
+    // Preserve the presenter's current position if provided (a local session's
+    // slide changes were never persisted server-side).
+    const currentSlide = parseInt(req.body.current_slide, 10);
+    const update: Record<string, unknown> = {
+      local: false,
+      pdf_path: pdfPath,
+      total_slides: totalSlides,
+      user_id: userData.user.id,
+    };
+    if (Number.isFinite(currentSlide) && currentSlide >= 1) update.current_slide = currentSlide;
+
     const { error: updateError } = await supabase
       .from("sessions")
-      .update({ local: false, pdf_path: pdfPath, total_slides: totalSlides, user_id: userData.user.id })
+      .update(update)
       .eq("id", row.id);
     if (updateError) {
       res.status(500).json({ error: "Failed to update session" });
       return;
     }
 
-    res.json({ id: row.id, totalSlides });
+    res.json({
+      id: row.id,
+      totalSlides,
+      controllerToken: row.controller_token,
+      passphrase: row.passphrase,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
