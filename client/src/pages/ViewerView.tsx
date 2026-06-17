@@ -14,6 +14,7 @@ import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
 
 export function ViewerView({
   id,
+  local,
   pdf,
   pdfUrl,
   canvasRef,
@@ -31,6 +32,7 @@ export function ViewerView({
   onResync,
 }: {
   id: string;
+  local: boolean;
   pdf: PDFDocumentProxy;
   pdfUrl: string;
   canvasRef: React.RefObject<HTMLDivElement | null>;
@@ -178,7 +180,7 @@ export function ViewerView({
           <span className={`transition-opacity duration-300 ${
             cursorVisible ? "opacity-100" : "opacity-0 pointer-events-none"
           }`}>
-            <ConnectionIndicator dark />
+            <ConnectionIndicator dark local={local} />
           </span>
         )}
         {outOfSync && (
@@ -222,14 +224,15 @@ export function ViewerView({
 
       {menuOpen && (
         <DialogOverlay onClose={() => setMenuOpen(false)} maxWidth="max-w-xs">
-          <SessionQRCode sessionId={id} size={160} />
+          {!local && <SessionQRCode sessionId={id} size={160} />}
           <div className="space-y-2">
             <Button
               className="w-full"
               variant="outline"
               onClick={() => {
+                // Local sessions are same-device; no passphrase gate needed.
                 const { controllerToken } = getSessionAuth(id);
-                if (controllerToken) {
+                if (local || controllerToken) {
                   navigate(`/s/${id}?role=controller`, { replace: true });
                 } else {
                   setMenuOpen(false);

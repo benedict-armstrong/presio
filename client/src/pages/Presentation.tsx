@@ -6,6 +6,7 @@ import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync,
 import { socket } from "@/lib/socket";
 import { startClockSync } from "@/lib/clock";
 import { getSessionAuth } from "@/lib/utils";
+import { idbGet, idbDelete } from "@/lib/localStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ControllerView } from "./ControllerView";
@@ -50,18 +51,53 @@ export default function Presentation() {
 
   const currentCanvasRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
+  // Latest broadcastable state, for replying to a local window's state_request
+  // without re-subscribing the channel on every slide change.
+  const stateRef = useRef({ currentSlide: 1, totalSlides: 0, blanked: false, settings: defaultSettings });
+
+  // Resolved during load: true if this presentation's PDF lives in this
+  // browser's IndexedDB (local session). null until known.
+  const [local, setLocal] = useState<boolean | null>(null);
 
   const isViewer = role === "viewer";
   const outOfSync = isViewer && viewerSlide !== null;
   const displaySlide = outOfSync ? viewerSlide! : currentSlide;
 
+  stateRef.current = { currentSlide, totalSlides, blanked, settings };
+
   useEffect(() => {
     let cancelled = false;
+    let localUrl = "";
     (async () => {
       try {
+        // If the PDF is in this browser's IndexedDB, it's a local session —
+        // render it without the server (works offline, independent of the row).
+        const rec = await idbGet(id!);
+        if (rec) {
+          if (cancelled) return;
+          setLocal(true);
+          localUrl = URL.createObjectURL(rec.blob);
+          const doc = await loadPdf(localUrl);
+          if (cancelled) return;
+          setPdfUrl(localUrl);
+          setPdf(doc);
+          loadMediaPlacements(doc).then((m) => {
+            if (!cancelled) setMediaPlacements(m);
+          }).catch(() => { /* ignore — no media */ });
+          setFilename(rec.filename);
+          setTotalSlides(rec.totalSlides);
+          return;
+        }
+
         const res = await fetch(`/api/sessions/${id}`);
         if (!res.ok) throw new Error("Session not found");
         const session = await res.json();
+        if (session.local) {
+          // Server knows this code, but the PDF only lives on the presenter's device.
+          throw new Error("This presentation is only available in the same browser on the device it was created on");
+        }
+        if (cancelled) return;
+        setLocal(false);
         const doc = await loadPdf(session.pdfUrl);
         if (cancelled) return;
         setPdfUrl(session.pdfUrl);
@@ -78,8 +114,8 @@ export default function Presentation() {
           timerThreshold: session.timer_threshold ?? null,
           notePrefix: session.note_prefix ?? "note:",
         });
-      } catch {
-        if (!cancelled) setError("Failed to load presentation");
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load presentation");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -87,6 +123,7 @@ export default function Presentation() {
     return () => {
       cancelled = true;
       clearCache();
+      if (localUrl) URL.revokeObjectURL(localUrl);
     };
   }, [id]);
 
@@ -98,10 +135,7 @@ export default function Presentation() {
   }, [filename, role]);
 
   useEffect(() => {
-    const { controllerToken } = getSessionAuth(id!);
-    socket.connect();
-    startClockSync();
-    socket.emit("join_session", { sessionId: id, role: requestedRole, token: controllerToken });
+    if (local === null) return; // wait until we know local vs. server
 
     const channel = new BroadcastChannel(`presio-${id}`);
     channelRef.current = channel;
@@ -112,7 +146,35 @@ export default function Presentation() {
       else if (type === "settings_update") setSettings(payload);
       else if (type === "media_update") setMediaState(payload);
       else if (type === "audio_update") setAudioState(payload);
+      else if (type === "session_ended") navigate("/", { replace: true });
+      else if (type === "state_request") {
+        // Controller is the source of truth for a local session; reply so a
+        // newly opened or reloaded window can catch up.
+        if (requestedRole === "controller") {
+          channel.postMessage({ type: "state_sync", payload: stateRef.current });
+        }
+      } else if (type === "state_sync") {
+        setCurrentSlide(payload.currentSlide);
+        if (payload.totalSlides) setTotalSlides(payload.totalSlides);
+        setBlanked(payload.blanked);
+        setSettings(payload.settings);
+      }
     };
+
+    // Local sessions never touch the server: no socket, sync over the channel.
+    if (local) {
+      setRole(requestedRole);
+      channel.postMessage({ type: "state_request" });
+      return () => {
+        channel.close();
+        channelRef.current = null;
+      };
+    }
+
+    const { controllerToken } = getSessionAuth(id!);
+    socket.connect();
+    startClockSync();
+    socket.emit("join_session", { sessionId: id, role: requestedRole, token: controllerToken });
 
     socket.on("session_state", ({ currentSlide, totalSlides, role: grantedRole, settings: s }) => {
       setCurrentSlide(currentSlide);
@@ -177,7 +239,7 @@ export default function Presentation() {
       socket.off("session_ended");
       socket.disconnect();
     };
-  }, [id, requestedRole, navigate, setSearchParams]);
+  }, [id, local, requestedRole, navigate, setSearchParams]);
 
   useEffect(() => {
     setMediaState((s) => (s.id === null ? s : { id: null, action: "pause", seq: Date.now() }));
@@ -199,51 +261,63 @@ export default function Presentation() {
   const goTo = useCallback(
     (slide: number) => {
       if (slide < 1 || slide > totalSlides) return;
-      socket.emit("slide_change", { slideNumber: slide });
+      if (!local) socket.emit("slide_change", { slideNumber: slide });
       channelRef.current?.postMessage({ type: "slide_update", payload: { slideNumber: slide } });
       setCurrentSlide(slide);
       setMediaState({ id: null, action: "pause", seq: Date.now() });
     },
-    [totalSlides]
+    [totalSlides, local]
   );
 
   const viewerGoTo = useCallback(
     (slide: number) => {
+      // Local viewers always follow the controller — no independent navigation.
+      if (local) return;
       if (slide < 1 || slide > totalSlides) return;
       setViewerSlide(slide);
     },
-    [totalSlides]
+    [totalSlides, local]
   );
 
   const resync = useCallback(() => setViewerSlide(null), []);
 
-  const syncAll = useCallback(() => socket.emit("sync_all"), []);
+  const syncAll = useCallback(() => { if (!local) socket.emit("sync_all"); }, [local]);
+
+  const endPresentation = useCallback(async () => {
+    if (local) {
+      await idbDelete(id!).catch(() => { /* ignore */ });
+      channelRef.current?.postMessage({ type: "session_ended" });
+    } else {
+      await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+    }
+    navigate("/", { replace: true });
+  }, [local, id, navigate]);
 
   const onMediaControl = useCallback(
     (id: string, action: "play" | "pause" | "reset") => {
       const next: MediaState = { id, action, seq: Date.now() };
-      socket.emit("media_control", { id, action });
+      if (!local) socket.emit("media_control", { id, action });
       channelRef.current?.postMessage({ type: "media_update", payload: next });
       setMediaState(next);
     },
-    []
+    [local]
   );
 
   const onMediaTime = useCallback(
     (id: string, t: number, playing: boolean, sampledAt: number) => {
-      socket.emit("media_time", { id, t, playing, sampledAt });
+      if (!local) socket.emit("media_time", { id, t, playing, sampledAt });
     },
-    []
+    [local]
   );
 
   const onAudioChange = useCallback(
     (next: { muted: boolean; target: AudioState["target"] }) => {
       const payload: AudioState = { ...next, seq: Date.now() };
-      socket.emit("audio_change", next);
+      if (!local) socket.emit("audio_change", next);
       channelRef.current?.postMessage({ type: "audio_update", payload });
       setAudioState(payload);
     },
-    []
+    [local]
   );
 
   const effectiveMuted = isMutedForRole(role === "controller" ? "controller" : "viewer", audioState);
@@ -283,6 +357,7 @@ export default function Presentation() {
     return (
       <ViewerView
         id={id!}
+        local={!!local}
         pdf={pdf!}
         pdfUrl={pdfUrl}
         canvasRef={currentCanvasRef}
@@ -305,24 +380,30 @@ export default function Presentation() {
   return (
     <ControllerView
       id={id!}
+      local={!!local}
       pdf={pdf!}
       pdfUrl={pdfUrl}
       currentSlide={currentSlide}
       totalSlides={totalSlides}
       onGoTo={goTo}
       onSyncAll={syncAll}
+      onEnd={endPresentation}
       currentCanvasRef={currentCanvasRef}
       settings={settings}
       onSettingsChange={(s) => {
         setSettings(s);
-        socket.emit("settings_change", s);
+        if (!local) socket.emit("settings_change", s);
         channelRef.current?.postMessage({ type: "settings_update", payload: s });
       }}
       startedAt={startedAt}
       blanked={blanked}
       onBlankToggle={() => {
-        socket.emit("blank_toggle");
-        channelRef.current?.postMessage({ type: "blank_update", payload: { blanked: !blanked } });
+        const next = !blanked;
+        // Server mode learns the new state from the socket echo; local mode has
+        // no echo (BroadcastChannel doesn't deliver to the sender), so set it here.
+        if (local) setBlanked(next);
+        else socket.emit("blank_toggle");
+        channelRef.current?.postMessage({ type: "blank_update", payload: { blanked: next } });
       }}
       mediaPlacements={currentMedia}
       mediaState={mediaState}

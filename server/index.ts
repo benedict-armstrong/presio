@@ -88,6 +88,37 @@ app.post("/api/sessions", upload.single("pdf"), async (req, res) => {
   }
 });
 
+// Reserve a session code for a presentation kept local to the browser. No PDF
+// is uploaded — the bytes stay in the client's IndexedDB. We only record the
+// code so it is unique/trackable (and claimable once the user logs in).
+app.post("/api/sessions/local", async (req, res) => {
+  const filename = typeof req.body.filename === "string" ? req.body.filename : "";
+  const totalSlides = parseInt(req.body.total_slides, 10);
+  if (!filename || !Number.isFinite(totalSlides) || totalSlides < 1) {
+    res.status(400).json({ error: "filename and total_slides are required" });
+    return;
+  }
+
+  const id = generateSessionId();
+  const { error } = await supabase.from("sessions").insert({
+    id,
+    pdf_path: "",
+    filename,
+    total_slides: totalSlides,
+    controller_token: nanoid(24),
+    passphrase: generatePassphrase(),
+    local: true,
+  });
+
+  if (error) {
+    console.error("Failed to create local session:", error);
+    res.status(500).json({ error: "Failed to create session" });
+    return;
+  }
+
+  res.json({ id });
+});
+
 app.get("/api/sessions/:id", async (req, res) => {
   const { data, error } = await supabase
     .from("sessions")
@@ -100,12 +131,13 @@ app.get("/api/sessions/:id", async (req, res) => {
     return;
   }
 
-  const { data: urlData } = supabase.storage
-    .from("presentations")
-    .getPublicUrl(data.pdf_path);
+  // Local sessions have no stored PDF, so there is no public URL.
+  const pdfUrl = data.pdf_path
+    ? supabase.storage.from("presentations").getPublicUrl(data.pdf_path).data.publicUrl
+    : "";
 
   const { controller_token, passphrase, ...publicData } = data;
-  res.json({ ...publicData, pdfUrl: urlData.publicUrl });
+  res.json({ ...publicData, pdfUrl });
 });
 
 app.post("/api/sessions/:id/auth", async (req, res) => {
@@ -146,7 +178,9 @@ app.delete("/api/sessions/:id", async (req, res) => {
     return;
   }
 
-  await supabase.storage.from("presentations").remove([data.pdf_path]);
+  if (data.pdf_path) {
+    await supabase.storage.from("presentations").remove([data.pdf_path]);
+  }
   await supabase.from("sessions").delete().eq("id", data.id);
 
   // Disconnect all sockets in this session's room
@@ -305,8 +339,8 @@ async function cleanupExpired() {
 
   if (!expired?.length) return;
 
-  const paths = expired.map((s) => s.pdf_path);
-  await supabase.storage.from("presentations").remove(paths);
+  const paths = expired.map((s) => s.pdf_path).filter(Boolean);
+  if (paths.length) await supabase.storage.from("presentations").remove(paths);
 
   const ids = expired.map((s) => s.id);
   await supabase.from("sessions").delete().in("id", ids);

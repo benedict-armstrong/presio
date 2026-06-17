@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { getSessionAuth } from "@/lib/utils";
+import { Settings, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import { SessionQRCode } from "@/components/SessionQRCode";
 import { CopyField } from "@/components/CopyField";
@@ -155,12 +157,14 @@ function loadVisibility(): Record<string, boolean> {
 
 interface ControllerViewProps {
   id: string;
+  local: boolean;
   pdf: PDFDocumentProxy;
   pdfUrl: string;
   currentSlide: number;
   totalSlides: number;
   onGoTo: (slide: number) => void;
   onSyncAll: () => void;
+  onEnd: () => void;
   currentCanvasRef: React.RefObject<HTMLDivElement | null>;
   settings: PresentationSettings;
   onSettingsChange: (settings: PresentationSettings) => void;
@@ -178,12 +182,14 @@ interface ControllerViewProps {
 
 export function ControllerView({
   id,
+  local,
   pdf,
   pdfUrl,
   currentSlide,
   totalSlides,
   onGoTo,
   onSyncAll,
+  onEnd,
   currentCanvasRef,
   settings,
   onSettingsChange,
@@ -198,15 +204,22 @@ export function ControllerView({
   audioState,
   onAudioChange,
 }: ControllerViewProps) {
-  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [passphraseDialogOpen, setPassphraseDialogOpen] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
-  const [cardsMenuOpen, setCardsMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [timerSettingsOpen, setTimerSettingsOpen] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [keymap, setKeymap] = useState<Keymap>(loadKeymap);
+  const [viewerBlocked, setViewerBlocked] = useState(false);
+
+  // Opening the controller auto-opens the viewer in its own window. The named
+  // target is reused across reloads/re-renders, so it never spawns duplicates.
+  useEffect(() => {
+    if (isMobile) return;
+    const w = window.open(`${window.location.origin}/s/${id}?role=viewer`, `presio-viewer-${id}`);
+    setViewerBlocked(!w);
+  }, [id, isMobile]);
 
   const [layouts, setLayouts] = useState<CardLayout[]>(loadLayout);
   const [cardVisibility, setCardVisibility] = useState<Record<string, boolean>>(loadVisibility);
@@ -346,6 +359,7 @@ export function ControllerView({
     return (
       <MobileLayout
         id={id}
+        local={local}
         pdfUrl={pdfUrl}
         pdf={pdf}
         currentSlide={currentSlide}
@@ -369,9 +383,14 @@ export function ControllerView({
             Presio
           </Link>
           <span className="text-muted-foreground/40">|</span>
-          <span className="text-xs text-muted-foreground">Code:</span>
-          <span className="font-mono font-bold tracking-widest select-all">{id}</span>
-          <ConnectionIndicator />
+          {!local && (
+            <>
+              <span className="text-xs text-muted-foreground">Code:</span>
+              <span className="font-mono font-bold tracking-widest select-all">{id}</span>
+            </>
+          )}
+          <ConnectionIndicator local={local} />
+          {local && <span className="text-xs font-medium text-amber-600 dark:text-amber-500">Local</span>}
           {blanked && (
             <span className="text-xs font-medium text-destructive px-1.5 py-0.5 rounded bg-destructive/10">
               Blanked
@@ -379,84 +398,43 @@ export function ControllerView({
           )}
         </div>
         <div className="flex items-center gap-1">
-          <div className="relative">
-            <Button size="sm" variant="ghost" onClick={() => setCardsMenuOpen(!cardsMenuOpen)}>
-              Layout
-            </Button>
-            {cardsMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 bg-popover border rounded-md shadow-md p-1 min-w-[160px]">
-                {CARD_KEYS.map((key) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => toggleCard(key)}
-                    className="flex items-center gap-2 w-full px-3 py-1.5 text-xs rounded hover:bg-accent transition-colors text-left"
-                  >
-                    <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center ${
-                      cardVisibility[key] ? "bg-primary border-primary text-primary-foreground" : "border-input"
-                    }`}>
-                      {cardVisibility[key] && (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
-                      )}
-                    </span>
-                    {CARD_LABELS[key]}
-                  </button>
-                ))}
-                <div className="border-t my-1" />
-                <button
-                  type="button"
-                  onClick={savePreferredLayout}
-                  className="w-full px-3 py-1.5 text-xs rounded hover:bg-accent transition-colors text-left text-muted-foreground"
-                >
-                  Save as preferred layout
-                </button>
-                {hasPreferred && (
-                  <button
-                    type="button"
-                    onClick={restorePreferredLayout}
-                    className="w-full px-3 py-1.5 text-xs rounded hover:bg-accent transition-colors text-left text-muted-foreground"
-                  >
-                    Restore preferred layout
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={resetLayout}
-                  className="w-full px-3 py-1.5 text-xs rounded hover:bg-accent transition-colors text-left text-muted-foreground"
-                >
-                  Reset to default
-                </button>
-              </div>
-            )}
-          </div>
-          <Button size="sm" variant="ghost" onClick={() => setShortcutsOpen(true)}>
-            Shortcuts
-          </Button>
           {passphrase && (
-            <Button size="sm" variant="ghost" onClick={() => setPassphraseDialogOpen(true)}>
+            <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-foreground" onClick={() => setPassphraseDialogOpen(true)}>
               Passphrase
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={() => setShareDialogOpen(true)}>
+          <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-foreground" onClick={() => setShareDialogOpen(true)}>
             Share
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => navigate(`/s/${id}?role=viewer`, { replace: true })}>
-            Switch to Viewer
-          </Button>
-          <a
-            href={viewerUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Open viewer in new window"
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            title="Settings"
             className="inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            <Settings size={15} />
+          </button>
+          <ThemeToggle />
+          <button
+            type="button"
+            onClick={() => {
+              const w = window.open(viewerUrl, `presio-viewer-${id}`);
+              setViewerBlocked(!w);
+            }}
+            title={viewerBlocked ? "Viewer window blocked — click to open it" : "Open viewer window"}
+            className={`ml-2 inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-semibold rounded-md transition-colors ${
+              viewerBlocked
+                ? "text-amber-500 bg-amber-500/10 hover:bg-amber-500/20"
+                : "text-foreground hover:bg-accent"
+            }`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 3h6v6" />
               <path d="M10 14 21 3" />
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
             </svg>
-          </a>
-          <ThemeToggle />
+            Open Viewer
+          </button>
         </div>
       </div>
 
@@ -467,7 +445,6 @@ export function ControllerView({
           (heightRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
         }}
         className="flex-1 min-h-0 overflow-hidden"
-        onClick={() => cardsMenuOpen && setCardsMenuOpen(false)}
       >
         <ResponsiveGridLayout
           className="layout"
@@ -529,10 +506,17 @@ export function ControllerView({
 
       {shareDialogOpen && (
         <DialogOverlay onClose={() => setShareDialogOpen(false)} maxWidth="max-w-[50%]">
-          <SessionQRCode sessionId={id} />
+          {local ? (
+            <p className="text-sm text-muted-foreground text-center">
+              Local presentation — viewers can only join in another window on this
+              device. Log in to share online.
+            </p>
+          ) : (
+            <SessionQRCode sessionId={id} />
+          )}
           <div className="space-y-2">
             <CopyField label="Viewer link" value={viewerUrl} />
-            <CopyField label="Controller link" value={controllerUrl} />
+            {!local && <CopyField label="Controller link" value={controllerUrl} />}
           </div>
           <Button className="w-full" variant="ghost" onClick={() => setShareDialogOpen(false)}>
             Close
@@ -558,12 +542,67 @@ export function ControllerView({
         </DialogOverlay>
       )}
 
-      {shortcutsOpen && (
-        <KeymapDialog
-          keymap={keymap}
-          onSave={(km) => { setKeymap(km); saveKeymap(km); }}
-          onClose={() => setShortcutsOpen(false)}
-        />
+      {settingsOpen && (
+        <DialogOverlay onClose={() => setSettingsOpen(false)} maxWidth="max-w-md">
+          <h2 className="text-lg font-semibold">Settings</h2>
+
+          <section className="space-y-2">
+            <h3 className="text-sm font-medium">Layout</h3>
+            <div className="space-y-0.5">
+              {CARD_KEYS.map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => toggleCard(key)}
+                  className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded hover:bg-accent transition-colors text-left"
+                >
+                  <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                    cardVisibility[key] ? "bg-primary border-primary text-primary-foreground" : "border-input"
+                  }`}>
+                    {cardVisibility[key] && <Check size={11} strokeWidth={3} />}
+                  </span>
+                  {CARD_LABELS[key]}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Button size="sm" variant="outline" onClick={savePreferredLayout}>
+                Save as preferred
+              </Button>
+              {hasPreferred && (
+                <Button size="sm" variant="outline" onClick={restorePreferredLayout}>
+                  Restore preferred
+                </Button>
+              )}
+              <Button size="sm" variant="outline" onClick={resetLayout}>
+                Reset to default
+              </Button>
+            </div>
+          </section>
+
+          <Separator />
+
+          <section className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium">Keyboard Shortcuts</h3>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => { setKeymap(DEFAULT_KEYMAP); saveKeymap(DEFAULT_KEYMAP); }}
+              >
+                Reset defaults
+              </Button>
+            </div>
+            <ShortcutsEditor
+              keymap={keymap}
+              onChange={(km) => { setKeymap(km); saveKeymap(km); }}
+            />
+          </section>
+
+          <Button className="w-full" variant="ghost" onClick={() => setSettingsOpen(false)}>
+            Close
+          </Button>
+        </DialogOverlay>
       )}
 
       {timerSettingsOpen && (
@@ -579,8 +618,9 @@ export function ControllerView({
           <div className="space-y-2 text-center">
             <h2 className="text-lg font-semibold">End Presentation?</h2>
             <p className="text-sm text-muted-foreground">
-              This will disconnect all viewers and permanently delete the
-              presentation. This action cannot be undone.
+              {local
+                ? "This will close the viewer window and delete the presentation from this browser. This action cannot be undone."
+                : "This will disconnect all viewers and permanently delete the presentation. This action cannot be undone."}
             </p>
           </div>
           <div className="flex gap-2">
@@ -590,10 +630,7 @@ export function ControllerView({
             <Button
               className="flex-1"
               variant="destructive"
-              onClick={async () => {
-                await fetch(`/api/sessions/${id}`, { method: "DELETE" });
-                navigate("/", { replace: true });
-              }}
+              onClick={onEnd}
             >
               End Presentation
             </Button>
@@ -606,6 +643,7 @@ export function ControllerView({
 
 function MobileLayout({
   id,
+  local,
   pdfUrl,
   pdf,
   currentSlide,
@@ -618,6 +656,7 @@ function MobileLayout({
   passphrase,
 }: {
   id: string;
+  local: boolean;
   pdfUrl: string;
   pdf: PDFDocumentProxy;
   currentSlide: number;
@@ -638,8 +677,11 @@ function MobileLayout({
             Presio
           </Link>
           <span className="text-muted-foreground/40">|</span>
-          <span className="font-mono font-bold tracking-widest text-sm select-all">{id}</span>
-          <ConnectionIndicator />
+          {!local && (
+            <span className="font-mono font-bold tracking-widest text-sm select-all">{id}</span>
+          )}
+          <ConnectionIndicator local={local} />
+          {local && <span className="text-xs font-medium text-amber-600 dark:text-amber-500">Local</span>}
         </div>
         <MobileControllerMenu id={id} pdf={pdf} pdfUrl={pdfUrl} passphrase={passphrase} />
       </div>
@@ -697,16 +739,13 @@ function MobileLayout({
   );
 }
 
-function KeymapDialog({
+function ShortcutsEditor({
   keymap,
-  onSave,
-  onClose,
+  onChange,
 }: {
   keymap: Keymap;
-  onSave: (km: Keymap) => void;
-  onClose: () => void;
+  onChange: (km: Keymap) => void;
 }) {
-  const [draft, setDraft] = useState<Keymap>(() => JSON.parse(JSON.stringify(keymap)));
   const [recording, setRecording] = useState<{ action: KeymapAction; index: number } | null>(null);
 
   useEffect(() => {
@@ -721,98 +760,64 @@ function KeymapDialog({
       if (["Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
       const binding: KeyBinding = { key: e.key };
       if (e.metaKey) binding.meta = true;
-      setDraft((prev) => {
-        const next = { ...prev };
-        const bindings = [...next[recording.action]];
-        bindings[recording.index] = binding;
-        next[recording.action] = bindings;
-        return next;
-      });
+      const next = { ...keymap };
+      const bindings = [...next[recording.action]];
+      bindings[recording.index] = binding;
+      next[recording.action] = bindings;
+      onChange(next);
       setRecording(null);
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [recording]);
+  }, [recording, keymap, onChange]);
 
   return (
-    <DialogOverlay onClose={onClose} maxWidth="max-w-md">
-      <h2 className="text-lg font-semibold">Keyboard Shortcuts</h2>
-      <div className="space-y-3">
-        {KEYMAP_ACTIONS.map((action) => (
-          <div key={action} className="flex items-center justify-between">
-            <span className="text-sm">{KEYMAP_LABELS[action]}</span>
-            <div className="flex items-center gap-1">
-              {draft[action].map((b, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => setRecording({ action, index: i })}
-                  className={`px-2 py-1 text-xs font-mono rounded border min-w-[40px] text-center transition-colors ${
-                    recording?.action === action && recording.index === i
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-input hover:border-primary/50"
-                  }`}
-                >
-                  {recording?.action === action && recording.index === i
-                    ? "..."
-                    : formatBinding(b)}
-                </button>
-              ))}
-              {draft[action].length < 3 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDraft((prev) => {
-                      const next = { ...prev };
-                      next[action] = [...next[action], { key: "" }];
-                      return next;
-                    });
-                    setRecording({ action, index: draft[action].length });
-                  }}
-                  className="px-1.5 py-1 text-xs rounded border border-dashed border-input hover:border-primary/50 text-muted-foreground"
-                >
-                  +
-                </button>
-              )}
-              {draft[action].length > 1 && !recording && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDraft((prev) => {
-                      const next = { ...prev };
-                      next[action] = next[action].slice(0, -1);
-                      return next;
-                    });
-                  }}
-                  className="px-1.5 py-1 text-xs rounded border border-input hover:border-destructive text-muted-foreground hover:text-destructive"
-                >
-                  −
-                </button>
-              )}
-            </div>
+    <div className="space-y-2">
+      {KEYMAP_ACTIONS.map((action) => (
+        <div key={action} className="flex items-center justify-between">
+          <span className="text-sm">{KEYMAP_LABELS[action]}</span>
+          <div className="flex items-center gap-1">
+            {keymap[action].map((b, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setRecording({ action, index: i })}
+                className={`px-2 py-1 text-xs font-mono rounded border min-w-[40px] text-center transition-colors ${
+                  recording?.action === action && recording.index === i
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-input hover:border-primary/50"
+                }`}
+              >
+                {recording?.action === action && recording.index === i
+                  ? "..."
+                  : formatBinding(b)}
+              </button>
+            ))}
+            {keymap[action].length < 3 && (
+              <button
+                type="button"
+                onClick={() => {
+                  const next = { ...keymap, [action]: [...keymap[action], { key: "" }] };
+                  onChange(next);
+                  setRecording({ action, index: keymap[action].length });
+                }}
+                className="px-1.5 py-1 text-xs rounded border border-dashed border-input hover:border-primary/50 text-muted-foreground"
+              >
+                +
+              </button>
+            )}
+            {keymap[action].length > 1 && !recording && (
+              <button
+                type="button"
+                onClick={() => onChange({ ...keymap, [action]: keymap[action].slice(0, -1) })}
+                className="px-1.5 py-1 text-xs rounded border border-input hover:border-destructive text-muted-foreground hover:text-destructive"
+              >
+                −
+              </button>
+            )}
           </div>
-        ))}
-      </div>
-      <div className="flex gap-2 pt-2">
-        <Button
-          className="flex-1"
-          variant="outline"
-          onClick={() => {
-            setDraft(JSON.parse(JSON.stringify(DEFAULT_KEYMAP)));
-          }}
-        >
-          Reset defaults
-        </Button>
-        <Button
-          className="flex-1"
-          onClick={() => {
-            onSave(draft);
-            onClose();
-          }}
-        >
-          Save
-        </Button>
-      </div>
-    </DialogOverlay>
+        </div>
+      ))}
+    </div>
   );
 }

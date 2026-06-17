@@ -54,14 +54,26 @@ The client dev server proxies `/api` and `/socket.io` requests to the server on 
 
 Presentations automatically expire after 24 hours.
 
+## Modes
+
+- **Logged out (default):** the PDF never leaves your browser. It's stored in
+  IndexedDB and shared across tabs/windows on the same device via
+  `BroadcastChannel` — no upload, no server session. Opening a presentation
+  auto-opens a viewer window. Local presentations can't be joined from another
+  device. They auto-expire after 7 days (or on "End Presentation").
+- **Logged in:** the existing server-synced flow — the PDF is uploaded to Supabase
+  and viewers can join from any device by code/QR. (Auth is currently a placeholder
+  toggle on the home screen.)
+
 ## Thoughts
 
-- [ ] To make it scalable ideally for free users if you don't sign up you can only host presentations locally. Presentations are then not synced online but just stored locally in the controller window. When a user logs in they can use it across devices and the presentation is synced online.
-- [ ]
+- [x] For free users (not signed in) presentations are hosted locally in the
+  browser and synced across windows only; logging in syncs online across devices.
+- [ ] Replace the placeholder auth with real authentication and gate server upload behind it.
 
 ## TODO
 
-- [ ] Indicator should be yellow when local connected to a local browser window
+- [x] Indicator should be yellow when local connected to a local browser window
 - [ ] Users should be able to generate a perma link and qr code that they can put on the presentation.
 - [ ] Add a button to toggle all viewers to show the join code and QR code.
 - [ ] In addition to blanking the screen it should also be possible to show the join code.

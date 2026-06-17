@@ -11,9 +11,13 @@ create table if not exists sessions (
   timer_duration integer,
   timer_threshold integer,
   note_prefix text not null default 'note:',
+  local boolean not null default false,
   created_at timestamptz not null default now(),
   expires_at timestamptz not null default (now() + interval '24 hours')
 );
+
+-- For existing deployments: add the column if the table predates it.
+alter table sessions add column if not exists local boolean not null default false;
 
 -- Index for cleanup query
 create index if not exists idx_sessions_expires_at on sessions (expires_at);

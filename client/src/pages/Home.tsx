@@ -1,14 +1,21 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { getDocument } from "pdfjs-dist";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PresioLogo } from "@/components/PresioLogo";
+import { isLoggedIn, setLoggedIn } from "@/lib/auth";
+import { idbPut, idbList, idbDelete, idbPruneOlderThan } from "@/lib/localStore";
+import "@/lib/pdf"; // ensure pdf.js worker is configured
+
+const LOCAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface RecentSession {
   id: string;
   filename: string;
   hasToken: boolean;
+  local?: boolean;
 }
 
 export default function Home() {
@@ -22,31 +29,44 @@ export default function Home() {
   const charRefs = useRef<(HTMLInputElement | null)[]>([]);
   const code = chars.join("");
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([]);
+  const [loggedIn, setLoggedInState] = useState(isLoggedIn);
 
   useEffect(() => {
-    const sessionKeys = Object.keys(localStorage).filter((k) => k.startsWith("session_"));
-    if (!sessionKeys.length) return;
-
     let cancelled = false;
-    Promise.all(
-      sessionKeys.map(async (key) => {
-        const id = key.replace("session_", "");
-        try {
-          const res = await fetch(`/api/sessions/${id}`);
-          if (!res.ok) {
-            localStorage.removeItem(key);
+
+    (async () => {
+      // Local presentations stored in IndexedDB — drop stale ones first.
+      await idbPruneOlderThan(LOCAL_TTL_MS).catch(() => { /* ignore */ });
+      const localRecents: RecentSession[] = (await idbList().catch(() => []))
+        .map((m) => ({ id: m.id, filename: m.filename, hasToken: true, local: true }));
+
+      // Server-backed presentations tracked via localStorage tokens.
+      const sessionKeys = Object.keys(localStorage).filter((k) => k.startsWith("session_"));
+      const serverRecents = await Promise.all(
+        sessionKeys.map(async (key) => {
+          const id = key.replace("session_", "");
+          try {
+            const res = await fetch(`/api/sessions/${id}`);
+            if (!res.ok) {
+              localStorage.removeItem(key);
+              return null;
+            }
+            const session = await res.json();
+            const stored = JSON.parse(localStorage.getItem(key) || "{}");
+            return { id, filename: session.filename, hasToken: !!stored.controllerToken } as RecentSession;
+          } catch {
             return null;
           }
-          const session = await res.json();
-          const stored = JSON.parse(localStorage.getItem(key) || "{}");
-          return { id, filename: session.filename, hasToken: !!stored.controllerToken } as RecentSession;
-        } catch {
-          return null;
-        }
-      })
-    ).then((results) => {
-      if (!cancelled) setRecentSessions(results.filter((r): r is RecentSession => r !== null));
-    });
+        })
+      );
+
+      if (!cancelled) {
+        setRecentSessions([
+          ...localRecents,
+          ...serverRecents.filter((r): r is RecentSession => r !== null),
+        ]);
+      }
+    })();
 
     return () => { cancelled = true; };
   }, []);
@@ -56,6 +76,27 @@ export default function Home() {
     setUploading(true);
     setProgress(0);
     try {
+      if (!isLoggedIn()) {
+        // Local mode: keep the PDF in the browser, never upload it. We still
+        // reserve a session code on the server (marked local) so it is unique.
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        setProgress(100);
+        const doc = await getDocument({ data: bytes }).promise;
+        const totalSlides = doc.numPages;
+        doc.destroy();
+        const filename = file.name.replace(/\.pdf$/i, "");
+        const res = await fetch("/api/sessions/local", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename, total_slides: totalSlides }),
+        });
+        if (!res.ok) throw new Error("Failed to create session");
+        const { id } = await res.json();
+        await idbPut({ id, filename, totalSlides, blob: file, createdAt: Date.now() });
+        navigate(`/s/${id}/share`);
+        return;
+      }
+
       const form = new FormData();
       form.append("pdf", file);
       const { id, controllerToken, passphrase } = await new Promise<{ id: string; controllerToken: string; passphrase: string }>((resolve, reject) => {
@@ -116,6 +157,18 @@ export default function Home() {
     navigate(`/s/${code}?role=${role}`);
   };
 
+  const removeRecent = async (s: RecentSession) => {
+    if (s.local) await idbDelete(s.id).catch(() => { /* ignore */ });
+    else localStorage.removeItem(`session_${s.id}`);
+    setRecentSessions((prev) => prev.filter((r) => r.id !== s.id));
+  };
+
+  const toggleLogin = () => {
+    const next = !loggedIn;
+    setLoggedIn(next);
+    setLoggedInState(next);
+  };
+
   return (
     <div
       className="min-h-screen flex flex-col items-center justify-center p-4 gap-4"
@@ -131,7 +184,9 @@ export default function Home() {
               <h1 className="text-2xl font-semibold tracking-tight">Presio</h1>
             </div>
             <p className="text-sm text-muted-foreground">
-              Upload a PDF presentation to start presenting
+              {loggedIn
+                ? "Upload a PDF presentation to start presenting"
+                : "Your PDF stays in this browser — nothing is uploaded"}
             </p>
           </div>
 
@@ -265,7 +320,14 @@ export default function Home() {
             {recentSessions.map((s) => (
               <div key={s.id} className="flex items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{s.filename}</p>
+                  <p className="text-sm font-medium truncate">
+                    {s.filename}
+                    {s.local && (
+                      <span className="ml-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground border rounded px-1 py-0.5">
+                        Local
+                      </span>
+                    )}
+                  </p>
                   <p className="text-xs text-muted-foreground font-mono">{s.id}</p>
                 </div>
                 <div className="flex gap-1.5 shrink-0">
@@ -276,6 +338,9 @@ export default function Home() {
                   )}
                   <Button size="sm" variant="outline" onClick={() => navigate(`/s/${s.id}?role=viewer`)}>
                     View
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => removeRecent(s)} title="Remove">
+                    ✕
                   </Button>
                 </div>
               </div>
@@ -291,6 +356,14 @@ export default function Home() {
         >
           How does this work?
         </Link>
+        <button
+          type="button"
+          onClick={toggleLogin}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4"
+          title="Placeholder — online sync for logged-in users is coming soon"
+        >
+          {loggedIn ? "Log out (online sync on)" : "Log in to sync online"}
+        </button>
         <ThemeToggle />
       </div>
     </div>
