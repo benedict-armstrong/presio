@@ -224,6 +224,13 @@ io.on("connection", (socket) => {
     io.to(sessionId).emit("slide_update", { slideNumber });
   });
 
+  socket.on("sync_all", () => {
+    const { sessionId } = socket.data;
+    if (!sessionId) return;
+    if (controllers.get(sessionId) !== socket.id) return;
+    io.to(sessionId).emit("sync_all");
+  });
+
   socket.on("settings_change", async (settings: { timerMode?: string | null; timerDuration?: number | null; timerThreshold?: number | null; notePrefix?: string }) => {
     const { sessionId } = socket.data;
     if (!sessionId) return;

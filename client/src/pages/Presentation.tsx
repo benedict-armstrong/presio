@@ -36,6 +36,7 @@ export default function Presentation() {
   const [pdfUrl, setPdfUrl] = useState("");
   const [filename, setFilename] = useState("");
   const [currentSlide, setCurrentSlide] = useState(1);
+  const [viewerSlide, setViewerSlide] = useState<number | null>(null);
   const [totalSlides, setTotalSlides] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -49,6 +50,10 @@ export default function Presentation() {
 
   const currentCanvasRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
+
+  const isViewer = role === "viewer";
+  const outOfSync = isViewer && viewerSlide !== null;
+  const displaySlide = outOfSync ? viewerSlide! : currentSlide;
 
   useEffect(() => {
     let cancelled = false;
@@ -125,6 +130,10 @@ export default function Presentation() {
       setCurrentSlide(slideNumber);
     });
 
+    socket.on("sync_all", () => {
+      setViewerSlide(null);
+    });
+
     socket.on("settings_update", (s: PresentationSettings) => {
       setSettings(s);
     });
@@ -158,6 +167,7 @@ export default function Presentation() {
       channelRef.current = null;
       socket.off("session_state");
       socket.off("slide_update");
+      socket.off("sync_all");
       socket.off("settings_update");
       socket.off("blank_update");
       socket.off("media_update");
@@ -172,19 +182,19 @@ export default function Presentation() {
   useEffect(() => {
     setMediaState((s) => (s.id === null ? s : { id: null, action: "pause", seq: Date.now() }));
     setMediaTime(null);
-  }, [currentSlide]);
+  }, [displaySlide]);
 
   useEffect(() => {
     if (!pdf || !currentCanvasRef.current) return;
     const container = currentCanvasRef.current;
-    renderPage(pdf, currentSlide).then((canvas) => {
+    renderPage(pdf, displaySlide).then((canvas) => {
       container.innerHTML = "";
       canvas.style.width = "100%";
       canvas.style.height = "100%";
       canvas.style.objectFit = "contain";
       container.appendChild(canvas);
     });
-  }, [pdf, currentSlide, role]);
+  }, [pdf, displaySlide, role]);
 
   const goTo = useCallback(
     (slide: number) => {
@@ -196,6 +206,18 @@ export default function Presentation() {
     },
     [totalSlides]
   );
+
+  const viewerGoTo = useCallback(
+    (slide: number) => {
+      if (slide < 1 || slide > totalSlides) return;
+      setViewerSlide(slide);
+    },
+    [totalSlides]
+  );
+
+  const resync = useCallback(() => setViewerSlide(null), []);
+
+  const syncAll = useCallback(() => socket.emit("sync_all"), []);
 
   const onMediaControl = useCallback(
     (id: string, action: "play" | "pause" | "reset") => {
@@ -226,7 +248,7 @@ export default function Presentation() {
 
   const effectiveMuted = isMutedForRole(role === "controller" ? "controller" : "viewer", audioState);
 
-  const currentMedia = mediaPlacements.get(currentSlide) ?? [];
+  const currentMedia = mediaPlacements.get(displaySlide) ?? [];
 
   if (loading) {
     return (
@@ -271,6 +293,11 @@ export default function Presentation() {
         mediaState={mediaState}
         mediaTime={mediaTime}
         muted={effectiveMuted}
+        currentSlide={displaySlide}
+        totalSlides={totalSlides}
+        outOfSync={outOfSync}
+        onViewerGoTo={viewerGoTo}
+        onResync={resync}
       />
     );
   }
@@ -283,6 +310,7 @@ export default function Presentation() {
       currentSlide={currentSlide}
       totalSlides={totalSlides}
       onGoTo={goTo}
+      onSyncAll={syncAll}
       currentCanvasRef={currentCanvasRef}
       settings={settings}
       onSettingsChange={(s) => {

@@ -160,6 +160,7 @@ interface ControllerViewProps {
   currentSlide: number;
   totalSlides: number;
   onGoTo: (slide: number) => void;
+  onSyncAll: () => void;
   currentCanvasRef: React.RefObject<HTMLDivElement | null>;
   settings: PresentationSettings;
   onSettingsChange: (settings: PresentationSettings) => void;
@@ -182,6 +183,7 @@ export function ControllerView({
   currentSlide,
   totalSlides,
   onGoTo,
+  onSyncAll,
   currentCanvasRef,
   settings,
   onSettingsChange,
@@ -349,6 +351,7 @@ export function ControllerView({
         currentSlide={currentSlide}
         totalSlides={totalSlides}
         onGoTo={onGoTo}
+        onSyncAll={onSyncAll}
         currentCanvasRef={currentCanvasRef}
         settings={settings}
         startedAt={startedAt}
@@ -506,6 +509,9 @@ export function ControllerView({
         >
           Next
         </Button>
+        <Button variant="ghost" size="sm" onClick={onSyncAll} title="Bring all viewers back to the current slide">
+          Sync All
+        </Button>
         <div className="ml-auto flex items-center gap-2">
           {pdfUrl && (
             <Button variant="ghost" size="sm" asChild>
@@ -605,6 +611,7 @@ function MobileLayout({
   currentSlide,
   totalSlides,
   onGoTo,
+  onSyncAll,
   currentCanvasRef,
   settings,
   startedAt,
@@ -616,6 +623,7 @@ function MobileLayout({
   currentSlide: number;
   totalSlides: number;
   onGoTo: (slide: number) => void;
+  onSyncAll: () => void;
   currentCanvasRef: React.RefObject<HTMLDivElement | null>;
   settings: PresentationSettings;
   startedAt: number;
@@ -662,6 +670,9 @@ function MobileLayout({
           <p className="text-center text-xs text-muted-foreground tabular-nums">
             {currentSlide} / {totalSlides}
           </p>
+          <Button variant="ghost" size="sm" onClick={onSyncAll}>
+            Sync All
+          </Button>
         </div>
         <div className="flex gap-2">
           <Button

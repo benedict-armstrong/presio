@@ -92,6 +92,17 @@ export default function Home() {
     [upload]
   );
 
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes("Files")) {
+      e.preventDefault();
+      setDragging(true);
+    }
+  }, []);
+
+  const onDragLeave = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget === e.target) setDragging(false);
+  }, []);
+
   const onFileSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -106,7 +117,12 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 gap-4">
+    <div
+      className="min-h-screen flex flex-col items-center justify-center p-4 gap-4"
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       <Card className="w-full max-w-lg">
         <CardContent className="pt-6 space-y-6">
           <div className="text-center space-y-2">
@@ -120,12 +136,6 @@ export default function Home() {
           </div>
 
           <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
             className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors cursor-pointer ${
               dragging
                 ? "border-primary bg-primary/5"

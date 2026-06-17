@@ -24,6 +24,11 @@ export function ViewerView({
   mediaState,
   mediaTime,
   muted,
+  currentSlide,
+  totalSlides,
+  outOfSync,
+  onViewerGoTo,
+  onResync,
 }: {
   id: string;
   pdf: PDFDocumentProxy;
@@ -36,6 +41,11 @@ export function ViewerView({
   mediaState: MediaState;
   mediaTime: MediaTimeSync | null;
   muted: boolean;
+  currentSlide: number;
+  totalSlides: number;
+  outOfSync: boolean;
+  onViewerGoTo: (slide: number) => void;
+  onResync: () => void;
 }) {
   const navigate = useNavigate();
   const [cursorVisible, setCursorVisible] = useState(true);
@@ -75,11 +85,17 @@ export function ViewerView({
       if (e.key === "f" || e.key === "F") {
         if (document.fullscreenElement) document.exitFullscreen();
         else document.documentElement.requestFullscreen();
+      } else if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") {
+        e.preventDefault();
+        onViewerGoTo(currentSlide + 1);
+      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        onViewerGoTo(currentSlide - 1);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [currentSlide, onViewerGoTo]);
 
   const submitPassphrase = async () => {
     setAuthError("");
@@ -133,16 +149,51 @@ export function ViewerView({
         </div>
       )}
 
-      <div className={`absolute top-4 left-4 flex items-center gap-2 transition-opacity duration-300 ${
-        cursorVisible ? "opacity-100" : "opacity-0 pointer-events-none"
-      }`}>
-        <ConnectionIndicator dark />
+      <div className="absolute top-4 left-4 flex items-center gap-2">
+        {outOfSync ? (
+          <button
+            onClick={onResync}
+            title="Out of sync — click to follow the presenter"
+            className="flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2 py-1 text-amber-300 hover:bg-amber-500/30 hover:text-amber-200 transition-colors cursor-pointer"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+              <path d="M21 3v5h-5" />
+              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+              <path d="M3 21v-5h5" />
+            </svg>
+            <span className="text-xs font-medium">Sync</span>
+          </button>
+        ) : (
+          <span className={`transition-opacity duration-300 ${
+            cursorVisible ? "opacity-100" : "opacity-0 pointer-events-none"
+          }`}>
+            <ConnectionIndicator dark />
+          </span>
+        )}
+        {outOfSync && (
+          <span className="text-white/40 text-xs tabular-nums select-none">
+            {currentSlide} / {totalSlides}
+          </span>
+        )}
         <PresentationTimer
           mode={settings.timerMode}
           duration={settings.timerDuration}
           threshold={settings.timerThreshold}
           startedAt={startedAt}
-          className="text-white/70 text-sm"
+          className={`text-white/70 text-sm transition-opacity duration-300 ${
+            cursorVisible ? "opacity-100" : "opacity-0"
+          }`}
         />
       </div>
 
