@@ -77,6 +77,16 @@ Presentations automatically expire after 24 hours.
   features as Synced. The PDF is fetched directly by each viewer's browser, so the URL
   must be publicly reachable and serve permissive CORS headers (GitHub raw/Pages do).
 
+  You can also start straight from a link without visiting the home screen:
+
+  ```txt
+  https://presio.xyz/present?from=<url-to-pdf>
+  ```
+
+  This creates an External session from the PDF and drops you into the controller.
+  GitHub `blob` links work too — they're normalized to `raw.githubusercontent.com`
+  automatically. For example:
+
 > **Note on synced PDF privacy:** uploaded PDFs are stored in a public Supabase
 > bucket so viewers can fetch them by URL. This means a synced presentation is
 > readable by anyone who knows or guesses its session code. Don't sync
