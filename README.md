@@ -71,6 +71,11 @@ Presentations automatically expire after 24 hours.
   account, keeping the same code — viewers can now join from any device by code/QR.
   Logging in by itself never uploads anything; syncing is always an explicit opt-in.
 
+> **Note on synced PDF privacy:** uploaded PDFs are stored in a public Supabase
+> bucket so viewers can fetch them by URL. This means a synced presentation is
+> readable by anyone who knows or guesses its session code. Don't sync
+> confidential material — keep it in Local mode instead.
+
 ## Thoughts
 
 - [x] For free users (not signed in) presentations are hosted locally in the

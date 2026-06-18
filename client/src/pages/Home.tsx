@@ -8,6 +8,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { AccountControl } from "@/components/AccountControl";
 import { PresioLogo } from "@/components/PresioLogo";
 import { idbPut, idbList, idbDelete, idbPruneOlderThan } from "@/lib/localStore";
+import { supabase } from "@/lib/supabaseClient";
 import "@/lib/pdf"; // ensure pdf.js worker is configured
 
 const LOCAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -86,9 +87,14 @@ export default function Home() {
       const totalSlides = doc.numPages;
       doc.destroy();
       const filename = file.name.replace(/\.pdf$/i, "");
+      // If the user is logged in, send their token so the server assigns the
+      // presentation to them right away (getSession refreshes a near-expiry one).
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData.session) headers.Authorization = `Bearer ${sessionData.session.access_token}`;
       const res = await fetch("/api/sessions/local", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ filename, total_slides: totalSlides }),
       });
       if (!res.ok) throw new Error("Failed to create session");

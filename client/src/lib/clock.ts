@@ -12,7 +12,6 @@ let offsetMs = 0;
 let rttMs = 0;
 let initialised = false;
 let started = false;
-let intervalId: number | null = null;
 
 const PING_INTERVAL = 30_000;
 const INITIAL_BURST = 4;
@@ -25,7 +24,7 @@ export function startClockSync() {
   for (let i = 0; i < INITIAL_BURST; i++) {
     setTimeout(ping, i * INITIAL_BURST_GAP);
   }
-  intervalId = window.setInterval(ping, PING_INTERVAL);
+  window.setInterval(ping, PING_INTERVAL);
   // If the socket reconnects mid-session, re-sync.
   socket.on("connect", () => {
     initialised = false;
@@ -33,13 +32,6 @@ export function startClockSync() {
       setTimeout(ping, i * INITIAL_BURST_GAP);
     }
   });
-}
-
-export function stopClockSync() {
-  if (intervalId !== null) window.clearInterval(intervalId);
-  intervalId = null;
-  started = false;
-  initialised = false;
 }
 
 function ping() {
@@ -71,16 +63,4 @@ function ping() {
 /** Server-time approximation in milliseconds. */
 export function serverNow(): number {
   return Date.now() + offsetMs;
-}
-
-export function clockOffset(): number {
-  return offsetMs;
-}
-
-export function clockRtt(): number {
-  return rttMs;
-}
-
-export function isClockSynced(): boolean {
-  return initialised;
 }

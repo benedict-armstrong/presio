@@ -7,6 +7,7 @@ import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import { SessionQRCode } from "@/components/SessionQRCode";
 import { CopyField } from "@/components/CopyField";
 import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
+import { endSession } from "@/lib/utils";
 
 function MenuIcon() {
   return (
@@ -138,7 +139,7 @@ export function MobileControllerMenu({
               className="flex-1"
               variant="destructive"
               onClick={async () => {
-                await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+                await endSession(id);
                 navigate("/", { replace: true });
               }}
             >

@@ -5,7 +5,7 @@ import { loadPdf, renderPage, clearCache, loadMediaPlacements, type MediaPlaceme
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/components/MediaOverlay";
 import { socket } from "@/lib/socket";
 import { startClockSync } from "@/lib/clock";
-import { getSessionAuth } from "@/lib/utils";
+import { getSessionAuth, endSession } from "@/lib/utils";
 import { idbGet, idbDelete } from "@/lib/localStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -291,7 +291,7 @@ export default function Presentation() {
       await idbDelete(id!).catch(() => { /* ignore */ });
       channelRef.current?.postMessage({ type: "session_ended" });
     } else {
-      await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+      await endSession(id!);
     }
     navigate("/", { replace: true });
   }, [local, id, navigate]);

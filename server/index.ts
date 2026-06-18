@@ -1,6 +1,8 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import multer from "multer";
 import http from "http";
 import path from "path";
@@ -10,13 +12,59 @@ import { nanoid, customAlphabet } from "nanoid";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { supabase } from "./supabase.js";
 
+// Allowed browser origins for cross-origin requests. The client and server are
+// served from the same origin in production, so same-origin requests (which
+// carry no Origin header, or one matching the host) always work. Set
+// ALLOWED_ORIGIN (comma-separated) only when the client is hosted separately.
+const allowedOrigins = (process.env.ALLOWED_ORIGIN ?? "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+const corsOrigin: cors.CorsOptions["origin"] = (origin, callback) => {
+  // No Origin header => same-origin / non-browser client (curl, server-to-server).
+  if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+  callback(new Error("Not allowed by CORS"));
+};
+
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, { cors: { origin: allowedOrigins.length ? allowedOrigins : false } });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-app.use(cors());
+// Helmet for sensible security headers. The CSP allows the YouTube/Vimeo embed
+// SDKs and their iframes, the Supabase API/storage, and websocket connections.
+const supabaseHost = (() => {
+  try {
+    return process.env.SUPABASE_URL ? new URL(process.env.SUPABASE_URL).origin : "";
+  } catch {
+    return "";
+  }
+})();
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        "default-src": ["'self'"],
+        "script-src": ["'self'", "https://www.youtube.com", "https://player.vimeo.com"],
+        "frame-src": ["'self'", "https://www.youtube.com", "https://player.vimeo.com"],
+        "img-src": ["'self'", "data:", "blob:", "https:"],
+        "media-src": ["'self'", "blob:", "https:"],
+        "connect-src": ["'self'", "ws:", "wss:", ...(supabaseHost ? [supabaseHost] : [])],
+        "worker-src": ["'self'", "blob:"],
+        "upgrade-insecure-requests": null,
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  })
+);
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json());
+
+// Throttle the JSON API to blunt brute-force (passphrase auth) and abuse.
+// Generous enough not to interfere with normal presenter/viewer flows.
+const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false });
+app.use("/api", apiLimiter);
 
 const generateSessionId = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
 const generatePassphrase = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 8);
@@ -44,6 +92,17 @@ app.post("/api/sessions/local", async (req, res) => {
     return;
   }
 
+  // If the creator is logged in, attach them as the owner up front so the
+  // presentation is theirs even while it stays local. Anonymous creators are
+  // still allowed — the token is optional, and an invalid one is simply ignored.
+  let userId: string | null = null;
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (token) {
+    const { data: userData } = await supabase.auth.getUser(token);
+    userId = userData.user?.id ?? null;
+  }
+
   const id = generateSessionId();
   const { error } = await supabase.from("sessions").insert({
     id,
@@ -53,6 +112,7 @@ app.post("/api/sessions/local", async (req, res) => {
     controller_token: nanoid(24),
     passphrase: generatePassphrase(),
     local: true,
+    user_id: userId,
   });
 
   if (error) {
@@ -170,7 +230,7 @@ app.post("/api/sessions/:id/claim", upload.single("pdf"), async (req, res) => {
 app.get("/api/sessions/:id", async (req, res) => {
   const { data, error } = await supabase
     .from("sessions")
-    .select("*")
+    .select("id, pdf_path, filename, total_slides, current_slide, timer_mode, timer_duration, timer_threshold, note_prefix, local")
     .eq("id", req.params.id)
     .single();
 
@@ -184,8 +244,20 @@ app.get("/api/sessions/:id", async (req, res) => {
     ? supabase.storage.from("presentations").getPublicUrl(data.pdf_path).data.publicUrl
     : "";
 
-  const { controller_token, passphrase, ...publicData } = data;
-  res.json({ ...publicData, pdfUrl });
+  // Return only fields the client needs; never leak controller_token,
+  // passphrase, owner user_id, or internal timestamps.
+  res.json({
+    id: data.id,
+    filename: data.filename,
+    total_slides: data.total_slides,
+    current_slide: data.current_slide,
+    timer_mode: data.timer_mode,
+    timer_duration: data.timer_duration,
+    timer_threshold: data.timer_threshold,
+    note_prefix: data.note_prefix,
+    local: data.local,
+    pdfUrl,
+  });
 });
 
 app.post("/api/sessions/:id/auth", async (req, res) => {
@@ -217,12 +289,19 @@ app.post("/api/sessions/:id/auth", async (req, res) => {
 app.delete("/api/sessions/:id", async (req, res) => {
   const { data, error } = await supabase
     .from("sessions")
-    .select("id, pdf_path")
+    .select("id, pdf_path, controller_token")
     .eq("id", req.params.id)
     .single();
 
   if (error || !data) {
     res.status(404).json({ error: "Session not found" });
+    return;
+  }
+
+  // Only the controller (who holds the token) may end a presentation.
+  const token = req.get("x-controller-token") || "";
+  if (token !== data.controller_token) {
+    res.status(403).json({ error: "Not authorized" });
     return;
   }
 
@@ -278,6 +357,7 @@ io.on("connection", (socket) => {
     socket.join(sessionId);
     socket.data.sessionId = sessionId;
     socket.data.role = grantedRole;
+    socket.data.totalSlides = data.total_slides;
 
     socket.emit("session_state", {
       currentSlide: data.current_slide,
@@ -297,6 +377,11 @@ io.on("connection", (socket) => {
     if (!sessionId) return;
 
     if (controllers.get(sessionId) !== socket.id) return;
+
+    // Reject non-finite/out-of-range values rather than persisting garbage.
+    if (!Number.isInteger(slideNumber) || slideNumber < 1) return;
+    const total = socket.data.totalSlides;
+    if (typeof total === "number" && slideNumber > total) return;
 
     await supabase
       .from("sessions")
@@ -318,17 +403,29 @@ io.on("connection", (socket) => {
     if (!sessionId) return;
     if (controllers.get(sessionId) !== socket.id) return;
 
+    // Coerce to known-good values so a malformed payload can't corrupt the row.
+    const timerMode =
+      settings.timerMode === "up" || settings.timerMode === "down" ? settings.timerMode : null;
+    const sanitizeDuration = (n: number | null | undefined) =>
+      typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : null;
+    const sanitized = {
+      timerMode,
+      timerDuration: sanitizeDuration(settings.timerDuration),
+      timerThreshold: sanitizeDuration(settings.timerThreshold),
+      notePrefix: typeof settings.notePrefix === "string" ? settings.notePrefix.slice(0, 100) : "note:",
+    };
+
     await supabase
       .from("sessions")
       .update({
-        timer_mode: settings.timerMode ?? null,
-        timer_duration: settings.timerDuration ?? null,
-        timer_threshold: settings.timerThreshold ?? null,
-        note_prefix: settings.notePrefix ?? "note:",
+        timer_mode: sanitized.timerMode,
+        timer_duration: sanitized.timerDuration,
+        timer_threshold: sanitized.timerThreshold,
+        note_prefix: sanitized.notePrefix,
       })
       .eq("id", sessionId);
 
-    io.to(sessionId).emit("settings_update", settings);
+    io.to(sessionId).emit("settings_update", sanitized);
   });
 
   socket.on("blank_toggle", () => {
@@ -396,6 +493,9 @@ async function cleanupExpired() {
   console.log(`Cleaned up ${expired.length} expired session(s)`);
 }
 
+// Run once at startup (the interval otherwise waits a full hour first), then
+// hourly. Guard so a transient failure doesn't crash boot.
+cleanupExpired().catch((err) => console.error("Initial cleanup failed:", err));
 setInterval(cleanupExpired, 60 * 60 * 1000);
 
 // --- Start ---

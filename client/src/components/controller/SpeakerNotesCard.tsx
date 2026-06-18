@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { extractSpeakerNotes } from "@/lib/pdf";
 import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 export function SpeakerNotesCard({
   pdf,
@@ -22,7 +23,7 @@ export function SpeakerNotesCard({
         {notes ? (
           <div
             className="prose prose-sm dark:prose-invert max-w-none"
-            dangerouslySetInnerHTML={{ __html: marked.parse(notes) as string }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(notes) as string) }}
           />
         ) : (
           <p className="text-xs text-muted-foreground">No speaker notes for this slide.</p>

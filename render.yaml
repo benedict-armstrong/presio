@@ -10,5 +10,7 @@ services:
         sync: false
       - key: VITE_SUPABASE_URL
         sync: false
-      - key: VITE_SUPABASE_ANON_KEY
+      - key: VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY
+        sync: false
+      - key: ALLOWED_ORIGIN
         sync: false

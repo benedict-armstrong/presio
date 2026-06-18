@@ -29,13 +29,16 @@ insert into storage.buckets (id, name, public)
 values ('presentations', 'presentations', true)
 on conflict (id) do nothing;
 
--- Allow public read access to the presentations bucket
+-- Allow public read access to the presentations bucket.
+-- NOTE: this makes every uploaded PDF readable by anyone who knows (or guesses)
+-- its object path. Do not store confidential material in synced presentations.
 create policy "Public read access" on storage.objects
   for select using (bucket_id = 'presentations');
 
--- Allow uploads to the presentations bucket (server uses service role key, so this is optional)
-create policy "Allow uploads" on storage.objects
-  for insert with check (bucket_id = 'presentations');
+-- Writes and deletes are performed exclusively by the server using the service
+-- role key, which bypasses RLS. We deliberately do NOT grant anon/authenticated
+-- insert or delete policies, so clients cannot tamper with stored PDFs directly.
 
-create policy "Allow deletes" on storage.objects
-  for delete using (bucket_id = 'presentations');
+-- If a deployment created the previously-permissive policies, drop them:
+drop policy if exists "Allow uploads" on storage.objects;
+drop policy if exists "Allow deletes" on storage.objects;
