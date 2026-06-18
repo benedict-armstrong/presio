@@ -47,10 +47,9 @@ export default function Share() {
     return () => { cancelled = true; document.title = "Presio"; };
   }, [id]);
 
-  // Opening the viewer window from this click keeps it within the user gesture,
-  // which avoids popup blockers. The controller also re-opens it as a fallback.
+  // Don't auto-open the viewer here — the controller prompts the presenter to
+  // open it themselves, which keeps the controller as the active tab.
   const start = (role: "controller" | "viewer") => {
-    window.open(viewerUrl, `presio-viewer-${id}`);
     navigate(`/s/${id}?role=${role}`);
   };
 

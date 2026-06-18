@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { getSessionAuth } from "@/lib/utils";
-import { Settings, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { cn, getSessionAuth } from "@/lib/utils";
+import { Settings, Check, Option, Plus } from "lucide-react";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import { SessionQRCode } from "@/components/SessionQRCode";
@@ -122,11 +122,11 @@ const GRID_ROWS = 12;
 const GRID_MARGIN = 12;
 
 const CARD_CONFIGS: CardConfig[] = [
-  { key: "currentSlide", label: "Current Slide", preferredLayout: { i: "currentSlide", x: 0,  y: 0, w: 6,  h: 8, minW: 4, minH: 3 } },
-  { key: "nextSlide",    label: "Next Slide",    preferredLayout: { i: "nextSlide",    x: 6,  y: 0, w: 4,  h: 5, minW: 3, minH: 3 } },
-  { key: "timer",        label: "Timer",         preferredLayout: { i: "timer",        x: 10, y: 0, w: 2,  h: 5, minW: 2, minH: 2 } },
-  { key: "notes",        label: "Speaker Notes", preferredLayout: { i: "notes",        x: 6,  y: 5, w: 6,  h: 3, minW: 3, minH: 2 } },
-  { key: "thumbnails",   label: "Thumbnails",    preferredLayout: { i: "thumbnails",   x: 0,  y: 8, w: 12, h: 4, minW: 4, minH: 2 } },
+  { key: "currentSlide", label: "Current Slide", preferredLayout: { i: "currentSlide", x: 0, y: 0, w: 6, h: 8, minW: 4, minH: 3 } },
+  { key: "nextSlide", label: "Next Slide", preferredLayout: { i: "nextSlide", x: 6, y: 0, w: 4, h: 5, minW: 3, minH: 3 } },
+  { key: "timer", label: "Timer", preferredLayout: { i: "timer", x: 10, y: 0, w: 2, h: 5, minW: 2, minH: 2 } },
+  { key: "notes", label: "Speaker Notes", preferredLayout: { i: "notes", x: 6, y: 5, w: 6, h: 3, minW: 3, minH: 2 } },
+  { key: "thumbnails", label: "Thumbnails", preferredLayout: { i: "thumbnails", x: 0, y: 8, w: 12, h: 4, minW: 4, minH: 2 } },
 ];
 
 const CARD_KEYS = CARD_CONFIGS.map((c) => c.key);
@@ -221,6 +221,7 @@ export function ControllerView({
   const [timerSettingsOpen, setTimerSettingsOpen] = useState(false);
   const [keymap, setKeymap] = useState<Keymap>(loadKeymap);
   const [viewerBlocked, setViewerBlocked] = useState(false);
+  const [viewerPromptOpen, setViewerPromptOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
 
   const { user } = useAuth();
@@ -231,12 +232,12 @@ export function ControllerView({
     if (await sync(currentSlide)) onSynced();
   };
 
-  // Opening the controller auto-opens the viewer in its own window. The named
-  // target is reused across reloads/re-renders, so it never spawns duplicates.
+  // Rather than auto-opening the viewer (which steals the active tab), prompt
+  // the presenter to open it themselves. A real click keeps them on the
+  // controller and avoids popup blockers.
   useEffect(() => {
     if (isMobile) return;
-    const w = window.open(`${window.location.origin}/s/${id}?role=viewer`, `presio-viewer-${id}`);
-    setViewerBlocked(!w);
+    setViewerPromptOpen(true);
   }, [id, isMobile]);
 
   const [layouts, setLayouts] = useState<CardLayout[]>(loadLayout);
@@ -339,6 +340,18 @@ export function ControllerView({
   const controllerUrl = `${window.location.origin}/s/${id}?role=controller`;
   const viewerUrl = `${window.location.origin}/s/${id}?role=viewer`;
   const { passphrase } = getSessionAuth(id);
+  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+
+  // Open the viewer in its named window (reused across opens, so no duplicates)
+  // and dismiss the prompt. Passing a feature string forces a separate window
+  // rather than a tab in the controller's window, so it never steals the active
+  // tab here. Tracks whether a popup blocker got in the way.
+  const openViewer = () => {
+    const features = "popup,width=1280,height=800";
+    const w = window.open(viewerUrl, `presio-viewer-${id}`, features);
+    setViewerBlocked(!w);
+    if (w) setViewerPromptOpen(false);
+  };
 
   const visibleLayouts = layouts.filter((l) => cardVisibility[l.i]);
 
@@ -432,16 +445,12 @@ export function ControllerView({
           <span className="text-muted-foreground/40">|</span>
           <button
             type="button"
-            onClick={() => {
-              const w = window.open(viewerUrl, `presio-viewer-${id}`);
-              setViewerBlocked(!w);
-            }}
+            onClick={openViewer}
             title={viewerBlocked ? "Viewer window blocked — click to open it" : "Open viewer window"}
-            className={`inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-semibold rounded-md transition-colors ${
-              viewerBlocked
-                ? "text-amber-500 bg-amber-500/10 hover:bg-amber-500/20"
-                : "text-foreground hover:bg-accent"
-            }`}
+            className={`inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-semibold rounded-md transition-colors ${viewerBlocked
+              ? "text-amber-500 bg-amber-500/10 hover:bg-amber-500/20"
+              : "text-foreground hover:bg-accent"
+              }`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 3h6v6" />
@@ -574,9 +583,8 @@ export function ControllerView({
                   onClick={() => toggleCard(key)}
                   className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded hover:bg-accent transition-colors text-left"
                 >
-                  <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
-                    cardVisibility[key] ? "bg-primary border-primary text-primary-foreground" : "border-input"
-                  }`}>
+                  <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${cardVisibility[key] ? "bg-primary border-primary text-primary-foreground" : "border-input"
+                    }`}>
                     {cardVisibility[key] && <Check size={11} strokeWidth={3} />}
                   </span>
                   {CARD_LABELS[key]}
@@ -665,6 +673,48 @@ export function ControllerView({
             >
               End Presentation
             </Button>
+          </div>
+        </DialogOverlay>
+      )}
+
+      {viewerPromptOpen && (
+        <DialogOverlay onClose={() => setViewerPromptOpen(false)}>
+          <div className="flex flex-col items-center gap-4 text-center">
+            {/* <h2 className="text-base font-semibold">Open the viewer</h2> */}
+            <p className="text-xs text-muted-foreground">
+              Hold <span className="font-medium text-foreground">{isMac ? "⌥ Option" : "Option/Alt"}</span> and click to open it in its own window.
+            </p>
+            <div className="flex items-center gap-2">
+              <kbd className="inline-flex items-center justify-center h-9 min-w-9 px-2 rounded-md border border-border bg-muted text-sm font-medium text-muted-foreground shadow-sm">
+                {isMac ? <Option size={15} /> : "Option/Alt"}
+              </kbd>
+              <Plus size={14} className="text-muted-foreground" />
+              {/* A real link so a modifier-click opens it in its own window. */}
+              {/* <Button asChild>
+                <a
+                  href={viewerUrl}
+                  target={`presio-viewer-${id}`}
+                  rel="noopener"
+                  onClick={() => setViewerPromptOpen(false)}
+                >
+                  Open Viewer
+                </a>
+              </Button> */}
+              <button
+                type="button"
+                onClick={openViewer}
+                className={cn(buttonVariants({ variant: "default" }))}
+              >
+                Open Viewer
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setViewerPromptOpen(false)}
+              className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4 mt-2"
+            >
+              Not now
+            </button>
           </div>
         </DialogOverlay>
       )}
@@ -815,11 +865,10 @@ function ShortcutsEditor({
                 key={i}
                 type="button"
                 onClick={() => setRecording({ action, index: i })}
-                className={`px-2 py-1 text-xs font-mono rounded border min-w-[40px] text-center transition-colors ${
-                  recording?.action === action && recording.index === i
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-input hover:border-primary/50"
-                }`}
+                className={`px-2 py-1 text-xs font-mono rounded border min-w-[40px] text-center transition-colors ${recording?.action === action && recording.index === i
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-input hover:border-primary/50"
+                  }`}
               >
                 {recording?.action === action && recording.index === i
                   ? "..."

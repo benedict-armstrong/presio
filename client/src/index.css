@@ -118,3 +118,22 @@
     margin: 0;
   }
 }
+
+/* Shiki dual-theme: codeToHtml runs with defaultColor:false, so it emits
+   --shiki-light / --shiki-dark CSS vars instead of fixed colors. Apply the
+   light theme by default and swap to dark when the .dark class is present. */
+.shiki,
+.shiki span {
+  color: var(--shiki-light);
+}
+/* Light mode: use the UI's muted gray rather than Shiki's near-white bg. */
+.shiki {
+  background-color: var(--muted);
+}
+.dark .shiki,
+.dark .shiki span {
+  color: var(--shiki-dark);
+}
+.dark .shiki {
+  background-color: var(--shiki-dark-bg);
+}

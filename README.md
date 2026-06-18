@@ -76,17 +76,9 @@ Presentations automatically expire after 24 hours.
 > readable by anyone who knows or guesses its session code. Don't sync
 > confidential material — keep it in Local mode instead.
 
-## Thoughts
-
-- [x] For free users (not signed in) presentations are hosted locally in the
-  browser and synced across windows only; logging in lets you sync online across devices.
-- [x] Real Supabase auth (GitHub + email/password) with opt-in syncing of local
-  presentations.
-
 ## TODO
 
-- [x] Indicator should be yellow when local connected to a local browser window
 - [ ] Users should be able to generate a perma link and qr code that they can put on the presentation.
 - [ ] Add a button to toggle all viewers to show the join code and QR code.
-- [ ] In addition to blanking the screen it should also be possible to show the join code.
-- [ ]
+- [ ] In addition to blanking the screen it should also be possible to show the join code (hotkey).
+- [ ] Add support for bringing your own PDF host?

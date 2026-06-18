@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { CodeBlock } from "@/components/CodeBlock";
 
 const PACKAGE_URL = "https://github.com/benedict-armstrong/presio-typst-package";
 
@@ -9,11 +10,28 @@ export default function About() {
     <div className="min-h-screen flex items-center justify-center p-4">
       <Card className="w-full max-w-3xl">
         <CardContent className="pt-6 space-y-6">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">About Presio</h1>
-            <p className="text-sm text-muted-foreground">
-              A simple tool for presenting PDFs — locally or shared live across devices.
-            </p>
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <h1 className="text-2xl font-semibold tracking-tight">About Presio</h1>
+              <p className="text-sm text-muted-foreground">
+                A simple tool for presenting PDFs — locally or shared live across devices.
+              </p>
+            </div>
+            <a
+              href="https://github.com/benedict-armstrong/slides"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 text-sm text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4"
+            >
+              GitHub
+            </a>
+          </div>
+
+          <div className="rounded-md border border-amber-500/10 bg-amber-500/20 px-3 py-2 text-sm text-amber-900 dark:text-amber-500">
+            🚧 Presio is under active development
+            <br />
+            <br />
+            Please report bugs, features or reach out <a className="font-medium underline underline-offset-2" href="https://github.com/benedict-armstrong/presio/issues">here</a>.
           </div>
 
           <div className="space-y-4 text-sm text-muted-foreground">
@@ -75,19 +93,19 @@ export default function About() {
                 . It attaches the media and notes to your PDF in a format Presio reads automatically — no manual
                 annotation wiring needed. Import it at the top of your document:
               </p>
-              <pre className="bg-muted rounded-md p-3 overflow-x-auto text-xs font-mono whitespace-pre">{`#import "@preview/presio:0.2.0": media, speaker-notes`}</pre>
+              <CodeBlock code={`#import "@preview/presio:0.2.0": media, speaker-notes`} />
 
               <p className="pt-2">Add speaker notes to any slide:</p>
-              <pre className="bg-muted rounded-md p-3 overflow-x-auto text-xs font-mono whitespace-pre">{`= Introduction
+              <CodeBlock code={`= Introduction
 
 Hello world.
 
 #speaker-notes[
   Remember to mention the demo before moving on.
-]`}</pre>
+]`} />
 
               <p className="pt-2">Embed a local video or GIF, a direct video URL, or a YouTube/Vimeo link:</p>
-              <pre className="bg-muted rounded-md p-3 overflow-x-auto text-xs font-mono whitespace-pre">{`// Local file
+              <CodeBlock code={`// Local file
 #media("figures/demo.gif", width: 60%)
 
 // Direct URL with a poster image
@@ -99,7 +117,7 @@ Hello world.
 )
 
 // YouTube / Vimeo are detected automatically
-#media("https://www.youtube.com/watch?v=dQw4w9WgXcQ", width: 60%, aspect-ratio: 16/9)`}</pre>
+#media("https://www.youtube.com/watch?v=dQw4w9WgXcQ", width: 60%, aspect-ratio: 16/9)`} />
               <p className="text-xs">
                 Works with plain Typst, Polylux, or Touying. Requires Typst 0.15+.
               </p>
@@ -115,7 +133,7 @@ Hello world.
 
               <h3 className="text-sm font-medium text-foreground pt-2">Typst</h3>
               <p>Define a helper and call it on each slide:</p>
-              <pre className="bg-muted rounded-md p-3 overflow-x-auto text-xs font-mono whitespace-pre">{`// Define the speaker-notes function
+              <CodeBlock code={`// Define the speaker-notes function
 #let speaker-notes(notes) = context {
   // 1. Get the current page number to ensure a unique filename per slide
   let page-num = counter(page).display()
@@ -136,13 +154,13 @@ Hello world.
     mime-type: "application/json",
   )
 }
-`}</pre>
+`} />
               <p>Example usage:</p>
-              <pre className="bg-muted rounded-md p-3 overflow-x-auto text-xs font-mono whitespace-pre">{`#speaker-notes("Remember to mention the demo.")`}</pre>
+              <CodeBlock code={`#speaker-notes("Remember to mention the demo.")`} />
 
               <h3 className="text-sm font-medium text-foreground pt-2">LaTeX (hyperref)</h3>
               <p>Use the <code className="bg-muted px-1 rounded text-xs">hyperref</code> package to create an invisible link:</p>
-              <pre className="bg-muted rounded-md p-3 overflow-x-auto text-xs font-mono whitespace-pre">{`\\usepackage{hyperref}
+              <CodeBlock lang="latex" code={`\\usepackage{hyperref}
 
 \\newcommand{\\speakernote}[1]{%
   \\href{note:#1}{\\phantom{n}}%
@@ -150,7 +168,7 @@ Hello world.
 
 % Usage on a slide:
 \\speakernote{Remember to mention the demo.}
-`}</pre>
+`} />
             </div>
           </div>
 
