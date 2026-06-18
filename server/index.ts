@@ -50,7 +50,10 @@ app.use(
         "frame-src": ["'self'", "https://www.youtube.com", "https://www.youtube-nocookie.com", "https://player.vimeo.com"],
         "img-src": ["'self'", "data:", "blob:", "https:"],
         "media-src": ["'self'", "blob:", "https:"],
-        "connect-src": ["'self'", "blob:", "data:", "ws:", "wss:", "https://vimeo.com", ...(supabaseHost ? [supabaseHost] : [])],
+        // `https:` lets the client fetch externally-hosted PDFs ("bring your own
+        // storage") from any HTTPS origin via pdf.js. img-src/media-src already
+        // allow https:, so this keeps connect-src consistent with them.
+        "connect-src": ["'self'", "blob:", "data:", "ws:", "wss:", "https:", "https://vimeo.com", ...(supabaseHost ? [supabaseHost] : [])],
         "worker-src": ["'self'", "blob:"],
         "upgrade-insecure-requests": null,
       },
@@ -78,6 +81,28 @@ const generatePassphrase = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 8)
 // lifetime — presentations.
 const MAX_CONCURRENT_PRESENTATIONS = 3;
 
+// Validate a user-supplied external PDF URL. We only ever hand this back to the
+// client to fetch (the server never requests it), so the bar is simply that it
+// be a well-formed https URL — rejecting http:/data:/javascript: and garbage.
+function isValidHttpsUrl(value: unknown): value is string {
+  if (typeof value !== "string" || !value) return false;
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+// Resolve the owner from an optional bearer token. Anonymous callers are fine —
+// an absent or invalid token simply yields null.
+async function resolveOptionalUserId(req: express.Request): Promise<string | null> {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (!token) return null;
+  const { data } = await supabase.auth.getUser(token);
+  return data.user?.id ?? null;
+}
+
 // Track which socket is the controller for each session
 const controllers = new Map<string, string>();
 // Track blanked state per session (transient, no DB persistence)
@@ -99,13 +124,7 @@ app.post("/api/sessions/local", async (req, res) => {
   // If the creator is logged in, attach them as the owner up front so the
   // presentation is theirs even while it stays local. Anonymous creators are
   // still allowed — the token is optional, and an invalid one is simply ignored.
-  let userId: string | null = null;
-  const authHeader = req.headers.authorization || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (token) {
-    const { data: userData } = await supabase.auth.getUser(token);
-    userId = userData.user?.id ?? null;
-  }
+  const userId = await resolveOptionalUserId(req);
 
   const id = generateSessionId();
   const { error } = await supabase.from("sessions").insert({
@@ -126,6 +145,90 @@ app.post("/api/sessions/local", async (req, res) => {
   }
 
   res.json({ id });
+});
+
+// Reserve a session whose PDF is hosted externally ("bring your own storage").
+// The client has already loaded the PDF from `url` to derive total_slides, so we
+// store only the URL — no bytes are uploaded and there is no storage cost, which
+// is why this needs neither login nor the synced-presentation cap. Viewers fetch
+// the PDF directly from the URL, so it must be a public, CORS-friendly host.
+app.post("/api/sessions/external", async (req, res) => {
+  const url = req.body.url;
+  const filename = typeof req.body.filename === "string" ? req.body.filename : "";
+  const totalSlides = parseInt(req.body.total_slides, 10);
+  if (!isValidHttpsUrl(url)) {
+    res.status(400).json({ error: "A valid https PDF URL is required" });
+    return;
+  }
+  if (!filename || !Number.isFinite(totalSlides) || totalSlides < 1) {
+    res.status(400).json({ error: "filename and total_slides are required" });
+    return;
+  }
+
+  const userId = await resolveOptionalUserId(req);
+
+  const id = generateSessionId();
+  const controllerToken = nanoid(24);
+  const passphrase = generatePassphrase();
+  const { error } = await supabase.from("sessions").insert({
+    id,
+    pdf_path: "",
+    pdf_url: url,
+    filename,
+    total_slides: totalSlides,
+    controller_token: controllerToken,
+    passphrase,
+    local: false,
+    user_id: userId,
+  });
+
+  if (error) {
+    console.error("Failed to create external session:", error);
+    res.status(500).json({ error: "Failed to create session" });
+    return;
+  }
+
+  res.json({ id, controllerToken, passphrase });
+});
+
+// Convert an existing local session into an external one in place (same code):
+// the client supplies the URL it now hosts the PDF at. Protected, like the local
+// session itself, only by knowledge of the random session code.
+app.post("/api/sessions/:id/share-url", async (req, res) => {
+  const url = req.body.url;
+  const totalSlides = parseInt(req.body.total_slides, 10);
+  if (!isValidHttpsUrl(url)) {
+    res.status(400).json({ error: "A valid https PDF URL is required" });
+    return;
+  }
+
+  const { data: row, error: rowError } = await supabase
+    .from("sessions")
+    .select("id, local, controller_token, passphrase")
+    .eq("id", req.params.id)
+    .single();
+  if (rowError || !row) {
+    res.status(404).json({ error: "Session not found" });
+    return;
+  }
+  if (!row.local) {
+    res.status(409).json({ error: "Presentation is already shared" });
+    return;
+  }
+
+  const update: Record<string, unknown> = { local: false, pdf_url: url };
+  if (Number.isFinite(totalSlides) && totalSlides >= 1) update.total_slides = totalSlides;
+
+  const { error: updateError } = await supabase
+    .from("sessions")
+    .update(update)
+    .eq("id", row.id);
+  if (updateError) {
+    res.status(500).json({ error: "Failed to update session" });
+    return;
+  }
+
+  res.json({ id: row.id, controllerToken: row.controller_token, passphrase: row.passphrase });
 });
 
 // Turn a local session into a synced one: upload the PDF (kept in the client's
@@ -234,7 +337,7 @@ app.post("/api/sessions/:id/claim", upload.single("pdf"), async (req, res) => {
 app.get("/api/sessions/:id", async (req, res) => {
   const { data, error } = await supabase
     .from("sessions")
-    .select("id, pdf_path, filename, total_slides, current_slide, timer_mode, timer_duration, timer_threshold, note_prefix, local")
+    .select("id, pdf_path, pdf_url, filename, total_slides, current_slide, timer_mode, timer_duration, timer_threshold, note_prefix, local")
     .eq("id", req.params.id)
     .single();
 
@@ -243,10 +346,13 @@ app.get("/api/sessions/:id", async (req, res) => {
     return;
   }
 
-  // Local sessions have no stored PDF, so there is no public URL.
-  const pdfUrl = data.pdf_path
-    ? supabase.storage.from("presentations").getPublicUrl(data.pdf_path).data.publicUrl
-    : "";
+  // External sessions store the URL directly; Supabase-hosted ones derive a
+  // public URL from the object path; local sessions have neither.
+  const pdfUrl = data.pdf_url
+    ? data.pdf_url
+    : data.pdf_path
+      ? supabase.storage.from("presentations").getPublicUrl(data.pdf_path).data.publicUrl
+      : "";
 
   // Return only fields the client needs; never leak controller_token,
   // passphrase, owner user_id, or internal timestamps.

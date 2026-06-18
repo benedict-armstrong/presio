@@ -17,6 +17,7 @@ import { AccountControl } from "@/components/AccountControl";
 import { SyncShareOverlay } from "@/components/SyncShareOverlay";
 import { useAuth } from "@/lib/useAuth";
 import { useClaim } from "@/lib/useClaim";
+import { useShareUrl } from "@/lib/useShareUrl";
 import { ControllerCard } from "@/components/controller/ControllerCard";
 import { CurrentSlideCard } from "@/components/controller/CurrentSlideCard";
 import { NextSlideCard } from "@/components/controller/NextSlideCard";
@@ -227,9 +228,14 @@ export function ControllerView({
   const { user } = useAuth();
   const loggedIn = !!user;
   const { syncing, syncError, sync } = useClaim(id);
+  const { converting, shareUrlError, shareViaUrl } = useShareUrl(id);
 
   const syncOnline = async () => {
     if (await sync(currentSlide)) onSynced();
+  };
+
+  const shareUrl = async (url: string) => {
+    if (await shareViaUrl(url)) onSynced();
   };
 
   // Rather than auto-opening the viewer (which steals the active tab), prompt
@@ -542,6 +548,9 @@ export function ControllerView({
                 syncError={syncError}
                 onLogin={() => setLoginOpen(true)}
                 onSync={syncOnline}
+                converting={converting}
+                shareUrlError={shareUrlError}
+                onShareUrl={shareUrl}
               />
               <p className="text-sm text-muted-foreground text-center">
                 This presentation is local to this browser. Sync it online to let

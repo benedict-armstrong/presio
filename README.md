@@ -70,6 +70,12 @@ Presentations automatically expire after 24 hours.
   **Sync online to share**. This uploads the PDF to Supabase and attaches it to your
   account, keeping the same code — viewers can now join from any device by code/QR.
   Logging in by itself never uploads anything; syncing is always an explicit opt-in.
+- **External (bring your own storage):** paste a PDF URL you host yourself (e.g. a
+  GitHub raw or Pages link) — on the home screen, or via **Host it yourself** on the
+  share screen to convert a local presentation in place. Presio stores only the URL,
+  never the bytes, so this needs **no login** and unlocks the same join-from-any-device
+  features as Synced. The PDF is fetched directly by each viewer's browser, so the URL
+  must be publicly reachable and serve permissive CORS headers (GitHub raw/Pages do).
 
 > **Note on synced PDF privacy:** uploaded PDFs are stored in a public Supabase
 > bucket so viewers can fetch them by URL. This means a synced presentation is
@@ -81,4 +87,4 @@ Presentations automatically expire after 24 hours.
 - [ ] Users should be able to generate a perma link and qr code that they can put on the presentation.
 - [ ] Add a button to toggle all viewers to show the join code and QR code.
 - [ ] In addition to blanking the screen it should also be possible to show the join code (hotkey).
-- [ ] Add support for bringing your own PDF host?
+- [x] Add support for bringing your own PDF host?

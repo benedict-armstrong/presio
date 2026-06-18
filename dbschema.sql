@@ -2,6 +2,7 @@
 create table if not exists sessions (
   id text primary key,
   pdf_path text not null,
+  pdf_url text not null default '',
   filename text not null,
   total_slides integer not null,
   current_slide integer not null default 1,
@@ -20,6 +21,12 @@ create table if not exists sessions (
 -- For existing deployments: add the columns if the table predates them.
 alter table sessions add column if not exists local boolean not null default true;
 alter table sessions add column if not exists user_id uuid references auth.users;
+
+-- "Bring your own storage": when set, the PDF is hosted externally (e.g. a
+-- GitHub raw/Pages URL) and Presio stores only this URL — no bytes are uploaded
+-- to the bucket. Mode is derivable: local=true ⇒ local; pdf_url <> '' ⇒
+-- external; pdf_path <> '' ⇒ Supabase-hosted.
+alter table sessions add column if not exists pdf_url text not null default '';
 
 -- Index for cleanup query
 create index if not exists idx_sessions_expires_at on sessions (expires_at);

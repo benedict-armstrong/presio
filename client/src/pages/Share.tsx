@@ -6,6 +6,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { idbGet } from "@/lib/localStore";
 import { useAuth } from "@/lib/useAuth";
 import { useClaim } from "@/lib/useClaim";
+import { useShareUrl } from "@/lib/useShareUrl";
 import { LoginDialog } from "@/components/LoginDialog";
 import { SyncShareOverlay } from "@/components/SyncShareOverlay";
 
@@ -15,6 +16,7 @@ export default function Share() {
   const { user } = useAuth();
   const loggedIn = !!user;
   const { syncing, syncError, sync } = useClaim(id!);
+  const { converting, shareUrlError, shareViaUrl } = useShareUrl(id!);
 
   const [local, setLocal] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -57,6 +59,10 @@ export default function Share() {
     if (await sync()) setLocal(false);
   };
 
+  const shareUrl = async (url: string) => {
+    if (await shareViaUrl(url)) setLocal(false);
+  };
+
   const showOverlay = local;
 
   return (
@@ -73,6 +79,9 @@ export default function Share() {
                 syncError={syncError}
                 onLogin={() => setLoginOpen(true)}
                 onSync={syncOnline}
+                converting={converting}
+                shareUrlError={shareUrlError}
+                onShareUrl={shareUrl}
               />
             ) : (
               <>
@@ -90,7 +99,7 @@ export default function Share() {
 
             <p className="text-sm text-muted-foreground">
               {local
-                ? "This presentation stays in your browser. Viewers can join in another window or tab on this device and browser — log in and sync to share online."
+                ? "This presentation stays in your browser. Viewers can join in another window or tab on this device and browser — log in and sync, or paste your own PDF URL, to share online."
                 : "Share this code or scan the QR to join as a viewer"}
             </p>
           </div>

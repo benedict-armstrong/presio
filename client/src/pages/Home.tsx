@@ -8,6 +8,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { AccountControl } from "@/components/AccountControl";
 import { PresioLogo } from "@/components/PresioLogo";
 import { idbPut, idbList, idbDelete, idbPruneOlderThan } from "@/lib/localStore";
+import { loadExternalPdfMeta, createExternalSession } from "@/lib/externalSession";
 import { supabase } from "@/lib/supabaseClient";
 import "@/lib/pdf"; // ensure pdf.js worker is configured
 
@@ -32,6 +33,8 @@ export default function Home() {
   const code = chars.join("");
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([]);
   const [confirmRemove, setConfirmRemove] = useState<RecentSession | null>(null);
+  const [pdfUrl, setPdfUrl] = useState("");
+  const [urlBusy, setUrlBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,6 +115,25 @@ export default function Home() {
     }
   }, [navigate]);
 
+  // "Bring your own storage": create a shareable session from an externally
+  // hosted PDF. No upload, no login required — Presio stores only the URL.
+  const submitUrl = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pdfUrl.trim() || urlBusy) return;
+    setError("");
+    setUrlBusy(true);
+    try {
+      const meta = await loadExternalPdfMeta(pdfUrl);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const id = await createExternalSession(meta, sessionData.session?.access_token);
+      navigate(`/s/${id}/share`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to create session");
+    } finally {
+      setUrlBusy(false);
+    }
+  }, [pdfUrl, urlBusy, navigate]);
+
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
@@ -180,11 +202,10 @@ export default function Home() {
           </div>
 
           <div
-            className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors cursor-pointer ${
-              dragging
+            className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors cursor-pointer ${dragging
                 ? "border-primary bg-primary/5"
                 : "border-muted-foreground/25 hover:border-muted-foreground/50"
-            }`}
+              }`}
             onClick={() => document.getElementById("file-input")?.click()}
           >
             {uploading ? (
@@ -210,6 +231,22 @@ export default function Home() {
               onChange={onFileSelect}
             />
           </div>
+
+          <form onSubmit={submitUrl} className="flex gap-2">
+            <input
+              type="url"
+              inputMode="url"
+              placeholder="…or paste a URL to a PDF"
+              value={pdfUrl}
+              onChange={(e) => setPdfUrl(e.target.value)}
+              className="flex-1 min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            {pdfUrl.trim() && (
+              <Button type="submit" variant="outline" disabled={urlBusy}>
+                {urlBusy ? "Loading…" : "Go"}
+              </Button>
+            )}
+          </form>
 
           {error && (
             <p className="text-sm text-destructive text-center">{error}</p>
