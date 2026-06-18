@@ -175,9 +175,36 @@ export default function Presentation() {
     }
 
     const { controllerToken } = getSessionAuth(id!);
+
+    // Re-emit join on every (re)connect, not just the first mount. Socket.io
+    // transparently reconnects after a network blip, server restart, or a
+    // sleeping laptop, but the reconnected socket is in no room and would
+    // silently miss every broadcast until it re-joins (looking connected the
+    // whole time). The server answers join_session with full session_state, so
+    // this also reconciles anything that changed while we were away, and
+    // re-registers the controller after a server restart wiped its in-memory map.
+    const join = () => {
+      socket.emit("join_session", { sessionId: id, role: requestedRole, token: controllerToken });
+    };
+
+    socket.on("connect", join);
     socket.connect();
     startClockSync();
-    socket.emit("join_session", { sessionId: id, role: requestedRole, token: controllerToken });
+    if (socket.connected) join();
+
+    // Backstop reconciliation for viewers: re-request authoritative state when
+    // the tab returns to the foreground (background tabs get frozen and can
+    // miss broadcasts) and on a slow interval in case an update was ever dropped
+    // without a full disconnect. Both are skipped while hidden, and the interval
+    // is deliberately infrequent (one cheap state read per viewer) so a large
+    // audience can't hammer the server. The controller is excluded — it drives
+    // state, so reconciling it from the server could yank it back mid-advance.
+    const reconcile = () => {
+      if (requestedRole === "viewer" && !document.hidden && socket.connected) join();
+    };
+    document.addEventListener("visibilitychange", reconcile);
+    const reconcileTimer =
+      requestedRole === "viewer" ? setInterval(reconcile, 30000) : undefined;
 
     socket.on("session_state", ({ currentSlide, totalSlides, role: grantedRole, settings: s }) => {
       setCurrentSlide(currentSlide);
@@ -230,6 +257,9 @@ export default function Presentation() {
     return () => {
       channel.close();
       channelRef.current = null;
+      document.removeEventListener("visibilitychange", reconcile);
+      if (reconcileTimer) clearInterval(reconcileTimer);
+      socket.off("connect", join);
       socket.off("session_state");
       socket.off("slide_update");
       socket.off("sync_all");
