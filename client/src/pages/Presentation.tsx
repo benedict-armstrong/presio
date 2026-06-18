@@ -192,19 +192,36 @@ export default function Presentation() {
     startClockSync();
     if (socket.connected) join();
 
-    // Backstop reconciliation for viewers: re-request authoritative state when
-    // the tab returns to the foreground (background tabs get frozen and can
-    // miss broadcasts) and on a slow interval in case an update was ever dropped
-    // without a full disconnect. Both are skipped while hidden, and the interval
-    // is deliberately infrequent (one cheap state read per viewer) so a large
-    // audience can't hammer the server. The controller is excluded — it drives
-    // state, so reconciling it from the server could yank it back mid-advance.
+    // Re-request authoritative state when a viewer's tab returns to the
+    // foreground — background tabs get frozen and can miss broadcasts.
     const reconcile = () => {
       if (requestedRole === "viewer" && !document.hidden && socket.connected) join();
     };
     document.addEventListener("visibilitychange", reconcile);
-    const reconcileTimer =
-      requestedRole === "viewer" ? setInterval(reconcile, 30000) : undefined;
+
+    // Recovery / reconciliation watchdog. While disconnected, every role nudges
+    // the socket to reconnect on a fast 5s cadence so a dropped connection comes
+    // back quickly instead of waiting out socket.io's backoff. While connected,
+    // viewers re-request state on a slow backstop interval in case a broadcast
+    // was ever dropped without a disconnect — kept infrequent and skipped while
+    // hidden so a large audience can't hammer the server. The controller is
+    // excluded from the backstop: it drives state, so reconciling it from the
+    // server could yank it back mid-advance.
+    const RECONNECT_EVERY_MS = 5000;
+    const RECONCILE_EVERY_MS = 30000;
+    let sinceReconcile = 0;
+    const watchdog = setInterval(() => {
+      if (!socket.connected) {
+        socket.connect(); // idempotent; nudges reconnection if it stalled
+        sinceReconcile = 0;
+        return;
+      }
+      sinceReconcile += RECONNECT_EVERY_MS;
+      if (sinceReconcile >= RECONCILE_EVERY_MS && requestedRole === "viewer" && !document.hidden) {
+        sinceReconcile = 0;
+        join();
+      }
+    }, RECONNECT_EVERY_MS);
 
     socket.on("session_state", ({ currentSlide, totalSlides, role: grantedRole, settings: s }) => {
       setCurrentSlide(currentSlide);
@@ -258,7 +275,7 @@ export default function Presentation() {
       channel.close();
       channelRef.current = null;
       document.removeEventListener("visibilitychange", reconcile);
-      if (reconcileTimer) clearInterval(reconcileTimer);
+      clearInterval(watchdog);
       socket.off("connect", join);
       socket.off("session_state");
       socket.off("slide_update");
