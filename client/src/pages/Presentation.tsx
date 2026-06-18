@@ -252,7 +252,12 @@ export default function Presentation() {
   useEffect(() => {
     if (!pdf || !currentCanvasRef.current) return;
     const container = currentCanvasRef.current;
-    renderPage(pdf, displaySlide).then((canvas) => {
+    // Render at the container's real pixel resolution (CSS width * DPR) so the
+    // slide stays sharp on large / high-DPI displays instead of upscaling a
+    // fixed-size canvas.
+    const dpr = window.devicePixelRatio || 1;
+    const targetWidth = Math.round((container.clientWidth || 1280) * dpr);
+    renderPage(pdf, displaySlide, { targetWidth }).then((canvas) => {
       container.innerHTML = "";
       canvas.style.width = "100%";
       canvas.style.height = "100%";
@@ -432,6 +437,7 @@ export default function Presentation() {
         channelRef.current?.postMessage({ type: "blank_update", payload: { blanked: next } });
       }}
       mediaPlacements={currentMedia}
+      mediaBySlide={mediaPlacements}
       mediaState={mediaState}
       onMediaControl={onMediaControl}
       onMediaTime={onMediaTime}

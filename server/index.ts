@@ -50,12 +50,16 @@ app.use(
         "frame-src": ["'self'", "https://www.youtube.com", "https://www.youtube-nocookie.com", "https://player.vimeo.com"],
         "img-src": ["'self'", "data:", "blob:", "https:"],
         "media-src": ["'self'", "blob:", "https:"],
-        "connect-src": ["'self'", "blob:", "data:", "ws:", "wss:", ...(supabaseHost ? [supabaseHost] : [])],
+        "connect-src": ["'self'", "blob:", "data:", "ws:", "wss:", "https://vimeo.com", ...(supabaseHost ? [supabaseHost] : [])],
         "worker-src": ["'self'", "blob:"],
         "upgrade-insecure-requests": null,
       },
     },
     crossOriginEmbedderPolicy: false,
+    // YouTube (esp. the JS API / nocookie player) validates the embedding
+    // origin via the Referer header. Helmet's default `no-referrer` strips it,
+    // which triggers YouTube playback error 153. Send the origin cross-site.
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
   })
 );
 app.use(cors({ origin: corsOrigin }));

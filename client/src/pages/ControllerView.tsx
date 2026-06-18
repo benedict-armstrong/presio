@@ -178,6 +178,8 @@ interface ControllerViewProps {
   blanked: boolean;
   onBlankToggle: () => void;
   mediaPlacements: MediaPlacement[];
+  /** All slides' media, keyed by slide number — used for thumbnail posters. */
+  mediaBySlide: Map<number, MediaPlacement[]>;
   mediaState: MediaState;
   onMediaControl: (id: string, action: "play" | "pause" | "reset") => void;
   onMediaTime: (id: string, t: number, playing: boolean, sampledAt: number) => void;
@@ -204,6 +206,7 @@ export function ControllerView({
   blanked,
   onBlankToggle,
   mediaPlacements,
+  mediaBySlide,
   mediaState,
   onMediaControl,
   onMediaTime,
@@ -367,7 +370,7 @@ export function ControllerView({
       content: <SpeakerNotesCard pdf={pdf} currentSlide={currentSlide} />,
     },
     thumbnails: {
-      content: <ThumbnailsCard pdf={pdf} totalSlides={totalSlides} currentSlide={currentSlide} onGoTo={onGoTo} />,
+      content: <ThumbnailsCard pdf={pdf} totalSlides={totalSlides} currentSlide={currentSlide} onGoTo={onGoTo} mediaBySlide={mediaBySlide} />,
     },
   };
 

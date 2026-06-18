@@ -10,15 +10,42 @@ export async function loadPdf(url: string): Promise<PDFDocumentProxy> {
   return getDocument(url).promise;
 }
 
+// Cap the rendered canvas width (device pixels). Beyond ~4K wide there's no
+// visible gain and we risk hitting browser canvas-size limits / memory.
+const MAX_CANVAS_WIDTH = 4096;
+
+export interface RenderOptions {
+  // Fixed scale multiplier (used for thumbnails / previews).
+  scale?: number;
+  // Desired output width in device pixels. When set, the scale is derived so
+  // the canvas matches the display resolution and stays crisp. Takes
+  // precedence over `scale`.
+  targetWidth?: number;
+}
+
 export async function renderPage(
   pdf: PDFDocumentProxy,
   pageNum: number,
-  scale = 2
+  opts: number | RenderOptions = {}
 ): Promise<HTMLCanvasElement> {
+  const options: RenderOptions = typeof opts === "number" ? { scale: opts } : opts;
+
+  const page = await pdf.getPage(pageNum);
+  const baseWidth = page.getViewport({ scale: 1 }).width;
+
+  let scale: number;
+  if (options.targetWidth) {
+    scale = Math.min(options.targetWidth, MAX_CANVAS_WIDTH) / baseWidth;
+  } else {
+    scale = options.scale ?? 2;
+  }
+  // Round so small layout/DPR jitters reuse the cached canvas instead of
+  // re-rendering on every resize.
+  scale = Math.max(0.25, Math.round(scale * 4) / 4);
+
   const key = `${pageNum}-${scale}`;
   if (pageCache.has(key)) return pageCache.get(key)!;
 
-  const page = await pdf.getPage(pageNum);
   const viewport = page.getViewport({ scale });
   const canvas = document.createElement("canvas");
   canvas.width = viewport.width;
