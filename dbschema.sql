@@ -39,6 +39,9 @@ on conflict (id) do nothing;
 -- Allow public read access to the presentations bucket.
 -- NOTE: this makes every uploaded PDF readable by anyone who knows (or guesses)
 -- its object path. Do not store confidential material in synced presentations.
+-- drop-then-create keeps this script idempotent (Postgres has no
+-- "create policy if not exists"), so it can be re-applied safely on every boot.
+drop policy if exists "Public read access" on storage.objects;
 create policy "Public read access" on storage.objects
   for select using (bucket_id = 'presentations');
 

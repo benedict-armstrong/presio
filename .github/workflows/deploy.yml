@@ -1,0 +1,72 @@
+name: Deploy to Coolify
+
+# Trigger a Coolify redeploy after build checks pass. Coolify clones this repo
+# and builds deploy/docker-compose.yml itself, so CI only needs to (1) catch
+# obvious breakage and (2) call Coolify's deploy API — no registry, no secrets
+# baked into an image here.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   COOLIFY_URL            e.g. https://coolify.example.com  (no trailing slash)
+#   COOLIFY_TOKEN          Coolify API token with the "deploy" permission
+#                          (Coolify → Keys & Tokens → API tokens)
+#   COOLIFY_RESOURCE_UUID  UUID of the Docker Compose resource (in its Coolify URL)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Build checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Catch TypeScript/build breakage before we ask Coolify to deploy.
+      - name: Build client
+        working-directory: client
+        run: |
+          npm ci
+          npm run build
+
+      - name: Typecheck server
+        working-directory: server
+        run: |
+          npm ci
+          npx tsc --noEmit
+
+      # Validate the deploy stack parses (placeholder env is fine for this).
+      - name: Validate compose
+        run: |
+          cp deploy/.env.example deploy/.env
+          docker compose -f deploy/docker-compose.yml --env-file deploy/.env config --quiet
+
+  deploy:
+    name: Trigger Coolify deploy
+    needs: checks
+    runs-on: ubuntu-latest
+    # Don't deploy on PRs / forks — only direct pushes to main and manual runs.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Call Coolify deploy API
+        env:
+          COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_RESOURCE_UUID: ${{ secrets.COOLIFY_RESOURCE_UUID }}
+        run: |
+          set -euo pipefail
+          status=$(curl --silent --show-error --fail-with-body \
+            --output /dev/stderr --write-out '%{http_code}' \
+            --request GET \
+            "${COOLIFY_URL}/api/v1/deploy?uuid=${COOLIFY_RESOURCE_UUID}&force=false" \
+            --header "Authorization: Bearer ${COOLIFY_TOKEN}")
+          echo "Coolify responded with HTTP ${status}"

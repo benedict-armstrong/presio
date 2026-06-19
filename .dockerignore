@@ -4,4 +4,8 @@ server/node_modules
 client/dist
 .env
 *.env
+**/.env
 .git
+# The self-hosted stack (vendored Supabase volumes + secrets) is not part of the
+# app image build context.
+deploy

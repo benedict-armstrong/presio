@@ -5,16 +5,35 @@ Upload a PDF presentation, get a short link, and control the slideshow from one 
 ## Prerequisites
 
 - Node.js 20+
-- A [Supabase](https://supabase.com) project
+- A Supabase backend — either a hosted [Supabase](https://supabase.com) project
+  or the self-hosted stack in [`deploy/`](deploy/README.md) (Postgres + Auth +
+  Storage). Presio talks to it only through env-configured URLs/keys, so either
+  works.
 
-## Supabase Setup
+## Backend setup
 
-1. Create a new Supabase project
-2. Run the SQL in `dbschema.sql` in the Supabase SQL editor to create the `sessions` table and `presentations` storage bucket
-3. **Auth** (for logging in / sharing presentations online):
-   - Email/password is enabled by default (optionally disable email confirmation for local dev under Auth → Providers → Email).
-   - GitHub: create a GitHub OAuth App with callback `https://<your-project>.supabase.co/auth/v1/callback`, then add its client id/secret under Auth → Providers → GitHub.
-   - Under Auth → URL Configuration, add your app origins to **Redirect URLs** (e.g. `http://localhost:5173/**` and your production origin) so the OAuth round-trip can return to the share screen.
+Whichever backend you use, it must have:
+
+1. The `sessions` table and `presentations` storage bucket from `dbschema.sql`.
+   - Hosted: run `dbschema.sql` in the Supabase SQL editor.
+   - Self-hosted: applied automatically on first boot — see
+     [`deploy/README.md`](deploy/README.md).
+2. **Auth** configured (for logging in / sharing presentations online):
+   - Email/password enabled (optionally auto-confirm for dev).
+   - GitHub: a GitHub OAuth App with callback
+     `https://<your-supabase-host>/auth/v1/callback`, its client id/secret set
+     on the auth provider.
+   - App origins (e.g. `http://localhost:5173` and your production origin) added
+     to the auth **Redirect URLs** so the OAuth round-trip can return to the
+     share screen.
+
+## Deployment (self-hosting on Coolify)
+
+The [`deploy/`](deploy/README.md) directory contains a single, config-driven
+`docker-compose.yml` that runs the whole thing — the Presio app, a pinned
+self-hosted Supabase stack, and MinIO (S3 storage backend) — with all settings
+in `deploy/.env`. See **[`deploy/README.md`](deploy/README.md)** for the full
+Coolify walkthrough.
 
 ## Environment Variables
 
