@@ -45,10 +45,12 @@ jobs:
           npx tsc --noEmit
 
       # Validate the deploy stack parses (placeholder env is fine for this).
+      # Use --project-directory . so relative paths resolve from the repo root,
+      # exactly as Coolify runs the build.
       - name: Validate compose
         run: |
           cp deploy/.env.example deploy/.env
-          docker compose -f deploy/docker-compose.yml --env-file deploy/.env config --quiet
+          docker compose --project-directory . -f deploy/docker-compose.yml --env-file deploy/.env config --quiet
 
   deploy:
     name: Trigger Coolify deploy

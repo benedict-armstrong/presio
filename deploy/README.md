@@ -64,8 +64,15 @@ verification emails).
 
 ## 3. Deploy on Coolify
 
-1. **New Resource → Docker Compose**, pointed at this repo, with the compose
-   path `deploy/docker-compose.yml`.
+1. **New Resource → Git Based** (Public Repository, or Private Repository with
+   the GitHub App), pointed at this repo. On the build screen set **Build Pack =
+   Docker Compose** and **Docker Compose Location = `/deploy/docker-compose.yml`**.
+
+   > **Leave Base Directory at `/` (the repo root).** Coolify builds with
+   > `--project-directory <repo-root>`, so every path in the compose is written
+   > relative to the repo root (`context: .`, `./deploy/volumes/...`,
+   > `./dbschema.sql`) — not relative to `deploy/`. Don't set Base Directory to
+   > `/deploy`, or those paths resolve one level too deep.
 2. Paste the values from your `.env` into the resource's **Environment
    Variables** (this is the only step that isn't in version control, since these
    are secrets).
@@ -79,10 +86,13 @@ verification emails).
 
 ## 4. Run it locally (optional smoke test)
 
+Run from the **repo root** (not from `deploy/`) so the compose's repo-root-relative
+paths resolve — mirror how Coolify builds it:
+
 ```bash
-cd deploy
-docker compose up -d --build
-docker compose ps        # everything healthy / completed
+cp deploy/.env.example deploy/.env   # fill it in first
+docker compose --project-directory . -f deploy/docker-compose.yml up -d --build
+docker compose --project-directory . -f deploy/docker-compose.yml ps  # healthy / completed
 ```
 
 Studio is on `http://localhost:8000` (login `DASHBOARD_USERNAME` /
