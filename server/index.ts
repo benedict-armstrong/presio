@@ -40,13 +40,20 @@ const supabaseHost = (() => {
     return "";
   }
 })();
+const analyticsHost = (() => {
+  try {
+    return process.env.ANALYTICS_URL ? new URL(process.env.ANALYTICS_URL).origin : "";
+  } catch {
+    return "";
+  }
+})();
 app.use(
   helmet({
     contentSecurityPolicy: {
       directives: {
         ...helmet.contentSecurityPolicy.getDefaultDirectives(),
         "default-src": ["'self'"],
-        "script-src": ["'self'", "https://www.youtube.com", "https://www.youtube-nocookie.com", "https://player.vimeo.com"],
+        "script-src": ["'self'", "https://www.youtube.com", "https://www.youtube-nocookie.com", "https://player.vimeo.com", ...(analyticsHost ? [analyticsHost] : [])],
         "frame-src": ["'self'", "https://www.youtube.com", "https://www.youtube-nocookie.com", "https://player.vimeo.com"],
         "img-src": ["'self'", "data:", "blob:", "https:"],
         "media-src": ["'self'", "blob:", "https:"],

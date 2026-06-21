@@ -690,9 +690,8 @@ services:
       SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
       PORT: 3001
-      # Same-origin in production (client is served by this server), so leave
-      # ALLOWED_ORIGIN unset. Set it only if the client is hosted separately.
       ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
+      ANALYTICS_URL: ${ANALYTICS_URL:-}
     # Ingress via the shared Traefik proxy (no host ports). Routes the app domain
     # to the Express/Socket.IO server on port 3001 (websockets pass through).
     labels:
@@ -702,6 +701,51 @@ services:
       - "traefik.http.routers.presio.entrypoints=websecure"
       - "traefik.http.routers.presio.tls.certresolver=le"
       - "traefik.http.services.presio.loadbalancer.server.port=3001"
+
+  # One-shot: create the umami database and user in the shared Postgres instance.
+  # Uses `|| true` so each statement is idempotent on re-runs.
+  umami-db-init:
+    container_name: presio-umami-db-init
+    image: postgres:17-alpine
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        psql -h db -p "${POSTGRES_PORT}" -U postgres -c "CREATE ROLE umami WITH LOGIN PASSWORD '${UMAMI_DB_PASSWORD}';" || true
+        psql -h db -p "${POSTGRES_PORT}" -U postgres -c "CREATE DATABASE umami;" || true
+        psql -h db -p "${POSTGRES_PORT}" -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE umami TO umami;" || true
+        psql -h db -p "${POSTGRES_PORT}" -U postgres -d umami -c "GRANT ALL ON SCHEMA public TO umami;" || true
+
+  # Umami web analytics — self-hosted, privacy-friendly.
+  # After first boot: visit https://${UMAMI_HOST}, log in (admin / umami),
+  # change the password, add a website, then paste the tracking script into
+  # client/index.html using the generated website ID.
+  umami:
+    container_name: presio-umami
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    restart: unless-stopped
+    networks:
+      default:
+      web:
+    depends_on:
+      umami-db-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://umami:${UMAMI_DB_PASSWORD}@db:${POSTGRES_PORT}/umami
+      APP_SECRET: ${UMAMI_APP_SECRET}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.umami.rule=Host(`${UMAMI_HOST}`)"
+      - "traefik.http.routers.umami.entrypoints=websecure"
+      - "traefik.http.routers.umami.tls.certresolver=le"
+      - "traefik.http.services.umami.loadbalancer.server.port=3000"
 
 networks:
   # Internal network for the Supabase services to talk to each other.
