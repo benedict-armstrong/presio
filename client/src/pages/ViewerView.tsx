@@ -131,7 +131,7 @@ export function ViewerView({
       className="h-screen w-screen bg-black flex items-center justify-center relative"
       style={{ cursor: cursorVisible ? "default" : "none" }}
     >
-      <div ref={canvasRef} className="w-full h-full relative" />
+      <div ref={canvasRef} data-testid="viewer-slide" data-slide={currentSlide} className="w-full h-full relative" />
       <MediaOverlay
         canvasContainerRef={canvasRef}
         placements={mediaPlacements}

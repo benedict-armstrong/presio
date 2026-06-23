@@ -17,6 +17,35 @@ const PING_INTERVAL = 30_000;
 const INITIAL_BURST = 4;
 const INITIAL_BURST_GAP = 250;
 
+const EWMA_ALPHA = 0.3;
+
+export interface ClockSample {
+  offsetMs: number;
+  rttMs: number;
+}
+
+// Fold one ping exchange into the running estimate.
+//   rtt    = t2 - t1
+//   offset = serverTime - (t1 + t2) / 2
+// The first sample seeds the estimate directly; later samples are smoothed with
+// an EWMA, and a sample whose RTT is a wild outlier (e.g. an RTT spike from tab
+// throttling) is rejected by returning `prev` unchanged.
+export function computeSample(
+  t1: number,
+  t2: number,
+  serverTime: number,
+  prev: ClockSample | null
+): ClockSample {
+  const r = t2 - t1;
+  const o = serverTime - (t1 + t2) / 2;
+  if (!prev) return { offsetMs: o, rttMs: r };
+  if (r > prev.rttMs * 4 + 200) return prev;
+  return {
+    offsetMs: prev.offsetMs * (1 - EWMA_ALPHA) + o * EWMA_ALPHA,
+    rttMs: prev.rttMs * (1 - EWMA_ALPHA) + r * EWMA_ALPHA,
+  };
+}
+
 export function startClockSync() {
   if (started) return;
   started = true;
@@ -43,19 +72,10 @@ function ping() {
     (resp: { serverTime: number; clientT1: number } | undefined) => {
       if (!resp) return;
       const t2 = Date.now();
-      const r = t2 - t1;
-      const o = resp.serverTime - (t1 + t2) / 2;
-      if (!initialised) {
-        offsetMs = o;
-        rttMs = r;
-        initialised = true;
-      } else {
-        // Reject crazy outliers (e.g. RTT spike from tab throttling)
-        if (r > rttMs * 4 + 200) return;
-        const a = 0.3;
-        offsetMs = offsetMs * (1 - a) + o * a;
-        rttMs = rttMs * (1 - a) + r * a;
-      }
+      const next = computeSample(t1, t2, resp.serverTime, initialised ? { offsetMs, rttMs } : null);
+      offsetMs = next.offsetMs;
+      rttMs = next.rttMs;
+      initialised = true;
     }
   );
 }

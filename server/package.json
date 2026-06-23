@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch index.ts",
-    "start": "tsx index.ts"
+    "start": "tsx index.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.1",
@@ -22,7 +23,11 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.1.0",
+    "@types/supertest": "^7.2.0",
+    "socket.io-client": "^4.8.3",
+    "supertest": "^7.2.2",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.9"
   }
 }

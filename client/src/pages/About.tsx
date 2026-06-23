@@ -93,7 +93,7 @@ export default function About() {
                 . It attaches the media and notes to your PDF in a format Presio reads automatically — no manual
                 annotation wiring needed. Import it at the top of your document:
               </p>
-              <CodeBlock code={`#import "@preview/presio:0.2.0": media, speaker-notes`} />
+              <CodeBlock code={`#import "@preview/presio:0.2.1": media, speaker-notes`} />
 
               <p className="pt-2">Add speaker notes to any slide:</p>
               <CodeBlock code={`= Introduction
@@ -105,8 +105,8 @@ Hello world.
 ]`} />
 
               <p className="pt-2">Embed a local video or GIF, a direct video URL, or a YouTube/Vimeo link:</p>
-              <CodeBlock code={`// Local file
-#media("figures/demo.gif", width: 60%)
+              <CodeBlock code={`// Local file — wrap the path with Typst's path() type
+#media(path("figures/demo.gif"), width: 60%)
 
 // Direct URL with a poster image
 #media(
@@ -118,8 +118,20 @@ Hello world.
 
 // YouTube / Vimeo are detected automatically
 #media("https://www.youtube.com/watch?v=dQw4w9WgXcQ", width: 60%, aspect-ratio: 16/9)`} />
+              <p className="pt-2">
+                <code className="bg-muted px-1 rounded text-xs">media</code> also accepts{" "}
+                <code className="bg-muted px-1 rounded text-xs">name</code>,{" "}
+                <code className="bg-muted px-1 rounded text-xs">height</code>,{" "}
+                <code className="bg-muted px-1 rounded text-xs">autoplay</code>, and{" "}
+                <code className="bg-muted px-1 rounded text-xs">loop</code> (autoplay and loop
+                default to true). Supported local types are{" "}
+                <code className="bg-muted px-1 rounded text-xs">.gif</code>,{" "}
+                <code className="bg-muted px-1 rounded text-xs">.mp4</code>, and{" "}
+                <code className="bg-muted px-1 rounded text-xs">.webm</code>.
+              </p>
               <p className="text-xs">
-                Works with plain Typst, Polylux, or Touying. Requires Typst 0.15+.
+                Works with plain Typst, Polylux, or Touying. The <code className="bg-muted px-1 rounded">path()</code>{" "}
+                syntax requires Typst 0.15+; on Typst 0.13–0.14 use presio 0.1.0 with the bytes-based API.
               </p>
             </div>
 
