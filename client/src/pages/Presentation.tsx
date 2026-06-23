@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useSearchParams, useNavigate, Link } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { loadPdf, renderPage, clearCache, loadMediaPlacements, type MediaPlacement } from "@/lib/pdf";
-import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/components/MediaOverlay";
+import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
 import { socket } from "@/lib/socket";
 import { startClockSync } from "@/lib/clock";
 import { getSessionAuth, endSession } from "@/lib/utils";
