@@ -9,8 +9,6 @@ import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import { SessionQRCode } from "@/components/SessionQRCode";
 import { CopyField } from "@/components/CopyField";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { MobileControllerMenu } from "@/components/MobileControllerMenu";
-import { PresentationTimer } from "@/components/PresentationTimer";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { LoginDialog } from "@/components/LoginDialog";
 import { AccountControl } from "@/components/AccountControl";
@@ -25,8 +23,34 @@ import { NextSlideCard } from "@/components/controller/NextSlideCard";
 import { SpeakerNotesCard } from "@/components/controller/SpeakerNotesCard";
 import { ThumbnailsCard } from "@/components/controller/ThumbnailsCard";
 import { TimerCard, TimerAction, TimerSettingsDialog } from "@/components/controller/TimerCard";
+import { ShortcutsEditor } from "@/components/controller/ShortcutsEditor";
+import { MobileControllerLayout } from "@/components/controller/MobileControllerLayout";
 import { PresioLogo } from "@/components/PresioLogo";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import {
+  DEFAULT_KEYMAP,
+  loadKeymap,
+  saveKeymap,
+  matchesBinding,
+  type Keymap,
+} from "@/lib/keymap";
+import {
+  GRID_ROWS,
+  GRID_MARGIN,
+  CARD_KEYS,
+  CARD_LABELS,
+  PREFERRED_LAYOUTS,
+  DEFAULT_LAYOUTS,
+  defaultVisibility,
+  loadLayout,
+  loadVisibility,
+  saveLayout,
+  saveVisibility,
+  savePreferred,
+  hasPreferredLayout,
+  loadPreferred,
+  type CardLayout,
+} from "@/lib/controllerLayout";
 import { ResponsiveGridLayout, useContainerWidth, getCompactor, type Layout, type ResponsiveLayouts } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
@@ -36,129 +60,6 @@ import type { MediaPlacement } from "@/lib/pdf";
 import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
 
 const verticalCompactor = getCompactor("vertical");
-
-// --- Keyboard shortcuts ---
-
-interface KeyBinding {
-  key: string;
-  meta?: boolean;
-}
-
-interface Keymap {
-  nextSlide: KeyBinding[];
-  prevSlide: KeyBinding[];
-  firstSlide: KeyBinding[];
-  lastSlide: KeyBinding[];
-  toggleBlank: KeyBinding[];
-}
-
-const KEYMAP_ACTIONS = ["nextSlide", "prevSlide", "firstSlide", "lastSlide", "toggleBlank"] as const;
-type KeymapAction = (typeof KEYMAP_ACTIONS)[number];
-
-const KEYMAP_LABELS: Record<KeymapAction, string> = {
-  nextSlide: "Next slide",
-  prevSlide: "Previous slide",
-  firstSlide: "First slide",
-  lastSlide: "Last slide",
-  toggleBlank: "Blank screen",
-};
-
-const DEFAULT_KEYMAP: Keymap = {
-  nextSlide: [{ key: "ArrowRight" }, { key: " " }],
-  prevSlide: [{ key: "ArrowLeft" }],
-  firstSlide: [{ key: "ArrowLeft", meta: true }],
-  lastSlide: [{ key: "ArrowRight", meta: true }],
-  toggleBlank: [{ key: "b" }],
-};
-
-function loadKeymap(): Keymap {
-  try {
-    const raw = localStorage.getItem("presio_keymap");
-    if (raw) return { ...DEFAULT_KEYMAP, ...JSON.parse(raw) };
-  } catch { /* ignore */ }
-  return DEFAULT_KEYMAP;
-}
-
-function saveKeymap(km: Keymap) {
-  localStorage.setItem("presio_keymap", JSON.stringify(km));
-}
-
-function matchesBinding(e: KeyboardEvent, bindings: KeyBinding[]): boolean {
-  return bindings.some((b) => {
-    const keyMatch = e.key.toLowerCase() === b.key.toLowerCase();
-    const metaMatch = b.meta ? e.metaKey : !e.metaKey;
-    return keyMatch && metaMatch;
-  });
-}
-
-function formatBinding(b: KeyBinding): string {
-  const parts: string[] = [];
-  if (b.meta) parts.push("⌘");
-  const display: Record<string, string> = {
-    ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓",
-    " ": "Space", Escape: "Esc", Enter: "Enter",
-  };
-  parts.push(display[b.key] || b.key.toUpperCase());
-  return parts.join("");
-}
-
-// --- Card configuration ---
-
-interface CardLayout {
-  i: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  minW?: number;
-  minH?: number;
-}
-
-interface CardConfig {
-  key: string;
-  label: string;
-  preferredLayout: CardLayout;
-}
-
-const GRID_ROWS = 12;
-const GRID_MARGIN = 12;
-
-const CARD_CONFIGS: CardConfig[] = [
-  { key: "currentSlide", label: "Current Slide", preferredLayout: { i: "currentSlide", x: 0, y: 0, w: 6, h: 8, minW: 4, minH: 3 } },
-  { key: "nextSlide", label: "Next Slide", preferredLayout: { i: "nextSlide", x: 6, y: 0, w: 4, h: 5, minW: 3, minH: 3 } },
-  { key: "timer", label: "Timer", preferredLayout: { i: "timer", x: 10, y: 0, w: 2, h: 5, minW: 2, minH: 2 } },
-  { key: "notes", label: "Speaker Notes", preferredLayout: { i: "notes", x: 6, y: 5, w: 6, h: 3, minW: 3, minH: 2 } },
-  { key: "thumbnails", label: "Thumbnails", preferredLayout: { i: "thumbnails", x: 0, y: 8, w: 12, h: 4, minW: 4, minH: 2 } },
-];
-
-const CARD_KEYS = CARD_CONFIGS.map((c) => c.key);
-const CARD_LABELS = Object.fromEntries(CARD_CONFIGS.map((c) => [c.key, c.label]));
-const PREFERRED_LAYOUTS: Record<string, CardLayout> =
-  Object.fromEntries(CARD_CONFIGS.map((c) => [c.key, c.preferredLayout])) as Record<string, CardLayout>;
-const DEFAULT_LAYOUTS: CardLayout[] = CARD_CONFIGS.map((c) => c.preferredLayout);
-
-function loadLayout(): CardLayout[] {
-  try {
-    const raw = localStorage.getItem("presio_controller_layout");
-    if (raw) {
-      const saved: CardLayout[] = JSON.parse(raw);
-      return CARD_KEYS.map((key) => {
-        const s = saved.find((l) => l.i === key);
-        const pref = PREFERRED_LAYOUTS[key];
-        return s ? { ...s, minW: pref.minW, minH: pref.minH } : pref;
-      });
-    }
-  } catch { /* ignore */ }
-  return DEFAULT_LAYOUTS;
-}
-
-function loadVisibility(): Record<string, boolean> {
-  try {
-    const raw = localStorage.getItem("presio_controller_cards");
-    if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
-  return Object.fromEntries(CARD_KEYS.map((k) => [k, true]));
-}
 
 // --- Component ---
 
@@ -246,7 +147,7 @@ export function ControllerView({
 
   const [layouts, setLayouts] = useState<CardLayout[]>(loadLayout);
   const [cardVisibility, setCardVisibility] = useState<Record<string, boolean>>(loadVisibility);
-  const [hasPreferred, setHasPreferred] = useState(() => !!localStorage.getItem("presio_preferred_layout"));
+  const [hasPreferred, setHasPreferred] = useState(hasPreferredLayout);
   const { containerRef: gridContainerRef, width: gridWidth } = useContainerWidth();
   const heightRef = useRef<HTMLDivElement>(null);
   const [containerHeight, setContainerHeight] = useState(0);
@@ -291,46 +192,35 @@ export function ControllerView({
       : (layouts?.lg ?? layouts?.md ?? layouts?.sm ?? layout);
     const arr: CardLayout[] = source.map((l) => ({ ...l })) as CardLayout[];
     setLayouts(arr);
-    localStorage.setItem("presio_controller_layout", JSON.stringify(arr));
+    saveLayout(arr);
   }, []);
 
   const resetLayout = useCallback(() => {
-    const defaultVis = Object.fromEntries(CARD_KEYS.map((k) => [k, true]));
+    const vis = defaultVisibility();
     setLayouts(DEFAULT_LAYOUTS.map((l) => ({ ...l })));
-    setCardVisibility(defaultVis);
-    localStorage.setItem("presio_controller_layout", JSON.stringify(DEFAULT_LAYOUTS));
-    localStorage.setItem("presio_controller_cards", JSON.stringify(defaultVis));
+    setCardVisibility(vis);
+    saveLayout(DEFAULT_LAYOUTS);
+    saveVisibility(vis);
   }, []);
 
   const savePreferredLayout = useCallback(() => {
-    localStorage.setItem("presio_preferred_layout", JSON.stringify(layouts));
-    localStorage.setItem("presio_preferred_cards", JSON.stringify(cardVisibility));
+    savePreferred(layouts, cardVisibility);
     setHasPreferred(true);
   }, [layouts, cardVisibility]);
 
   const restorePreferredLayout = useCallback(() => {
-    try {
-      const savedLayout = localStorage.getItem("presio_preferred_layout");
-      const savedCards = localStorage.getItem("presio_preferred_cards");
-      if (!savedLayout || !savedCards) return;
-      const parsed: CardLayout[] = JSON.parse(savedLayout);
-      const vis: Record<string, boolean> = JSON.parse(savedCards);
-      const restored = CARD_KEYS.map((key) => {
-        const s = parsed.find((l) => l.i === key);
-        const pref = PREFERRED_LAYOUTS[key];
-        return s ? { ...s, minW: pref.minW, minH: pref.minH } : pref;
-      });
-      setLayouts(restored);
-      setCardVisibility(vis);
-      localStorage.setItem("presio_controller_layout", JSON.stringify(restored));
-      localStorage.setItem("presio_controller_cards", JSON.stringify(vis));
-    } catch { /* ignore */ }
+    const pref = loadPreferred();
+    if (!pref) return;
+    setLayouts(pref.layouts);
+    setCardVisibility(pref.visibility);
+    saveLayout(pref.layouts);
+    saveVisibility(pref.visibility);
   }, []);
 
   const toggleCard = useCallback((key: string) => {
     setCardVisibility((prev) => {
       const next = { ...prev, [key]: !prev[key] };
-      localStorage.setItem("presio_controller_cards", JSON.stringify(next));
+      saveVisibility(next);
       return next;
     });
     // When toggling ON, reset to preferred size so it doesn't appear tiny
@@ -393,7 +283,7 @@ export function ControllerView({
 
   if (isMobile) {
     return (
-      <MobileLayout
+      <MobileControllerLayout
         id={id}
         local={local}
         pdfUrl={pdfUrl}
@@ -722,188 +612,6 @@ export function ControllerView({
           onOpenViewer={openViewer}
         />
       )}
-    </div>
-  );
-}
-
-function MobileLayout({
-  id,
-  local,
-  pdfUrl,
-  pdf,
-  currentSlide,
-  totalSlides,
-  onGoTo,
-  onSyncAll,
-  currentCanvasRef,
-  settings,
-  startedAt,
-  passphrase,
-}: {
-  id: string;
-  local: boolean;
-  pdfUrl: string;
-  pdf: PDFDocumentProxy;
-  currentSlide: number;
-  totalSlides: number;
-  onGoTo: (slide: number) => void;
-  onSyncAll: () => void;
-  currentCanvasRef: React.RefObject<HTMLDivElement | null>;
-  settings: PresentationSettings;
-  startedAt: number;
-  passphrase: string;
-}) {
-  return (
-    <div className="h-dvh bg-background flex flex-col">
-      <div className="border-b px-3 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Link to="/" className="flex items-center gap-1.5 text-sm font-semibold hover:text-muted-foreground transition-colors">
-            <PresioLogo className="h-4 w-auto" />
-            Presio
-          </Link>
-          <span className="text-muted-foreground/40">|</span>
-          {!local && (
-            <span className="font-mono font-bold tracking-widest text-sm select-all">{id}</span>
-          )}
-          <ConnectionIndicator local={local} />
-          {local && <span className="text-xs font-medium text-amber-600 dark:text-amber-500">Local</span>}
-        </div>
-        <MobileControllerMenu id={id} pdf={pdf} pdfUrl={pdfUrl} passphrase={passphrase} />
-      </div>
-
-      <div className="flex-1 flex flex-col gap-2 p-3 min-h-0">
-        <div className="flex-3 flex flex-col gap-1 min-h-0">
-          <p className="text-xs text-muted-foreground font-medium">Current</p>
-          <div
-            ref={currentCanvasRef}
-            className="flex-1 border rounded-lg overflow-hidden bg-white min-h-0"
-          />
-        </div>
-        <div className="flex-2 flex flex-col gap-1 min-h-0">
-          <p className="text-xs text-muted-foreground font-medium">Next</p>
-          <NextSlideCard pdf={pdf} currentSlide={currentSlide} totalSlides={totalSlides} />
-        </div>
-      </div>
-
-      <div className="border-t px-3 py-3 space-y-2">
-        <div className="flex items-center justify-center gap-3">
-          <PresentationTimer
-            mode={settings.timerMode}
-            duration={settings.timerDuration}
-            threshold={settings.timerThreshold}
-            startedAt={startedAt}
-            className="text-xs font-medium"
-          />
-          <p className="text-center text-xs text-muted-foreground tabular-nums">
-            {currentSlide} / {totalSlides}
-          </p>
-          {!local && (
-            <Button variant="ghost" size="sm" onClick={onSyncAll}>
-              Sync All
-            </Button>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Button
-            className="flex-1 h-12 text-base"
-            variant="outline"
-            onClick={() => onGoTo(currentSlide - 1)}
-            disabled={currentSlide <= 1}
-          >
-            Previous
-          </Button>
-          <Button
-            className="flex-1 h-12 text-base"
-            variant="outline"
-            onClick={() => onGoTo(currentSlide + 1)}
-            disabled={currentSlide >= totalSlides}
-          >
-            Next
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ShortcutsEditor({
-  keymap,
-  onChange,
-}: {
-  keymap: Keymap;
-  onChange: (km: Keymap) => void;
-}) {
-  const [recording, setRecording] = useState<{ action: KeymapAction; index: number } | null>(null);
-
-  useEffect(() => {
-    if (!recording) return;
-    const handler = (e: KeyboardEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.key === "Escape") {
-        setRecording(null);
-        return;
-      }
-      if (["Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
-      const binding: KeyBinding = { key: e.key };
-      if (e.metaKey) binding.meta = true;
-      const next = { ...keymap };
-      const bindings = [...next[recording.action]];
-      bindings[recording.index] = binding;
-      next[recording.action] = bindings;
-      onChange(next);
-      setRecording(null);
-    };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [recording, keymap, onChange]);
-
-  return (
-    <div className="space-y-2">
-      {KEYMAP_ACTIONS.map((action) => (
-        <div key={action} className="flex items-center justify-between">
-          <span className="text-sm">{KEYMAP_LABELS[action]}</span>
-          <div className="flex items-center gap-1">
-            {keymap[action].map((b, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => setRecording({ action, index: i })}
-                className={`px-2 py-1 text-xs font-mono rounded border min-w-[40px] text-center transition-colors ${recording?.action === action && recording.index === i
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-input hover:border-primary/50"
-                  }`}
-              >
-                {recording?.action === action && recording.index === i
-                  ? "..."
-                  : formatBinding(b)}
-              </button>
-            ))}
-            {keymap[action].length < 3 && (
-              <button
-                type="button"
-                onClick={() => {
-                  const next = { ...keymap, [action]: [...keymap[action], { key: "" }] };
-                  onChange(next);
-                  setRecording({ action, index: keymap[action].length });
-                }}
-                className="px-1.5 py-1 text-xs rounded border border-dashed border-input hover:border-primary/50 text-muted-foreground"
-              >
-                +
-              </button>
-            )}
-            {keymap[action].length > 1 && !recording && (
-              <button
-                type="button"
-                onClick={() => onChange({ ...keymap, [action]: keymap[action].slice(0, -1) })}
-                className="px-1.5 py-1 text-xs rounded border border-input hover:border-destructive text-muted-foreground hover:text-destructive"
-              >
-                −
-              </button>
-            )}
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
