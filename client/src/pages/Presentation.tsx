@@ -313,15 +313,32 @@ export default function Presentation() {
     });
   }, [pdf, displaySlide, role]);
 
+  // Mirror a local state change outward: always to other same-browser windows
+  // (BroadcastChannel) and, for synced sessions, to the server (socket). The
+  // channel message `type` and the socket `event` intentionally differ — the
+  // server echoes a *_update broadcast in response to a *_change/control emit.
+  const broadcast = useCallback(
+    (
+      channelMsg: { type: string; payload?: unknown },
+      socketEmit?: { event: string; payload?: unknown }
+    ) => {
+      if (!local && socketEmit) socket.emit(socketEmit.event, socketEmit.payload);
+      channelRef.current?.postMessage(channelMsg);
+    },
+    [local]
+  );
+
   const goTo = useCallback(
     (slide: number) => {
       if (slide < 1 || slide > totalSlides) return;
-      if (!local) socket.emit("slide_change", { slideNumber: slide });
-      channelRef.current?.postMessage({ type: "slide_update", payload: { slideNumber: slide } });
+      broadcast(
+        { type: "slide_update", payload: { slideNumber: slide } },
+        { event: "slide_change", payload: { slideNumber: slide } }
+      );
       setCurrentSlide(slide);
       setMediaState({ id: null, action: "pause", seq: Date.now() });
     },
-    [totalSlides, local]
+    [totalSlides, broadcast]
   );
 
   const viewerGoTo = useCallback(
@@ -351,11 +368,13 @@ export default function Presentation() {
   const onMediaControl = useCallback(
     (id: string, action: "play" | "pause" | "reset") => {
       const next: MediaState = { id, action, seq: Date.now() };
-      if (!local) socket.emit("media_control", { id, action });
-      channelRef.current?.postMessage({ type: "media_update", payload: next });
+      broadcast(
+        { type: "media_update", payload: next },
+        { event: "media_control", payload: { id, action } }
+      );
       setMediaState(next);
     },
-    [local]
+    [broadcast]
   );
 
   const onMediaTime = useCallback(
@@ -377,11 +396,13 @@ export default function Presentation() {
   const onAudioChange = useCallback(
     (next: { muted: boolean; target: AudioState["target"] }) => {
       const payload: AudioState = { ...next, seq: Date.now() };
-      if (!local) socket.emit("audio_change", next);
-      channelRef.current?.postMessage({ type: "audio_update", payload });
+      broadcast(
+        { type: "audio_update", payload },
+        { event: "audio_change", payload: next }
+      );
       setAudioState(payload);
     },
-    [local]
+    [broadcast]
   );
 
   const effectiveMuted = isMutedForRole(role === "controller" ? "controller" : "viewer", audioState);
@@ -470,8 +491,10 @@ export default function Presentation() {
       settings={settings}
       onSettingsChange={(s) => {
         setSettings(s);
-        if (!local) socket.emit("settings_change", s);
-        channelRef.current?.postMessage({ type: "settings_update", payload: s });
+        broadcast(
+          { type: "settings_update", payload: s },
+          { event: "settings_change", payload: s }
+        );
       }}
       startedAt={startedAt}
       blanked={blanked}
@@ -480,8 +503,7 @@ export default function Presentation() {
         // Server mode learns the new state from the socket echo; local mode has
         // no echo (BroadcastChannel doesn't deliver to the sender), so set it here.
         if (local) setBlanked(next);
-        else socket.emit("blank_toggle");
-        channelRef.current?.postMessage({ type: "blank_update", payload: { blanked: next } });
+        broadcast({ type: "blank_update", payload: { blanked: next } }, { event: "blank_toggle" });
       }}
       mediaPlacements={currentMedia}
       mediaBySlide={mediaPlacements}
