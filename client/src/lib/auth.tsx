@@ -1,13 +1,21 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { Session } from "@supabase/supabase-js";
+import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { AuthContext, type AuthContextValue } from "@/lib/useAuth";
 
+// Dev-only: set VITE_DEV_USER (e.g. "dev@example.com") to start signed in as a
+// fake user. Lets us exercise the logged-in UI without a real Supabase session.
+const devUser: User | null =
+  import.meta.env.DEV && import.meta.env.VITE_DEV_USER
+    ? ({ id: "dev-user", email: import.meta.env.VITE_DEV_USER } as User)
+    : null;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!devUser);
 
   useEffect(() => {
+    if (devUser) return;
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setLoading(false);
@@ -19,7 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value: AuthContextValue = {
-    user: session?.user ?? null,
+    user: devUser ?? session?.user ?? null,
     session,
     loading,
     signInWithGitHub: async (redirectTo) => {

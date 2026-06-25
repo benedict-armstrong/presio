@@ -25,6 +25,10 @@ export async function loadPdf(url: string): Promise<PDFDocumentProxy> {
   return getDocument(url).promise;
 }
 
+export async function loadPdfData(data: Uint8Array): Promise<PDFDocumentProxy> {
+  return getDocument({ data }).promise;
+}
+
 // Cap the rendered canvas width (device pixels). Beyond ~4K wide there's no
 // visible gain and we risk hitting browser canvas-size limits / memory.
 const MAX_CANVAS_WIDTH = 4096;

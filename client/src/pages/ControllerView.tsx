@@ -1,19 +1,18 @@
-import { useState, useEffect, useCallback, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { cn, getSessionAuth } from "@/lib/utils";
-import { Settings, Check, Option, Plus, Share2, ExternalLink, X } from "lucide-react";
+import { Settings, Check, Option, Plus, Share2, ExternalLink } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
-import { SessionQRCode } from "@/components/SessionQRCode";
 import { CopyField } from "@/components/CopyField";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { LoginDialog } from "@/components/LoginDialog";
 import { AccountControl } from "@/components/AccountControl";
-import { SyncShareOverlay } from "@/components/SyncShareOverlay";
 import { ControllerOnboarding } from "@/components/ControllerOnboarding";
+import { PresentationTimer } from "@/components/PresentationTimer";
+import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
 import { hasCompletedControllerOnboarding } from "@/lib/onboarding";
 import { useAuth } from "@/lib/useAuth";
 import { useClaim } from "@/lib/useClaim";
@@ -23,8 +22,13 @@ import { SpeakerNotesCard } from "@/components/controller/SpeakerNotesCard";
 import { ThumbnailsCard } from "@/components/controller/ThumbnailsCard";
 import { TimerCard, TimerAction, TimerSettingsDialog } from "@/components/controller/TimerCard";
 import { ShortcutsEditor } from "@/components/controller/ShortcutsEditor";
-import { MobileControllerLayout } from "@/components/controller/MobileControllerLayout";
-import { PresioLogo } from "@/components/PresioLogo";
+import { ControllerHeader } from "@/components/controller/ControllerHeader";
+import { ControllerNav } from "@/components/controller/ControllerNav";
+import { ControllerMenu } from "@/components/controller/ControllerMenu";
+import { ControllerDashboard, type CardEntry } from "@/components/controller/ControllerDashboard";
+import { ControllerStack } from "@/components/controller/ControllerStack";
+import { ShareDialog } from "@/components/controller/ShareDialog";
+import { ConfirmEndDialog } from "@/components/controller/ConfirmEndDialog";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   DEFAULT_KEYMAP,
@@ -46,13 +50,11 @@ import {
   removeLeaf,
   visibleKeys,
 } from "@/lib/controllerLayout";
-import { Mosaic, MosaicWindow, type MosaicNode } from "react-mosaic-component";
-import "react-mosaic-component/react-mosaic-component.css";
-import "./controllerMosaic.css";
+import { lsGetString, lsSetString, viewerOpenedKey } from "@/lib/storage";
+import { type MosaicNode } from "react-mosaic-component";
 import type { PresentationSettings } from "./Presentation";
 import type { MediaState, AudioState } from "@/components/MediaOverlay";
 import type { MediaPlacement } from "@/lib/pdf";
-import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
 
 // --- Component ---
 
@@ -67,6 +69,7 @@ interface ControllerViewProps {
   onSyncAll: () => void;
   onEnd: () => void;
   onSynced: () => void;
+  onSaveNotes: (slide: number, notes: string) => Promise<void>;
   currentCanvasRef: React.RefObject<HTMLDivElement | null>;
   settings: PresentationSettings;
   onSettingsChange: (settings: PresentationSettings) => void;
@@ -95,6 +98,7 @@ export function ControllerView({
   onSyncAll,
   onEnd,
   onSynced,
+  onSaveNotes,
   currentCanvasRef,
   settings,
   onSettingsChange,
@@ -111,6 +115,7 @@ export function ControllerView({
   onAudioChange,
 }: ControllerViewProps) {
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -119,6 +124,9 @@ export function ControllerView({
   const [viewerBlocked, setViewerBlocked] = useState(false);
   const [viewerPromptOpen, setViewerPromptOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
+  // Mobile-only surfaces.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [passphraseDialogOpen, setPassphraseDialogOpen] = useState(false);
   // First-run tutorial for the controller. Shown before the viewer prompt.
   const [onboardingOpen, setOnboardingOpen] = useState(() => !hasCompletedControllerOnboarding());
 
@@ -135,6 +143,9 @@ export function ControllerView({
   // controller and avoids popup blockers.
   useEffect(() => {
     if (isMobile || onboardingOpen) return;
+    // Only prompt if the presenter hasn't already opened a viewer for this
+    // presentation (the flag survives controller refreshes).
+    if (lsGetString(viewerOpenedKey(id)) === "true") return;
     // One-time mount prompt (re-armed when onboarding finishes); the single
     // extra render the rule warns about is intentional and harmless here.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -213,11 +224,14 @@ export function ControllerView({
     const features = "popup,width=1280,height=800";
     const w = window.open(viewerUrl, `presio-viewer-${id}`, features);
     setViewerBlocked(!w);
-    if (w) setViewerPromptOpen(false);
+    if (w) {
+      lsSetString(viewerOpenedKey(id), "true");
+      setViewerPromptOpen(false);
+    }
   };
 
-  // Card content + optional action for each key
-  const cardContent: Record<string, { content: ReactNode; action?: ReactNode }> = {
+  // Desktop dashboard card content + optional toolbar action for each key.
+  const cardContent: Record<string, CardEntry> = {
     currentSlide: {
       content: (
         <CurrentSlideCard
@@ -241,198 +255,165 @@ export function ControllerView({
       action: <TimerAction open={timerSettingsOpen} onToggle={() => setTimerSettingsOpen(!timerSettingsOpen)} />,
     },
     notes: {
-      content: <SpeakerNotesCard pdf={pdf} currentSlide={currentSlide} />,
+      content: (
+        <SpeakerNotesCard
+          pdf={pdf}
+          currentSlide={currentSlide}
+          editable={loggedIn}
+          onSave={onSaveNotes}
+          onRequestLogin={() => setLoginOpen(true)}
+        />
+      ),
     },
     thumbnails: {
       content: <ThumbnailsCard pdf={pdf} totalSlides={totalSlides} currentSlide={currentSlide} onGoTo={onGoTo} mediaBySlide={mediaBySlide} />,
     },
   };
 
-  if (isMobile) {
-    return (
-      <MobileControllerLayout
-        id={id}
-        local={local}
-        pdfUrl={pdfUrl}
-        pdf={pdf}
-        currentSlide={currentSlide}
-        totalSlides={totalSlides}
-        onGoTo={onGoTo}
-        onSyncAll={onSyncAll}
-        currentCanvasRef={currentCanvasRef}
-        settings={settings}
-        startedAt={startedAt}
-        passphrase={passphrase}
-      />
-    );
-  }
+  const desktopActions = (
+    <>
+      <button
+        type="button"
+        onClick={() => setSettingsOpen(true)}
+        title="Settings"
+        className="inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+      >
+        <Settings size={15} />
+      </button>
+      <ThemeToggle />
+      <span className="text-muted-foreground/40">|</span>
+      <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-foreground" onClick={() => setShareDialogOpen(true)}>
+        Share
+        <Share2 size={12} className="inline ml-1" />
+      </Button>
+      <span className="text-muted-foreground/40">|</span>
+      <button
+        type="button"
+        onClick={openViewer}
+        title={viewerBlocked ? "Viewer window blocked — click to open it" : "Open viewer window"}
+        className={`inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-semibold rounded-md transition-colors ${viewerBlocked
+          ? "text-amber-500 bg-amber-500/10 hover:bg-amber-500/20"
+          : "text-foreground hover:bg-accent"
+          }`}
+      >
+        <ExternalLink size={15} />
+        Open Viewer
+      </button>
+    </>
+  );
+
+  const mobileActions = (
+    <ControllerMenu
+      open={menuOpen}
+      onOpen={() => setMenuOpen(true)}
+      onClose={() => setMenuOpen(false)}
+      pdf={pdf}
+      pdfUrl={pdfUrl}
+      hasPassphrase={!!passphrase}
+      onShare={() => setShareDialogOpen(true)}
+      onShowPassphrase={() => setPassphraseDialogOpen(true)}
+      onSwitchToViewer={() => navigate(`/s/${id}?role=viewer`, { replace: true })}
+      onEndClick={() => setConfirmEnd(true)}
+    />
+  );
 
   return (
-    <div className="h-screen bg-background flex flex-col">
-      <div className="border-b px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link to="/" className="flex items-center gap-1.5 text-sm font-semibold hover:text-muted-foreground transition-colors">
-            <PresioLogo className="h-4 w-auto" />
-            Presio
-          </Link>
-          <span className="text-muted-foreground/40">|</span>
-          {!local && (
-            <>
-              <span className="text-xs text-muted-foreground">Code:</span>
-              <span className="font-mono font-bold tracking-widest select-all">{id}</span>
-            </>
-          )}
-          <ConnectionIndicator local={local} />
-          {local && <span className="text-xs font-medium text-amber-600 dark:text-amber-500">Local</span>}
-          {blanked && (
-            <span className="text-xs font-medium text-destructive px-1.5 py-0.5 rounded bg-destructive/10">
-              Blanked
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            title="Settings"
-            className="inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          >
-            <Settings size={15} />
-          </button>
-          <ThemeToggle />
-          <span className="text-muted-foreground/40">|</span>
-          <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-foreground" onClick={() => setShareDialogOpen(true)}>
-            Share
-            <Share2 size={12} className="inline ml-1" />
-          </Button>
-          <span className="text-muted-foreground/40">|</span>
-          <button
-            type="button"
-            onClick={openViewer}
-            title={viewerBlocked ? "Viewer window blocked — click to open it" : "Open viewer window"}
-            className={`inline-flex items-center gap-1.5 h-8 px-2.5 text-sm font-semibold rounded-md transition-colors ${viewerBlocked
-              ? "text-amber-500 bg-amber-500/10 hover:bg-amber-500/20"
-              : "text-foreground hover:bg-accent"
-              }`}
-          >
-            <ExternalLink size={15} />
-            Open Viewer
-          </button>
-        </div>
-      </div>
+    <div className={cn("bg-background flex flex-col", isMobile ? "h-dvh" : "h-screen")}>
+      <ControllerHeader
+        id={id}
+        local={local}
+        blanked={blanked}
+        compact={isMobile}
+        actions={isMobile ? mobileActions : desktopActions}
+      />
 
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <Mosaic<string>
-          className="controller-mosaic"
+      {isMobile ? (
+        <ControllerStack
+          pdf={pdf}
+          currentSlide={currentSlide}
+          totalSlides={totalSlides}
+          currentCanvasRef={currentCanvasRef}
+        />
+      ) : (
+        <ControllerDashboard
           value={mosaic}
           onChange={onMosaicChange}
-          renderTile={(key, path) => (
-            <MosaicWindow<string>
-              path={path}
-              title={CARD_LABELS[key]}
-              renderToolbar={() => (
-                <div className="flex items-center justify-between w-full px-3 py-1.5 cursor-move select-none">
-                  <span className="text-xs text-muted-foreground font-semibold">{CARD_LABELS[key]}</span>
-                  <div className="flex items-center gap-1">
-                    {cardContent[key].action}
-                    <button
-                      type="button"
-                      onClick={() => toggleCard(key)}
-                      title="Hide card"
-                      className="inline-flex items-center justify-center h-5 w-5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
-                </div>
-              )}
-            >
-              <div className="h-full flex flex-col p-3 pt-1">
-                <div className="flex-1 min-h-0">{cardContent[key].content}</div>
-              </div>
-            </MosaicWindow>
-          )}
-          zeroStateView={
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              All cards hidden — enable them in Settings.
-            </div>
-          }
+          cards={cardContent}
+          onHideCard={toggleCard}
         />
-      </div>
+      )}
 
-      <div className="border-t p-4 flex items-center justify-center gap-4 shrink-0">
-        <Button
-          variant="outline"
-          onClick={() => onGoTo(currentSlide - 1)}
-          disabled={currentSlide <= 1}
-        >
-          Previous
-        </Button>
-        <span className="text-sm font-medium tabular-nums">
-          {currentSlide} / {totalSlides}
-        </span>
-        <Button
-          variant="outline"
-          onClick={() => onGoTo(currentSlide + 1)}
-          disabled={currentSlide >= totalSlides}
-        >
-          Next
-        </Button>
-        {!local && (
-          <Button variant="ghost" size="sm" onClick={onSyncAll} title="Bring all viewers back to the current slide">
-            Sync All
-          </Button>
-        )}
-        <div className="ml-auto flex items-center gap-2">
-          {pdfUrl && (
-            <Button variant="ghost" size="sm" asChild>
-              <a href={pdfUrl} download>
-                Download PDF
-              </a>
+      {isMobile ? (
+        <div className="border-t px-3 py-3 space-y-2">
+          <div className="flex items-center justify-center gap-3">
+            <PresentationTimer
+              mode={settings.timerMode}
+              duration={settings.timerDuration}
+              threshold={settings.timerThreshold}
+              startedAt={startedAt}
+              className="text-xs font-medium"
+            />
+            <p className="text-center text-xs text-muted-foreground tabular-nums">
+              {currentSlide} / {totalSlides}
+            </p>
+            {!local && (
+              <Button variant="ghost" size="sm" onClick={onSyncAll}>
+                Sync All
+              </Button>
+            )}
+          </div>
+          <ControllerNav
+            size="lg"
+            showCount={false}
+            currentSlide={currentSlide}
+            totalSlides={totalSlides}
+            onGoTo={onGoTo}
+            className="gap-2"
+          />
+        </div>
+      ) : (
+        <div className="border-t p-4 flex items-center justify-center gap-4 shrink-0">
+          <ControllerNav
+            className="gap-4"
+            currentSlide={currentSlide}
+            totalSlides={totalSlides}
+            onGoTo={onGoTo}
+          />
+          {!local && (
+            <Button variant="ghost" size="sm" onClick={onSyncAll} title="Bring all viewers back to the current slide">
+              Sync All
             </Button>
           )}
-          <DownloadStrippedButton pdf={pdf} pdfUrl={pdfUrl} />
-          <Button variant="destructive" size="sm" onClick={() => setConfirmEnd(true)}>
-            End Presentation
-          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            {pdfUrl && (
+              <Button variant="ghost" size="sm" asChild>
+                <a href={pdfUrl} download>
+                  Download PDF
+                </a>
+              </Button>
+            )}
+            <DownloadStrippedButton pdf={pdf} pdfUrl={pdfUrl} />
+            <Button variant="destructive" size="sm" onClick={() => setConfirmEnd(true)}>
+              End Presentation
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {shareDialogOpen && (
-        <DialogOverlay onClose={() => setShareDialogOpen(false)} maxWidth="max-w-[50%]">
-          {local ? (
-            <>
-              <p className="text-sm text-muted-foreground text-center">
-                This presentation is local to this browser. Sync it online to let
-                viewers join from any device.
-              </p>
-              <br />
-              <br />
-              <SyncShareOverlay
-                id={id}
-                viewerUrl={viewerUrl}
-                loggedIn={loggedIn}
-                syncing={syncing}
-                syncError={syncError}
-                onLogin={() => setLoginOpen(true)}
-                onSync={syncOnline}
-              />
-            </>
-          ) : (
-            <>
-              <SessionQRCode sessionId={id} />
-              <div className="space-y-2">
-                <CopyField label="Viewer link" value={viewerUrl} />
-                <CopyField label="Controller link" value={controllerUrl} />
-              </div>
-            </>
-          )}
-          <br />
-          <br />
-          <Button className="w-full" variant="ghost" onClick={() => setShareDialogOpen(false)}>
-            Close
-          </Button>
-        </DialogOverlay>
+        <ShareDialog
+          id={id}
+          viewerUrl={viewerUrl}
+          controllerUrl={controllerUrl}
+          local={local}
+          loggedIn={loggedIn}
+          syncing={syncing}
+          syncError={syncError}
+          onLogin={() => setLoginOpen(true)}
+          onSync={syncOnline}
+          onClose={() => setShareDialogOpen(false)}
+          maxWidth={isMobile ? "max-w-[90%]" : "max-w-[50%]"}
+        />
       )}
 
       {loginOpen && <LoginDialog onClose={() => setLoginOpen(false)} />}
@@ -525,31 +506,28 @@ export function ControllerView({
       )}
 
       {confirmEnd && (
-        <DialogOverlay onClose={() => setConfirmEnd(false)}>
-          <div className="space-y-2 text-center">
-            <h2 className="text-lg font-semibold">End Presentation?</h2>
-            <p className="text-sm text-muted-foreground">
-              {local
-                ? "This will close the viewer window and delete the presentation from this browser. This action cannot be undone."
-                : "This will disconnect all viewers and permanently delete the presentation. This action cannot be undone."}
+        <ConfirmEndDialog local={local} onConfirm={onEnd} onClose={() => setConfirmEnd(false)} />
+      )}
+
+      {passphraseDialogOpen && passphrase && (
+        <DialogOverlay onClose={() => setPassphraseDialogOpen(false)} maxWidth="max-w-xs">
+          <div className="text-center space-y-3">
+            <h2 className="text-lg font-semibold">Controller Passphrase</h2>
+            <p className="text-xs text-muted-foreground">
+              Share this passphrase to grant controller access
             </p>
+            <p className="text-2xl font-bold tracking-widest font-mono select-all">
+              {passphrase}
+            </p>
+            <CopyField label="" value={passphrase} />
           </div>
-          <div className="flex gap-2">
-            <Button className="flex-1" variant="outline" onClick={() => setConfirmEnd(false)}>
-              Cancel
-            </Button>
-            <Button
-              className="flex-1"
-              variant="destructive"
-              onClick={onEnd}
-            >
-              End Presentation
-            </Button>
-          </div>
+          <Button className="w-full" variant="ghost" onClick={() => setPassphraseDialogOpen(false)}>
+            Close
+          </Button>
         </DialogOverlay>
       )}
 
-      {viewerPromptOpen && (
+      {!isMobile && viewerPromptOpen && (
         <DialogOverlay onClose={() => setViewerPromptOpen(false)}>
           <div className="flex flex-col items-center gap-4 text-center">
             <p className="text-xs text-muted-foreground">
@@ -582,7 +560,7 @@ export function ControllerView({
         </DialogOverlay>
       )}
 
-      {onboardingOpen && (
+      {!isMobile && onboardingOpen && (
         <ControllerOnboarding
           onClose={() => setOnboardingOpen(false)}
           onOpenViewer={openViewer}

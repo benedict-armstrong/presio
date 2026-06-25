@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { nanoid, customAlphabet } from "nanoid";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { isValidHttpsUrl } from "../validation.js";
-import { getBearerToken, resolveOptionalUserId } from "../auth.js";
+import { getBearerToken, resolveOptionalUserId, requireUser } from "../auth.js";
 
 export interface RouteDeps {
   supabase: SupabaseClient;
@@ -200,6 +200,56 @@ export function registerSessionRoutes(app: express.Express, { supabase, io }: Ro
         controllerToken: row.controller_token,
         passphrase: row.passphrase,
       });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Replace a synced presentation's PDF — used to persist edited speaker notes,
+  // which are written back into the PDF as embedded-file sidecars by the client.
+  // Only the authenticated owner may overwrite the stored file.
+  app.post("/api/sessions/:id/pdf", upload.single("pdf"), async (req, res) => {
+    try {
+      const user = await requireUser(supabase, req);
+      if (!user) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+
+      const file = req.file;
+      if (!file || file.mimetype !== "application/pdf") {
+        res.status(400).json({ error: "A PDF file is required" });
+        return;
+      }
+
+      const { data: row, error: rowError } = await supabase
+        .from("sessions")
+        .select("id, local, pdf_path, user_id")
+        .eq("id", req.params.id)
+        .single();
+      if (rowError || !row) {
+        res.status(404).json({ error: "Session not found" });
+        return;
+      }
+      if (row.user_id !== user.id) {
+        res.status(403).json({ error: "Not authorized" });
+        return;
+      }
+      if (row.local || !row.pdf_path) {
+        res.status(400).json({ error: "This presentation's PDF is not hosted on the server" });
+        return;
+      }
+
+      const { error: uploadError } = await supabase.storage
+        .from("presentations")
+        .upload(row.pdf_path, file.buffer, { contentType: "application/pdf", upsert: true });
+      if (uploadError) {
+        res.status(500).json({ error: "Failed to save PDF" });
+        return;
+      }
+
+      res.json({ ok: true });
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: "Internal server error" });

@@ -1,12 +1,14 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useSearchParams, useNavigate, Link } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { loadPdf, renderPage, clearCache, loadMediaPlacements, type MediaPlacement } from "@/lib/pdf";
+import { loadPdf, loadPdfData, renderPage, clearCache, loadMediaPlacements, type MediaPlacement } from "@/lib/pdf";
+import { setSlideNotes } from "@/lib/notesAttach";
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
 import { socket } from "@/lib/socket";
 import { startClockSync } from "@/lib/clock";
+import { supabase } from "@/lib/supabaseClient";
 import { getSessionAuth, endSession } from "@/lib/utils";
-import { idbGet, idbDelete } from "@/lib/localStore";
+import { idbGet, idbPut, idbDelete } from "@/lib/localStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ControllerView } from "./ControllerView";
@@ -51,6 +53,8 @@ export default function Presentation() {
 
   const currentCanvasRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
+  // Object URL backing a local session's PDF, swapped when notes are edited.
+  const localUrlRef = useRef("");
   // Latest broadcastable state, for replying to a local window's state_request
   // without re-subscribing the channel on every slide change.
   const stateRef = useRef({ currentSlide: 1, totalSlides: 0, blanked: false, settings: defaultSettings });
@@ -79,6 +83,7 @@ export default function Presentation() {
           if (cancelled) return;
           setLocal(true);
           localUrl = URL.createObjectURL(rec.blob);
+          localUrlRef.current = localUrl;
           const doc = await loadPdf(localUrl);
           if (cancelled) return;
           setPdfUrl(localUrl);
@@ -125,7 +130,7 @@ export default function Presentation() {
     return () => {
       cancelled = true;
       clearCache();
-      if (localUrl) URL.revokeObjectURL(localUrl);
+      if (localUrlRef.current) URL.revokeObjectURL(localUrlRef.current);
     };
   }, [id]);
 
@@ -365,6 +370,54 @@ export default function Presentation() {
     navigate("/", { replace: true });
   }, [local, id, navigate]);
 
+  // Persist edited speaker notes by writing them back into the PDF as a JSON
+  // sidecar (matching presio's format), then swap in the updated document so
+  // further edits build on it. Local sessions update IndexedDB; synced ones
+  // re-upload to the owner's stored PDF.
+  const saveNotes = useCallback(
+    async (slide: number, text: string) => {
+      if (!pdf) return;
+      const original = await pdf.getData();
+      const updated = await setSlideNotes(original, slide, text);
+      // Coerce to a plain ArrayBuffer slice so Blob's BlobPart typing is happy.
+      const buf = updated.buffer.slice(
+        updated.byteOffset,
+        updated.byteOffset + updated.byteLength
+      ) as ArrayBuffer;
+      const blob = new Blob([buf], { type: "application/pdf" });
+
+      if (local) {
+        const rec = await idbGet(id!);
+        if (rec) await idbPut({ ...rec, blob });
+      } else {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        if (!token) throw new Error("Please log in again");
+        const form = new FormData();
+        form.append("pdf", blob, `${filename || "presentation"}.pdf`);
+        const res = await fetch(`/api/sessions/${id}/pdf`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || "Failed to save notes");
+        }
+      }
+
+      const doc = await loadPdfData(updated);
+      setPdf(doc);
+      if (local) {
+        const url = URL.createObjectURL(blob);
+        if (localUrlRef.current) URL.revokeObjectURL(localUrlRef.current);
+        localUrlRef.current = url;
+        setPdfUrl(url);
+      }
+    },
+    [pdf, local, id, filename]
+  );
+
   const onMediaControl = useCallback(
     (id: string, action: "play" | "pause" | "reset") => {
       const next: MediaState = { id, action, seq: Date.now() };
@@ -487,6 +540,7 @@ export default function Presentation() {
       onSyncAll={syncAll}
       onEnd={endPresentation}
       onSynced={() => setLocal(false)}
+      onSaveNotes={saveNotes}
       currentCanvasRef={currentCanvasRef}
       settings={settings}
       onSettingsChange={(s) => {

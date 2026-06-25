@@ -20,6 +20,7 @@ export const STORAGE_KEYS = {
 
 export const timerKey = (id: string) => `presio_timer_${id}`;
 export const sessionKey = (id: string) => `session_${id}`;
+export const viewerOpenedKey = (id: string) => `presio_viewer_opened_${id}`;
 
 /** Read and JSON-parse a value, returning `fallback` if absent or malformed. */
 export function lsGet<T>(key: string, fallback: T): T {
