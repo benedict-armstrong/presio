@@ -2,6 +2,8 @@
 
 Upload a PDF presentation, get a short link, and control the slideshow from one browser window while viewers watch in another.
 
+![Demo](example/diagram.png)
+
 ## Prerequisites
 
 - Node.js 20+
