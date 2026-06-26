@@ -677,6 +677,7 @@ services:
       args:
         VITE_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
         VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY: ${ANON_KEY}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
     restart: unless-stopped
     networks:
       default:
@@ -692,6 +693,8 @@ services:
       PORT: 3001
       ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
       ANALYTICS_URL: ${ANALYTICS_URL:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
     # Ingress via the shared Traefik proxy (no host ports). Routes the app domain
     # to the Express/Socket.IO server on port 3001 (websockets pass through).
     labels:
@@ -747,6 +750,26 @@ services:
       - "traefik.http.routers.umami.tls.certresolver=le"
       - "traefik.http.services.umami.loadbalancer.server.port=3000"
 
+  # Uptime Kuma — self-hosted uptime monitoring + status dashboard.
+  # After first boot: visit https://${UPTIME_HOST}, create the admin account,
+  # then add an HTTP(s) monitor pointing at https://${APP_HOST}/healthz.
+  uptime-kuma:
+    container_name: presio-uptime-kuma
+    image: louislam/uptime-kuma:1
+    restart: unless-stopped
+    networks:
+      default:
+      web:
+    volumes:
+      - uptime-kuma-data:/app/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.uptime.rule=Host(`${UPTIME_HOST}`)"
+      - "traefik.http.routers.uptime.entrypoints=websecure"
+      - "traefik.http.routers.uptime.tls.certresolver=le"
+      - "traefik.http.services.uptime.loadbalancer.server.port=3001"
+
 networks:
   # Internal network for the Supabase services to talk to each other.
   default:
@@ -758,3 +781,4 @@ volumes:
   db-config:
   deno-cache:
   minio-data:
+  uptime-kuma-data:

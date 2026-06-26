@@ -22,7 +22,11 @@ function copyCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
 }
 
 export async function loadPdf(url: string): Promise<PDFDocumentProxy> {
-  return getDocument(url).promise;
+  // Fetch the whole file in one request rather than letting pdf.js stream it
+  // with HTTP range requests. Mobile Safari/iOS mishandles cross-origin 206
+  // Partial Content responses, so range-loaded PDFs that work on desktop fail
+  // on iOS. Presentations are small, so a single GET is cheap and robust.
+  return getDocument({ url, disableRange: true, disableStream: true }).promise;
 }
 
 export async function loadPdfData(data: Uint8Array): Promise<PDFDocumentProxy> {

@@ -3,11 +3,12 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch index.ts",
-    "start": "tsx index.ts",
+    "dev": "tsx watch --import ./instrument.ts index.ts",
+    "start": "tsx --import ./instrument.ts index.ts",
     "test": "vitest run"
   },
   "dependencies": {
+    "@sentry/node": "^10.61.0",
     "@supabase/supabase-js": "^2.99.1",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",

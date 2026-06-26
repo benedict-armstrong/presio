@@ -1,131 +1,50 @@
 # Presio
 
+Try it at [presio.xyz](https://presio.xyz)
+
 Upload a PDF presentation, get a short link, and control the slideshow from one browser window while viewers watch in another.
 
 ![Demo](https://github.com/benedict-armstrong/presio/releases/download/demo/presio.gif)
 
 ![Demo](example/diagram.png)
 
-## Prerequisites
+## Features
 
-- Node.js 20+
-- A Supabase backend — either a hosted [Supabase](https://supabase.com) project
-  or the self-hosted stack in [`deploy/`](deploy/README.md) (Postgres + Auth +
-  Storage). Presio talks to it only through env-configured URLs/keys, so either
-  works.
+- **Local by default** — your PDF stays in the browser and is never uploaded. Works offline; local presentations are kept for up to 7 days.
+- **Controller + viewer** — drive slides from the controller window while a viewer window mirrors it, kept perfectly in sync.
+- **Present across devices** — log in and sync online to get a 6-character session code. Viewers enter it on the home page and follow along live over WebSockets.
+- **Shared control** — hand out a controller passphrase to let someone else drive.
+- **Speaker notes** — written next to your current and next slide, rendered as markdown.
+- **Embedded media** — local videos and GIFs, direct video URLs, and YouTube/Vimeo. Playback, autoplay, and seeking all stay in sync with viewers.
+- **Presentation timer** — track how long you've been talking.
+- **Customizable controller** — rearrange the layout and remap keyboard shortcuts.
+- **Recent presentations** — pick up where you left off from the home page.
+- **Download** — anyone can grab the PDF from the presentation view.
 
-## Backend setup
+## Adding videos and speaker notes
 
-Whichever backend you use, it must have:
+The easiest way to attach videos and speaker notes is the [Presio Typst package](https://github.com/benedict-armstrong/presio-typst-package):
 
-1. The `sessions` table and `presentations` storage bucket from `dbschema.sql`.
-   - Hosted: run `dbschema.sql` in the Supabase SQL editor.
-   - Self-hosted: applied automatically on first boot — see
-     [`deploy/README.md`](deploy/README.md).
-2. **Auth** configured (for logging in / sharing presentations online):
-   - Email/password enabled (optionally auto-confirm for dev).
-   - GitHub: a GitHub OAuth App with callback
-     `https://<your-supabase-host>/auth/v1/callback`, its client id/secret set
-     on the auth provider.
-   - App origins (e.g. `http://localhost:5173` and your production origin) added
-     to the auth **Redirect URLs** so the OAuth round-trip can return to the
-     share screen.
+```typst
+#import "@preview/presio:0.2.1": media, speaker-notes
 
-## Deployment (self-hosting)
+= Introduction
 
-The root [`docker-compose.yml`](docker-compose.yml) runs the whole thing — the
-Presio app, a pinned self-hosted Supabase stack, and MinIO (S3 storage backend) —
-behind a shared [Traefik](proxy/) reverse proxy that handles TLS. In short:
+Hello world.
+
+#speaker-notes[
+  Remember to mention the demo before moving on.
+]
+
+#media("https://www.youtube.com/watch?v=dQw4w9WgXcQ", width: 60%, aspect-ratio: 16/9)
+```
+
+Presio reads the attached media and notes from the PDF automatically. Notes can also be embedded by hand from plain Typst or LaTeX — see the in-app [About page](https://presio.xyz/about) for details.
+
+## Development
 
 ```bash
-docker network create web                 # once per host
-(cd proxy && cp .env.example .env && docker compose up -d)   # shared proxy
-cp deploy/.env.example .env && docker compose up -d --build  # the stack
+npm run build    # install deps and build client + server
+npm start        # start the server
+npm run test:e2e # run Playwright end-to-end tests
 ```
-
-All settings live in the root `.env` (copied from `deploy/.env.example`). See
-**[`deploy/README.md`](deploy/README.md)** for the full walkthrough, including
-how to host other apps behind the same proxy.
-
-## Environment Variables
-
-**Server** (`server/.env`):
-
-```
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-PORT=3001
-```
-
-**Client** (`client/.env`):
-
-```
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY=your-publishable-key
-```
-
-## Running Locally
-
-```bash
-# Terminal 1 - Server
-cd server
-cp .env.example .env   # fill in your Supabase credentials
-npm run dev
-
-# Terminal 2 - Client
-cd client
-npm run dev
-```
-
-The client dev server proxies `/api` and `/socket.io` requests to the server on port 3001.
-
-## Usage
-
-1. Open `http://localhost:5173`
-2. Drop a PDF file onto the upload zone
-3. Copy the **Controller** link and open it in one window
-4. Copy the **Viewer** link and open it in another window (or send to another device)
-5. Use the Previous/Next buttons (or arrow keys) in the controller to navigate slides
-
-Presentations automatically expire after 24 hours.
-
-## Modes
-
-- **Local (default):** the PDF never leaves your browser. It's stored in
-  IndexedDB and shared across tabs/windows on the same device via
-  `BroadcastChannel` — no upload. A session code is reserved on the server (marked
-  `local`) but no PDF is stored. Opening a presentation auto-opens a viewer window.
-  Local presentations can't be joined from another device. They auto-expire after 7
-  days (or on "End Presentation").
-- **Synced:** log in (GitHub or email/password), then on the share screen choose
-  **Sync online to share**. This uploads the PDF to Supabase and attaches it to your
-  account, keeping the same code — viewers can now join from any device by code/QR.
-  Logging in by itself never uploads anything; syncing is always an explicit opt-in.
-- **External (bring your own storage):** paste a PDF URL you host yourself (e.g. a
-  GitHub raw or Pages link) — on the home screen, or via **Host it yourself** on the
-  share screen to convert a local presentation in place. Presio stores only the URL,
-  never the bytes, so this needs **no login** and unlocks the same join-from-any-device
-  features as Synced. The PDF is fetched directly by each viewer's browser, so the URL
-  must be publicly reachable and serve permissive CORS headers (GitHub raw/Pages do).
-
-  You can also start straight from a link without visiting the home screen:
-
-  ```txt
-  https://presio.xyz/present?from=<url-to-pdf>
-  ```
-
-  This creates an External session from the PDF and drops you into the controller.
-  GitHub `blob` links work too — they're normalized to `raw.githubusercontent.com`
-  automatically. For example:
-
-> **Note on synced PDF privacy:** uploaded PDFs are stored in a public Supabase
-> bucket so viewers can fetch them by URL. This means a synced presentation is
-> readable by anyone who knows or guesses its session code. Don't sync
-> confidential material — keep it in Local mode instead.
-
-## TODO
-
-- [ ] Users should be able to generate a perma link and qr code that they can put on the presentation.
-- [ ] Add a button to toggle all viewers to show the join code and QR code.
-- [ ] In addition to blanking the screen it should also be possible to show the join code (hotkey).
-- [x] Add support for bringing your own PDF host?

@@ -44,10 +44,14 @@ export async function loadExternalPdfMeta(rawUrl: string): Promise<ExternalPdfMe
 
   let totalSlides: number;
   try {
-    const doc = await getDocument(url.href).promise;
+    // Single GET, no range/streaming — see loadPdf() for the iOS rationale.
+    const doc = await getDocument({ url: url.href, disableRange: true, disableStream: true }).promise;
     totalSlides = doc.numPages;
     doc.destroy();
-  } catch {
+  } catch (e) {
+    // Surface the real cause (CORS, 404, parse error, iOS range bug) for
+    // debugging; the user still gets the friendly, actionable message.
+    console.error("[present] failed to load external PDF:", e);
     throw new Error(LOAD_ERROR);
   }
 

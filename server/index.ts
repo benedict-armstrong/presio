@@ -1,3 +1,4 @@
+import "./instrument.js"; // must come first — initializes Sentry before other imports
 import "dotenv/config";
 import http from "http";
 import { Server } from "socket.io";
