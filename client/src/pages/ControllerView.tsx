@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { cn, getSessionAuth } from "@/lib/utils";
-import { Settings, Check, Option, Plus, Share2, ExternalLink } from "lucide-react";
+import { Settings, Check, Option, Plus, Share2, ExternalLink, QrCode } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
@@ -76,6 +76,8 @@ interface ControllerViewProps {
   startedAt: number;
   blanked: boolean;
   onBlankToggle: () => void;
+  showCode: boolean;
+  onShowCodeToggle: () => void;
   mediaPlacements: MediaPlacement[];
   /** All slides' media, keyed by slide number — used for thumbnail posters. */
   mediaBySlide: Map<number, MediaPlacement[]>;
@@ -105,6 +107,8 @@ export function ControllerView({
   startedAt,
   blanked,
   onBlankToggle,
+  showCode,
+  onShowCodeToggle,
   mediaPlacements,
   mediaBySlide,
   mediaState,
@@ -182,11 +186,15 @@ export function ControllerView({
         onGoTo(currentSlide - 1);
       } else if (matchesBinding(e, keymap.toggleBlank)) {
         onBlankToggle();
+      } else if (matchesBinding(e, keymap.toggleCode)) {
+        // The join code is only meaningful for synced sessions, which have a
+        // remote audience; local sessions can't be joined elsewhere.
+        if (!local) onShowCodeToggle();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [currentSlide, totalSlides, onGoTo, onBlankToggle, keymap]);
+  }, [currentSlide, totalSlides, onGoTo, onBlankToggle, onShowCodeToggle, local, keymap]);
 
   const onMosaicChange = useCallback((node: MosaicNode<string> | null) => {
     setMosaic(node);
@@ -319,7 +327,10 @@ export function ControllerView({
       pdf={pdf}
       pdfUrl={pdfUrl}
       hasPassphrase={!!passphrase}
+      canShowCode={!local}
+      showingCode={showCode}
       onShare={() => setShareDialogOpen(true)}
+      onToggleCode={onShowCodeToggle}
       onShowPassphrase={() => setPassphraseDialogOpen(true)}
       onSwitchToViewer={() => navigate(`/s/${id}?role=viewer`, { replace: true })}
       onEndClick={() => setConfirmEnd(true)}
@@ -332,6 +343,7 @@ export function ControllerView({
         id={id}
         local={local}
         blanked={blanked}
+        showingCode={showCode && !local}
         compact={isMobile}
         actions={isMobile ? mobileActions : desktopActions}
       />
@@ -391,6 +403,17 @@ export function ControllerView({
           {!local && (
             <Button variant="ghost" size="sm" onClick={onSyncAll} title="Bring all viewers back to the current slide">
               Sync All
+            </Button>
+          )}
+          {!local && (
+            <Button
+              variant={showCode ? "default" : "ghost"}
+              size="sm"
+              onClick={onShowCodeToggle}
+              title="Show the join code & QR on all viewers' screens"
+            >
+              <QrCode size={14} className="mr-1" />
+              {showCode ? "Hide Code" : "Show Code"}
             </Button>
           )}
           <div className="ml-auto flex items-center gap-2">

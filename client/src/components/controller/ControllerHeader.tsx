@@ -11,12 +11,15 @@ export function ControllerHeader({
   id,
   local,
   blanked = false,
+  showingCode = false,
   compact = false,
   actions,
 }: {
   id: string;
   local: boolean;
   blanked?: boolean;
+  /** Whether the join code / QR is currently shown on all viewers. */
+  showingCode?: boolean;
   /** Tighter spacing + bare code (no "Code:" label) for the mobile header. */
   compact?: boolean;
   actions?: ReactNode;
@@ -48,6 +51,11 @@ export function ControllerHeader({
         {blanked && (
           <span className="text-xs font-medium text-destructive px-1.5 py-0.5 rounded bg-destructive/10">
             Blanked
+          </span>
+        )}
+        {showingCode && (
+          <span className="text-xs font-medium text-primary px-1.5 py-0.5 rounded bg-primary/10">
+            Code shown
           </span>
         )}
       </div>

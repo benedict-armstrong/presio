@@ -16,6 +16,8 @@ export const STORAGE_KEYS = {
   controllerMosaic: "presio_controller_mosaic",
   preferredMosaic: "presio_preferred_mosaic",
   controllerOnboarded: "presio_controller_onboarded",
+  // Whether the mobile "best on desktop" notice has been dismissed.
+  mobileNoticeSeen: "presio_mobile_notice_seen",
 } as const;
 
 export const timerKey = (id: string) => `presio_timer_${id}`;

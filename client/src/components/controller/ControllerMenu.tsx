@@ -1,5 +1,5 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { Menu, X } from "lucide-react";
+import { Menu, X, QrCode } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
@@ -14,7 +14,10 @@ export function ControllerMenu({
   pdf,
   pdfUrl,
   hasPassphrase,
+  canShowCode,
+  showingCode,
   onShare,
+  onToggleCode,
   onShowPassphrase,
   onSwitchToViewer,
   onEndClick,
@@ -25,7 +28,11 @@ export function ControllerMenu({
   pdf: PDFDocumentProxy;
   pdfUrl: string;
   hasPassphrase: boolean;
+  /** Whether the "show join code on viewers" toggle applies (synced sessions only). */
+  canShowCode: boolean;
+  showingCode: boolean;
   onShare: () => void;
+  onToggleCode: () => void;
   onShowPassphrase: () => void;
   onSwitchToViewer: () => void;
   onEndClick: () => void;
@@ -58,6 +65,12 @@ export function ControllerMenu({
               <Button variant="ghost" className="justify-start" onClick={act(onShare)}>
                 Share
               </Button>
+              {canShowCode && (
+                <Button variant="ghost" className="justify-start" onClick={act(onToggleCode)}>
+                  <QrCode size={16} className="mr-2" />
+                  {showingCode ? "Hide Join Code" : "Show Join Code"}
+                </Button>
+              )}
               {hasPassphrase && (
                 <Button variant="ghost" className="justify-start" onClick={act(onShowPassphrase)}>
                   Passphrase

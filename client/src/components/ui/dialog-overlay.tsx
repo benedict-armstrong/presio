@@ -16,7 +16,7 @@ export function DialogOverlay({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <Card className={`w-full ${maxWidth}`}>
+      <Card className={`w-full ${maxWidth} max-h-[90dvh] overflow-y-auto`}>
         <CardContent className="pt-6 space-y-4">{children}</CardContent>
       </Card>
     </div>

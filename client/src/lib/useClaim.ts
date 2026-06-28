@@ -13,7 +13,14 @@ export function useClaim(id: string) {
   const [syncError, setSyncError] = useState("");
 
   const sync = async (currentSlide?: number): Promise<boolean> => {
-    if (!session) return false;
+    // We may appear "logged in" without a real Supabase session — notably the
+    // dev-only VITE_DEV_USER flag fakes a user but never establishes a session,
+    // and the server's claim endpoint requires a real access token. Surface that
+    // instead of silently doing nothing when the button is clicked.
+    if (!session) {
+      setSyncError("You're not fully signed in. Please log in again to sync.");
+      return false;
+    }
     setSyncError("");
     setSyncing(true);
     try {

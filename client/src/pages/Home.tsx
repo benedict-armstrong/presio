@@ -7,6 +7,7 @@ import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AccountControl } from "@/components/AccountControl";
 import { PresioLogo } from "@/components/PresioLogo";
+import { MobileNotice } from "@/components/MobileNotice";
 import { idbPut, idbList, idbDelete, idbPruneOlderThan } from "@/lib/localStore";
 import { lsRemove, sessionKey } from "@/lib/storage";
 import { getSessionAuth } from "@/lib/utils";
@@ -402,6 +403,7 @@ export default function Home() {
         </DialogOverlay>
       )}
 
+      <MobileNotice />
     </div>
   );
 }

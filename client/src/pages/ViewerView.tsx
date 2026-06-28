@@ -4,6 +4,7 @@ import { RotateCw, EllipsisVertical } from "lucide-react";
 import { getSessionAuth, setSessionAuth } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
+import { QRCodeSVG } from "qrcode.react";
 import { SessionQRCode } from "@/components/SessionQRCode";
 import { PresentationTimer } from "@/components/PresentationTimer";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
@@ -29,6 +30,7 @@ export function ViewerView({
   muted,
   currentSlide,
   totalSlides,
+  showCode,
   outOfSync,
   onViewerGoTo,
   onResync,
@@ -47,6 +49,7 @@ export function ViewerView({
   muted: boolean;
   currentSlide: number;
   totalSlides: number;
+  showCode: boolean;
   outOfSync: boolean;
   onViewerGoTo: (slide: number) => void;
   onResync: () => void;
@@ -152,6 +155,21 @@ export function ViewerView({
           }`}>
             Screen blanked by presenter
           </p>
+        </div>
+      )}
+
+      {showCode && !local && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6 bg-black/95">
+          <p className="text-white/70 text-lg select-none">Scan to join this presentation</p>
+          <div className="rounded-lg bg-white p-4">
+            <QRCodeSVG value={`${window.location.origin}/s/${id}?role=viewer`} size={260} />
+          </div>
+          <div className="text-center space-y-1">
+            <p className="text-white/50 text-sm select-none">Session code</p>
+            <p className="text-white text-4xl font-bold tracking-widest font-mono select-all">
+              {id}
+            </p>
+          </div>
         </div>
       )}
 

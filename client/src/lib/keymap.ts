@@ -13,9 +13,10 @@ export interface Keymap {
   firstSlide: KeyBinding[];
   lastSlide: KeyBinding[];
   toggleBlank: KeyBinding[];
+  toggleCode: KeyBinding[];
 }
 
-export const KEYMAP_ACTIONS = ["nextSlide", "prevSlide", "firstSlide", "lastSlide", "toggleBlank"] as const;
+export const KEYMAP_ACTIONS = ["nextSlide", "prevSlide", "firstSlide", "lastSlide", "toggleBlank", "toggleCode"] as const;
 export type KeymapAction = (typeof KEYMAP_ACTIONS)[number];
 
 export const KEYMAP_LABELS: Record<KeymapAction, string> = {
@@ -24,6 +25,7 @@ export const KEYMAP_LABELS: Record<KeymapAction, string> = {
   firstSlide: "First slide",
   lastSlide: "Last slide",
   toggleBlank: "Blank screen",
+  toggleCode: "Show join code",
 };
 
 export const DEFAULT_KEYMAP: Keymap = {
@@ -32,6 +34,7 @@ export const DEFAULT_KEYMAP: Keymap = {
   firstSlide: [{ key: "ArrowLeft", meta: true }],
   lastSlide: [{ key: "ArrowRight", meta: true }],
   toggleBlank: [{ key: "b" }],
+  toggleCode: [{ key: "c" }],
 };
 
 export function loadKeymap(): Keymap {

@@ -7,10 +7,12 @@ export interface SocketState {
   controllers: Map<string, string>;
   // Blanked state per session (transient, no DB persistence).
   blankedSessions: Set<string>;
+  // Sessions currently showing the join code / QR on all viewers (transient).
+  codeSessions: Set<string>;
 }
 
 export function createSocketState(): SocketState {
-  return { controllers: new Map(), blankedSessions: new Set() };
+  return { controllers: new Map(), blankedSessions: new Set(), codeSessions: new Set() };
 }
 
 export function registerSocketHandlers(
@@ -18,7 +20,7 @@ export function registerSocketHandlers(
   supabase: SupabaseClient,
   state: SocketState
 ) {
-  const { controllers, blankedSessions } = state;
+  const { controllers, blankedSessions, codeSessions } = state;
 
   // Wrap an event handler so it only runs for the session's registered
   // controller, passing the resolved sessionId through. Mutating events
@@ -112,6 +114,15 @@ export function registerSocketHandlers(
         blankedSessions.add(sessionId);
       }
       io.to(sessionId).emit("blank_update", { blanked: blankedSessions.has(sessionId) });
+    }));
+
+    socket.on("code_toggle", controllerOnly(socket, (sessionId) => {
+      if (codeSessions.has(sessionId)) {
+        codeSessions.delete(sessionId);
+      } else {
+        codeSessions.add(sessionId);
+      }
+      io.to(sessionId).emit("code_update", { showCode: codeSessions.has(sessionId) });
     }));
 
     socket.on("media_control", controllerOnly(socket, (sessionId, payload: { id: string; action: "play" | "pause" | "reset" }) => {

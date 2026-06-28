@@ -46,6 +46,8 @@ export default function Presentation() {
   const [settings, setSettings] = useState<PresentationSettings>(defaultSettings);
   const [startedAt] = useState(() => Date.now());
   const [blanked, setBlanked] = useState(false);
+  // Whether all viewers are currently showing the join code / QR overlay.
+  const [showCode, setShowCode] = useState(false);
   const [mediaPlacements, setMediaPlacements] = useState<Map<number, MediaPlacement[]>>(new Map());
   const [mediaState, setMediaState] = useState<MediaState>({ id: null, action: "pause", seq: 0 });
   const [mediaTime, setMediaTime] = useState<MediaTimeSync | null>(null);
@@ -57,7 +59,7 @@ export default function Presentation() {
   const localUrlRef = useRef("");
   // Latest broadcastable state, for replying to a local window's state_request
   // without re-subscribing the channel on every slide change.
-  const stateRef = useRef({ currentSlide: 1, totalSlides: 0, blanked: false, settings: defaultSettings });
+  const stateRef = useRef({ currentSlide: 1, totalSlides: 0, blanked: false, showCode: false, settings: defaultSettings });
 
   // Resolved during load: true if this presentation's PDF lives in this
   // browser's IndexedDB (local session). null until known.
@@ -67,7 +69,7 @@ export default function Presentation() {
   const outOfSync = isViewer && viewerSlide !== null;
   const displaySlide = outOfSync ? viewerSlide! : currentSlide;
 
-  stateRef.current = { currentSlide, totalSlides, blanked, settings };
+  stateRef.current = { currentSlide, totalSlides, blanked, showCode, settings };
 
   useEffect(() => {
     let cancelled = false;
@@ -150,6 +152,7 @@ export default function Presentation() {
       const { type, payload } = e.data;
       if (type === "slide_update") setCurrentSlide(payload.slideNumber);
       else if (type === "blank_update") setBlanked(payload.blanked);
+      else if (type === "code_update") setShowCode(payload.showCode);
       else if (type === "settings_update") setSettings(payload);
       else if (type === "media_update") setMediaState(payload);
       else if (type === "media_time_update") setMediaTime(payload);
@@ -165,6 +168,7 @@ export default function Presentation() {
         setCurrentSlide(payload.currentSlide);
         if (payload.totalSlides) setTotalSlides(payload.totalSlides);
         setBlanked(payload.blanked);
+        setShowCode(!!payload.showCode);
         setSettings(payload.settings);
       }
     };
@@ -256,6 +260,10 @@ export default function Presentation() {
       setBlanked(blanked);
     });
 
+    socket.on("code_update", ({ showCode }: { showCode: boolean }) => {
+      setShowCode(showCode);
+    });
+
     socket.on("media_update", (payload: MediaState) => {
       setMediaState(payload);
     });
@@ -287,6 +295,7 @@ export default function Presentation() {
       socket.off("sync_all");
       socket.off("settings_update");
       socket.off("blank_update");
+      socket.off("code_update");
       socket.off("media_update");
       socket.off("media_time_update");
       socket.off("audio_update");
@@ -521,6 +530,7 @@ export default function Presentation() {
         muted={effectiveMuted}
         currentSlide={displaySlide}
         totalSlides={totalSlides}
+        showCode={showCode}
         outOfSync={outOfSync}
         onViewerGoTo={viewerGoTo}
         onResync={resync}
@@ -558,6 +568,13 @@ export default function Presentation() {
         // no echo (BroadcastChannel doesn't deliver to the sender), so set it here.
         if (local) setBlanked(next);
         broadcast({ type: "blank_update", payload: { blanked: next } }, { event: "blank_toggle" });
+      }}
+      showCode={showCode}
+      onShowCodeToggle={() => {
+        const next = !showCode;
+        // Same echo asymmetry as blanking: local mode sets it directly.
+        if (local) setShowCode(next);
+        broadcast({ type: "code_update", payload: { showCode: next } }, { event: "code_toggle" });
       }}
       mediaPlacements={currentMedia}
       mediaBySlide={mediaPlacements}
