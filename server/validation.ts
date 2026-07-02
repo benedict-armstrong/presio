@@ -42,6 +42,19 @@ export function sanitizeSettings(settings: RawSettings): SanitizedSettings {
   };
 }
 
+// A laser payload is either null (hide) or a normalized point. Returns the
+// clamped point, or undefined when the payload is malformed and should be dropped.
+export function sanitizeLaserPoint(payload: unknown): { x: number; y: number } | null | undefined {
+  if (payload === null) return null;
+  if (typeof payload !== "object") return undefined;
+  const { x, y } = payload as { x?: unknown; y?: unknown };
+  if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) {
+    return undefined;
+  }
+  const clamp = (n: number) => Math.min(1, Math.max(0, n));
+  return { x: clamp(x), y: clamp(y) };
+}
+
 // A slide number is valid when it's a positive integer within the deck. When
 // `total` is unknown (non-number) only the lower bound is enforced.
 export function isValidSlideNumber(slideNumber: unknown, total: unknown): boolean {

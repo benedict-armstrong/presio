@@ -1,6 +1,6 @@
 import type { Server, Socket } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { sanitizeSettings, isValidSlideNumber } from "./validation.js";
+import { sanitizeSettings, isValidSlideNumber, sanitizeLaserPoint } from "./validation.js";
 
 export interface SocketState {
   // Which socket is the controller for each session.
@@ -123,6 +123,14 @@ export function registerSocketHandlers(
         codeSessions.add(sessionId);
       }
       io.to(sessionId).emit("code_update", { showCode: codeSessions.has(sessionId) });
+    }));
+
+    // Laser pointer stream: relay to everyone else in the room. Transient and
+    // high-frequency, so nothing is persisted.
+    socket.on("laser_move", controllerOnly(socket, (sessionId, payload: unknown) => {
+      const pt = sanitizeLaserPoint(payload);
+      if (pt === undefined) return;
+      socket.to(sessionId).emit("laser_update", pt);
     }));
 
     socket.on("media_control", controllerOnly(socket, (sessionId, payload: { id: string; action: "play" | "pause" | "reset" }) => {

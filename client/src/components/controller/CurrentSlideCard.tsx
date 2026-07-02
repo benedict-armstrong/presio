@@ -11,6 +11,9 @@ import {
   Eye,
 } from "lucide-react";
 import { MediaOverlay, type MediaState, type AudioState, type AudioTarget } from "@/components/MediaOverlay";
+import { AnnotationOverlay } from "@/components/AnnotationOverlay";
+import { AnnotationToolbar } from "@/components/AnnotationToolbar";
+import type { Tool, LaserPoint } from "@/lib/annotations";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
@@ -32,6 +35,9 @@ interface Props {
   muted?: boolean;
   audioState?: AudioState;
   onAudioChange?: (next: { muted: boolean; target: AudioTarget }) => void;
+  tool?: Tool;
+  onToolChange?: (tool: Tool) => void;
+  onLaserMove?: (pt: LaserPoint | null) => void;
 }
 
 const TARGET_LABEL: Record<AudioTarget, string> = {
@@ -57,6 +63,9 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
       muted = true,
       audioState,
       onAudioChange,
+      tool = "none",
+      onToolChange,
+      onLaserMove,
     },
     ref
   ) => {
@@ -80,6 +89,12 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
               role="controller"
             />
           )}
+          <AnnotationOverlay
+            containerRef={ref as React.RefObject<HTMLDivElement | null>}
+            tool={tool}
+            onLaserMove={onLaserMove}
+          />
+          {onToolChange && <AnnotationToolbar tool={tool} onToolChange={onToolChange} />}
         </div>
         {showControls && (
           <div className="flex flex-col gap-2 shrink-0 w-full">

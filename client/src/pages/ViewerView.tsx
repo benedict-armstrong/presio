@@ -10,6 +10,8 @@ import { PresentationTimer } from "@/components/PresentationTimer";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import type { PresentationSettings } from "./Presentation";
 import { MediaOverlay, type MediaState, type MediaTimeSync } from "@/components/MediaOverlay";
+import { AnnotationOverlay } from "@/components/AnnotationOverlay";
+import type { LaserPoint } from "@/lib/annotations";
 import type { MediaPlacement } from "@/lib/pdf";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
@@ -34,6 +36,7 @@ export function ViewerView({
   outOfSync,
   onViewerGoTo,
   onResync,
+  laser,
 }: {
   id: string;
   local: boolean;
@@ -53,6 +56,7 @@ export function ViewerView({
   outOfSync: boolean;
   onViewerGoTo: (slide: number) => void;
   onResync: () => void;
+  laser: LaserPoint | null;
 }) {
   const navigate = useNavigate();
   const [cursorVisible, setCursorVisible] = useState(true);
@@ -145,6 +149,8 @@ export function ViewerView({
         muted={muted}
         role="viewer"
       />
+
+      <AnnotationOverlay containerRef={canvasRef} remoteLaser={laser} />
 
       <ViewerHint canNavigate={!local} />
 

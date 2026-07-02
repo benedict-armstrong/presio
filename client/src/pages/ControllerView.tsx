@@ -55,6 +55,7 @@ import { type MosaicNode } from "react-mosaic-component";
 import type { PresentationSettings } from "./Presentation";
 import type { MediaState, AudioState } from "@/components/MediaOverlay";
 import type { MediaPlacement } from "@/lib/pdf";
+import type { Tool, LaserPoint } from "@/lib/annotations";
 
 // --- Component ---
 
@@ -87,6 +88,7 @@ interface ControllerViewProps {
   muted: boolean;
   audioState: AudioState;
   onAudioChange: (next: { muted: boolean; target: AudioState["target"] }) => void;
+  onLaserMove: (pt: LaserPoint | null) => void;
 }
 
 export function ControllerView({
@@ -117,6 +119,7 @@ export function ControllerView({
   muted,
   audioState,
   onAudioChange,
+  onLaserMove,
 }: ControllerViewProps) {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
@@ -133,6 +136,8 @@ export function ControllerView({
   const [passphraseDialogOpen, setPassphraseDialogOpen] = useState(false);
   // First-run tutorial for the controller. Shown before the viewer prompt.
   const [onboardingOpen, setOnboardingOpen] = useState(() => !hasCompletedControllerOnboarding());
+  // Active annotation tool for the current-slide card (laser pointer etc.).
+  const [tool, setTool] = useState<Tool>("none");
 
   const { user } = useAuth();
   const loggedIn = !!user;
@@ -261,6 +266,9 @@ export function ControllerView({
           muted={muted}
           audioState={audioState}
           onAudioChange={onAudioChange}
+          tool={tool}
+          onToolChange={setTool}
+          onLaserMove={onLaserMove}
         />
       ),
     },

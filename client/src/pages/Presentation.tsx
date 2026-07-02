@@ -4,6 +4,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { loadPdf, loadPdfData, renderPage, clearCache, loadMediaPlacements, type MediaPlacement } from "@/lib/pdf";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
+import type { LaserPoint } from "@/lib/annotations";
 import { socket } from "@/lib/socket";
 import { startClockSync } from "@/lib/clock";
 import { supabase } from "@/lib/supabaseClient";
@@ -52,6 +53,8 @@ export default function Presentation() {
   const [mediaState, setMediaState] = useState<MediaState>({ id: null, action: "pause", seq: 0 });
   const [mediaTime, setMediaTime] = useState<MediaTimeSync | null>(null);
   const [audioState, setAudioState] = useState<AudioState>(defaultAudioState);
+  // Laser pointer position streamed from the controller (null = hidden).
+  const [laser, setLaser] = useState<LaserPoint | null>(null);
 
   const currentCanvasRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
@@ -157,6 +160,7 @@ export default function Presentation() {
       else if (type === "media_update") setMediaState(payload);
       else if (type === "media_time_update") setMediaTime(payload);
       else if (type === "audio_update") setAudioState(payload);
+      else if (type === "laser_update") setLaser(payload);
       else if (type === "session_ended") navigate("/", { replace: true });
       else if (type === "state_request") {
         // Controller is the source of truth for a local session; reply so a
@@ -276,6 +280,10 @@ export default function Presentation() {
       setAudioState(payload);
     });
 
+    socket.on("laser_update", (payload: LaserPoint | null) => {
+      setLaser(payload);
+    });
+
     socket.on("error", ({ message }) => {
       setError(message);
     });
@@ -299,6 +307,7 @@ export default function Presentation() {
       socket.off("media_update");
       socket.off("media_time_update");
       socket.off("audio_update");
+      socket.off("laser_update");
       socket.off("error");
       socket.off("session_ended");
       socket.disconnect();
@@ -455,6 +464,18 @@ export default function Presentation() {
     [local]
   );
 
+  // Stream the controller's laser pointer to every other window. High-frequency
+  // and transient, so it goes straight out without touching component state.
+  const onLaserMove = useCallback(
+    (pt: LaserPoint | null) => {
+      broadcast(
+        { type: "laser_update", payload: pt },
+        { event: "laser_move", payload: pt }
+      );
+    },
+    [broadcast]
+  );
+
   const onAudioChange = useCallback(
     (next: { muted: boolean; target: AudioState["target"] }) => {
       const payload: AudioState = { ...next, seq: Date.now() };
@@ -534,6 +555,7 @@ export default function Presentation() {
         outOfSync={outOfSync}
         onViewerGoTo={viewerGoTo}
         onResync={resync}
+        laser={laser}
       />
     );
   }
@@ -584,6 +606,7 @@ export default function Presentation() {
       muted={effectiveMuted}
       audioState={audioState}
       onAudioChange={onAudioChange}
+      onLaserMove={onLaserMove}
     />
   );
 }
