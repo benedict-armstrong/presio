@@ -18,6 +18,14 @@ if (dsn) {
   })
 }
 
+// Installability + offline shell ("save to home screen"). Dev builds skip it
+// so Vite's HMR never fights a stale cache.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => { /* non-fatal */ })
+  })
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <Sentry.ErrorBoundary
