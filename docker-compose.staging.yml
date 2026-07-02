@@ -1,0 +1,40 @@
+# Staging deployment — a second Presio app container built from the working
+# tree, routed by the shared Traefik proxy at ${STAGING_HOST}. It reuses the
+# production Supabase stack (same .env), so no extra services are needed:
+#
+#   docker compose -f docker-compose.staging.yml up -d --build
+#
+# Sessions created here land in the shared DB but expire after 24h. Sentry is
+# intentionally not configured so staging errors don't pollute prod tracking.
+
+name: presio-staging
+
+services:
+  presio-staging:
+    container_name: presio-staging
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
+        VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY: ${ANON_KEY}
+    restart: unless-stopped
+    networks:
+      web:
+    environment:
+      SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      PORT: 3001
+      ALLOWED_ORIGIN: https://${STAGING_HOST:-staging.presio.xyz}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.presio-staging.rule=Host(`${STAGING_HOST:-staging.presio.xyz}`)"
+      - "traefik.http.routers.presio-staging.entrypoints=websecure"
+      - "traefik.http.routers.presio-staging.tls.certresolver=le"
+      - "traefik.http.services.presio-staging.loadbalancer.server.port=3001"
+
+networks:
+  # Shared with the Traefik proxy (created once per host: `docker network create web`).
+  web:
+    external: true
