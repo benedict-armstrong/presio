@@ -27,7 +27,9 @@ describe("loadExternalPdfMeta", () => {
       "https://github.com/me/repo/blob/main/slides/deck.pdf"
     );
     expect(getDocument).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/me/repo/main/slides/deck.pdf"
+      expect.objectContaining({
+        url: "https://raw.githubusercontent.com/me/repo/main/slides/deck.pdf",
+      })
     );
     expect(meta.url).toBe(
       "https://raw.githubusercontent.com/me/repo/main/slides/deck.pdf"
@@ -47,7 +49,9 @@ describe("loadExternalPdfMeta", () => {
   it("passes non-github HTTPS URLs through unchanged", async () => {
     mockPdf(3);
     const meta = await loadExternalPdfMeta("https://example.com/files/talk.pdf");
-    expect(getDocument).toHaveBeenCalledWith("https://example.com/files/talk.pdf");
+    expect(getDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ url: "https://example.com/files/talk.pdf" })
+    );
     expect(meta.url).toBe("https://example.com/files/talk.pdf");
     expect(meta.filename).toBe("talk");
   });
