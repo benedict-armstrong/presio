@@ -36,6 +36,14 @@ alter table sessions add column if not exists status text not null default 'acti
 -- Index for cleanup query
 create index if not exists idx_sessions_expires_at on sessions (expires_at);
 
+-- Email list signups collected from the in-app prompt. Only the server (service
+-- role) touches this table; RLS with no policies keeps PostgREST clients out.
+create table if not exists newsletter_signups (
+  email text primary key,
+  created_at timestamptz not null default now()
+);
+alter table newsletter_signups enable row level security;
+
 -- Create storage bucket for presentations
 insert into storage.buckets (id, name, public)
 values ('presentations', 'presentations', true)

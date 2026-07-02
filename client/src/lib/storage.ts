@@ -25,6 +25,10 @@ export const STORAGE_KEYS = {
   timerShowClock: "presio_timer_show_clock",
   // Font-size multiplier for the speaker notes card.
   notesFontScale: "presio_notes_font_scale",
+  // Email list prompt: "subscribed" | "dismissed" (absent = not asked yet).
+  newsletterStatus: "presio_newsletter_status",
+  // Test hook: override the prompt delay (ms).
+  newsletterDelayOverride: "presio_newsletter_delay_ms",
 } as const;
 
 export const timerKey = (id: string) => `presio_timer_${id}`;

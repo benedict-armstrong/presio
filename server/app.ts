@@ -9,6 +9,7 @@ import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAllowedOrigins, buildCspDirectives } from "./security.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
+import { registerNewsletterRoutes } from "./routes/newsletter.js";
 import type { SocketState } from "./socket.js";
 
 export interface AppDeps {
@@ -54,6 +55,7 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   app.use("/api", apiLimiter);
 
   registerSessionRoutes(app, { supabase, io, socketState });
+  registerNewsletterRoutes(app, supabase);
 
   // --- Serve client in production ---
 

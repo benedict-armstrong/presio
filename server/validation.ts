@@ -42,6 +42,16 @@ export function sanitizeSettings(settings: RawSettings): SanitizedSettings {
   };
 }
 
+// Light-touch email validation for the newsletter list: something@something.tld
+// with sane length. Deliverability is not our problem here.
+export function isValidEmail(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= 320 &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value)
+  );
+}
+
 // --- Drawing annotations ---
 
 export interface StrokeData {

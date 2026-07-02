@@ -11,6 +11,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { LoginDialog } from "@/components/LoginDialog";
 import { AccountControl } from "@/components/AccountControl";
 import { ControllerOnboarding } from "@/components/ControllerOnboarding";
+import { NewsletterDialog, useNewsletterPrompt } from "@/components/NewsletterDialog";
 import { PresentationTimer } from "@/components/PresentationTimer";
 import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
 import { hasCompletedControllerOnboarding } from "@/lib/onboarding";
@@ -188,6 +189,10 @@ export function ControllerView({
   const { user } = useAuth();
   const loggedIn = !!user;
   const { syncing, syncError, sync } = useClaim(id);
+
+  // One-time email list prompt after a few minutes of presenting. Waits for
+  // the first-run tutorial to be out of the way.
+  const newsletter = useNewsletterPrompt(!onboardingOpen);
 
   const syncOnline = async () => {
     if (await sync(currentSlide)) onSynced();
@@ -667,6 +672,8 @@ export function ControllerView({
           onOpenViewer={openViewer}
         />
       )}
+
+      {newsletter.open && <NewsletterDialog onClose={newsletter.close} />}
     </div>
   );
 }
