@@ -18,7 +18,7 @@ import { useAuth } from "@/lib/useAuth";
 import { useClaim } from "@/lib/useClaim";
 import { CurrentSlideCard } from "@/components/controller/CurrentSlideCard";
 import { NextSlideCard } from "@/components/controller/NextSlideCard";
-import { SpeakerNotesCard } from "@/components/controller/SpeakerNotesCard";
+import { SpeakerNotesCard, NotesSizeAction } from "@/components/controller/SpeakerNotesCard";
 import { ThumbnailsCard } from "@/components/controller/ThumbnailsCard";
 import { TimerCard, TimerAction, TimerSettingsDialog } from "@/components/controller/TimerCard";
 import { ShortcutsEditor } from "@/components/controller/ShortcutsEditor";
@@ -154,6 +154,12 @@ export function ControllerView({
   const [onboardingOpen, setOnboardingOpen] = useState(() => !hasCompletedControllerOnboarding());
   // Active annotation tool for the current-slide card (laser pointer etc.).
   const [tool, setTool] = useState<Tool>("none");
+  // Speaker-notes text size multiplier (device preference).
+  const [notesScale, setNotesScale] = useState(() => lsGet(STORAGE_KEYS.notesFontScale, 1));
+  const changeNotesScale = useCallback((scale: number) => {
+    setNotesScale(scale);
+    lsSet(STORAGE_KEYS.notesFontScale, scale);
+  }, []);
   // Optional wall-clock display on the timer card (device preference).
   const [showClock, setShowClock] = useState(() => lsGetString(STORAGE_KEYS.timerShowClock) === "true");
   const changeShowClock = useCallback((show: boolean) => {
@@ -338,8 +344,10 @@ export function ControllerView({
           editable={loggedIn}
           onSave={onSaveNotes}
           onRequestLogin={() => setLoginOpen(true)}
+          fontScale={notesScale}
         />
       ),
+      action: <NotesSizeAction scale={notesScale} onChange={changeNotesScale} />,
     },
     thumbnails: {
       content: <ThumbnailsCard pdf={pdf} totalSlides={totalSlides} currentSlide={currentSlide} onGoTo={onGoTo} mediaBySlide={mediaBySlide} />,

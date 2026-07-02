@@ -23,6 +23,8 @@ export const STORAGE_KEYS = {
   highlighterStyle: "presio_highlighter_style",
   // Whether the timer card also shows the current wall-clock time.
   timerShowClock: "presio_timer_show_clock",
+  // Font-size multiplier for the speaker notes card.
+  notesFontScale: "presio_notes_font_scale",
 } as const;
 
 export const timerKey = (id: string) => `presio_timer_${id}`;
