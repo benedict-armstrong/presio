@@ -4,6 +4,7 @@ import {
   clamp01,
   drawStrokes,
   DEFAULT_PEN_STYLE,
+  HIGHLIGHTER_OPACITY,
   type ContentRect,
   type LaserPoint,
   type PenStyle,
@@ -150,14 +151,14 @@ export function AnnotationOverlay({
       const pt = toNormalized(e);
       setLocalLaser(pt);
       emitThrottled(() => onLaserMove?.(pt));
-    } else if (tool === "pen") {
+    } else if (tool === "pen" || tool === "highlighter") {
       e.currentTarget.setPointerCapture(e.pointerId);
       const pt = toNormalized(e);
       draftRef.current = {
-        tool: "pen",
+        tool,
         color: penStyle.color,
         size: penStyle.size,
-        opacity: 1,
+        opacity: tool === "highlighter" ? HIGHLIGHTER_OPACITY : 1,
         points: [pt.x, pt.y],
       };
       redraw();
@@ -173,7 +174,7 @@ export function AnnotationOverlay({
       return;
     }
     const draft = draftRef.current;
-    if (tool === "pen" && draft) {
+    if ((tool === "pen" || tool === "highlighter") && draft) {
       const pt = toNormalized(e);
       const n = draft.points.length;
       const dx = pt.x - draft.points[n - 2];

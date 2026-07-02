@@ -20,6 +20,7 @@ export const STORAGE_KEYS = {
   mobileNoticeSeen: "presio_mobile_notice_seen",
   // Last-used drawing color/width for the annotation tools.
   penStyle: "presio_pen_style",
+  highlighterStyle: "presio_highlighter_style",
 } as const;
 
 export const timerKey = (id: string) => `presio_timer_${id}`;

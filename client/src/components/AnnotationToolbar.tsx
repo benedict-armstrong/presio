@@ -1,15 +1,17 @@
 import { useRef } from "react";
-import { MousePointer2, Target, PenLine, Undo2, Trash2, FileDown, Save, FolderOpen } from "lucide-react";
+import { MousePointer2, Target, PenLine, Highlighter, Undo2, Trash2, FileDown, Save, FolderOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PEN_COLORS, PEN_REFERENCE_WIDTH, type PenStyle, type Tool } from "@/lib/annotations";
+import { PEN_COLORS, HIGHLIGHTER_COLORS, PEN_REFERENCE_WIDTH, type PenStyle, type Tool } from "@/lib/annotations";
 
 const TOOLS: { key: Tool; icon: React.ComponentType<{ size?: number }>; label: string }[] = [
   { key: "none", icon: MousePointer2, label: "Pointer (no tool)" },
   { key: "laser", icon: Target, label: "Laser pointer" },
   { key: "pen", icon: PenLine, label: "Draw" },
+  { key: "highlighter", icon: Highlighter, label: "Highlight" },
 ];
 
 const PEN_SIZES = [2, 3, 5, 8];
+const HIGHLIGHTER_SIZES = [8, 14, 20, 28];
 
 function IconButton({
   title,
@@ -64,8 +66,8 @@ interface Props {
 }
 
 // Floating tool picker shown over the controller's current slide. When a
-// drawing tool is active, a second panel offers color/width plus the
-// undo/clear/save/load actions.
+// drawing tool is active, a second panel offers that tool's colors/widths plus
+// the undo/clear/save/load actions.
 export function AnnotationToolbar({
   tool,
   onToolChange,
@@ -80,6 +82,9 @@ export function AnnotationToolbar({
   onLoadDrawing,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const drawing = tool === "pen" || tool === "highlighter";
+  const colors = tool === "highlighter" ? HIGHLIGHTER_COLORS : PEN_COLORS;
+  const sizes = tool === "highlighter" ? HIGHLIGHTER_SIZES : PEN_SIZES;
 
   return (
     <div className="absolute left-2 top-2 z-10 flex items-start gap-1">
@@ -97,13 +102,13 @@ export function AnnotationToolbar({
         ))}
       </div>
 
-      {tool === "pen" && (
+      {drawing && (
         <div
           data-testid="pen-options"
           className="flex flex-col gap-1.5 rounded-md border bg-background/85 backdrop-blur p-1.5 shadow-sm"
         >
           <div className="grid grid-cols-3 gap-1">
-            {PEN_COLORS.map((color) => (
+            {colors.map((color) => (
               <button
                 key={color}
                 type="button"
@@ -119,7 +124,7 @@ export function AnnotationToolbar({
             ))}
           </div>
           <div className="flex items-center justify-between gap-1">
-            {PEN_SIZES.map((px) => {
+            {sizes.map((px) => {
               const size = px / PEN_REFERENCE_WIDTH;
               const active = Math.abs(penStyle.size - size) < 0.0005;
               return (
@@ -137,7 +142,10 @@ export function AnnotationToolbar({
                 >
                   <span
                     className="rounded-full bg-foreground"
-                    style={{ width: Math.max(3, px * 1.2), height: Math.max(3, px * 1.2) }}
+                    style={{
+                      width: Math.min(18, Math.max(3, px * 1.2)),
+                      height: Math.min(18, Math.max(3, px * 1.2)),
+                    }}
                   />
                 </button>
               );

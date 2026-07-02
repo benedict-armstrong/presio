@@ -3,7 +3,7 @@
 // rect* — the letterboxed area the PDF page actually occupies inside its
 // container — so a point means the same spot on every screen size.
 
-export type Tool = "none" | "laser" | "pen";
+export type Tool = "none" | "laser" | "pen" | "highlighter";
 
 export interface LaserPoint {
   x: number;
@@ -34,6 +34,11 @@ export const PEN_REFERENCE_WIDTH = 960;
 export const DEFAULT_PEN_STYLE: PenStyle = { color: "#e11d48", size: 3 / PEN_REFERENCE_WIDTH };
 
 export const PEN_COLORS = ["#111111", "#e11d48", "#2563eb", "#16a34a", "#f59e0b", "#9333ea"];
+
+// Highlighter strokes are wide and semi-transparent, in marker-like colors.
+export const HIGHLIGHTER_OPACITY = 0.35;
+export const DEFAULT_HIGHLIGHTER_STYLE: PenStyle = { color: "#facc15", size: 14 / PEN_REFERENCE_WIDTH };
+export const HIGHLIGHTER_COLORS = ["#facc15", "#a3e635", "#22d3ee", "#f472b6", "#fb923c", "#c084fc"];
 
 export interface ContentRect {
   left: number;

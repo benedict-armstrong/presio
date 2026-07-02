@@ -55,7 +55,7 @@ import { type MosaicNode } from "react-mosaic-component";
 import type { PresentationSettings } from "./Presentation";
 import type { MediaState, AudioState } from "@/components/MediaOverlay";
 import type { MediaPlacement } from "@/lib/pdf";
-import { DEFAULT_PEN_STYLE, hasAnyStrokes, type AnnotationsBySlide, type LaserPoint, type PenStyle, type Stroke, type Tool } from "@/lib/annotations";
+import { DEFAULT_PEN_STYLE, DEFAULT_HIGHLIGHTER_STYLE, hasAnyStrokes, type AnnotationsBySlide, type LaserPoint, type PenStyle, type Stroke, type Tool } from "@/lib/annotations";
 
 // --- Component ---
 
@@ -154,12 +154,24 @@ export function ControllerView({
   const [onboardingOpen, setOnboardingOpen] = useState(() => !hasCompletedControllerOnboarding());
   // Active annotation tool for the current-slide card (laser pointer etc.).
   const [tool, setTool] = useState<Tool>("none");
-  // Drawing color/width, remembered across presentations.
+  // Drawing color/width per tool, remembered across presentations.
   const [penStyle, setPenStyle] = useState<PenStyle>(() => lsGet(STORAGE_KEYS.penStyle, DEFAULT_PEN_STYLE));
-  const changePenStyle = useCallback((style: PenStyle) => {
-    setPenStyle(style);
-    lsSet(STORAGE_KEYS.penStyle, style);
-  }, []);
+  const [highlighterStyle, setHighlighterStyle] = useState<PenStyle>(() =>
+    lsGet(STORAGE_KEYS.highlighterStyle, DEFAULT_HIGHLIGHTER_STYLE)
+  );
+  const activeStyle = tool === "highlighter" ? highlighterStyle : penStyle;
+  const changeActiveStyle = useCallback(
+    (style: PenStyle) => {
+      if (tool === "highlighter") {
+        setHighlighterStyle(style);
+        lsSet(STORAGE_KEYS.highlighterStyle, style);
+      } else {
+        setPenStyle(style);
+        lsSet(STORAGE_KEYS.penStyle, style);
+      }
+    },
+    [tool]
+  );
 
   const { user } = useAuth();
   const loggedIn = !!user;
@@ -291,8 +303,8 @@ export function ControllerView({
           tool={tool}
           onToolChange={setTool}
           onLaserMove={onLaserMove}
-          penStyle={penStyle}
-          onPenStyleChange={changePenStyle}
+          penStyle={activeStyle}
+          onPenStyleChange={changeActiveStyle}
           strokes={annotations[currentSlide] ?? []}
           hasDrawing={hasAnyStrokes(annotations)}
           onStrokeProgress={onStrokeProgress}
