@@ -154,6 +154,12 @@ export function ControllerView({
   const [onboardingOpen, setOnboardingOpen] = useState(() => !hasCompletedControllerOnboarding());
   // Active annotation tool for the current-slide card (laser pointer etc.).
   const [tool, setTool] = useState<Tool>("none");
+  // Optional wall-clock display on the timer card (device preference).
+  const [showClock, setShowClock] = useState(() => lsGetString(STORAGE_KEYS.timerShowClock) === "true");
+  const changeShowClock = useCallback((show: boolean) => {
+    setShowClock(show);
+    lsSetString(STORAGE_KEYS.timerShowClock, String(show));
+  }, []);
   // Drawing color/width per tool, remembered across presentations.
   const [penStyle, setPenStyle] = useState<PenStyle>(() => lsGet(STORAGE_KEYS.penStyle, DEFAULT_PEN_STYLE));
   const [highlighterStyle, setHighlighterStyle] = useState<PenStyle>(() =>
@@ -321,7 +327,7 @@ export function ControllerView({
       content: <NextSlideCard pdf={pdf} currentSlide={currentSlide} totalSlides={totalSlides} />,
     },
     timer: {
-      content: <TimerCard id={id} />,
+      content: <TimerCard id={id} showClock={showClock} />,
       action: <TimerAction open={timerSettingsOpen} onToggle={() => setTimerSettingsOpen(!timerSettingsOpen)} />,
     },
     notes: {
@@ -586,6 +592,8 @@ export function ControllerView({
         <TimerSettingsDialog
           settings={settings}
           onSettingsChange={onSettingsChange}
+          showClock={showClock}
+          onShowClockChange={changeShowClock}
           onClose={() => setTimerSettingsOpen(false)}
         />
       )}

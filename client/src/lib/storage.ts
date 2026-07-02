@@ -21,6 +21,8 @@ export const STORAGE_KEYS = {
   // Last-used drawing color/width for the annotation tools.
   penStyle: "presio_pen_style",
   highlighterStyle: "presio_highlighter_style",
+  // Whether the timer card also shows the current wall-clock time.
+  timerShowClock: "presio_timer_show_clock",
 } as const;
 
 export const timerKey = (id: string) => `presio_timer_${id}`;

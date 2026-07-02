@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import type { PresentationSettings } from "@/pages/Presentation";
@@ -32,13 +33,28 @@ function formatTime(totalSeconds: number): string {
 
 const inputCls = "w-14 rounded-md border border-input bg-background px-1.5 py-1 text-xs text-center placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
+function formatClock(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 export function TimerCard({
   id,
+  showClock = false,
 }: {
   id: string;
+  /** Also show the current wall-clock time under the elapsed timer. */
+  showClock?: boolean;
 }) {
   const [timer, setTimer] = useState<TimerState>(() => loadTimerState(id));
   const [display, setDisplay] = useState(0);
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    if (!showClock) return;
+    const interval = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, [showClock]);
 
   const computeElapsed = useCallback(() => {
     if (timer.running && timer.startedAt) {
@@ -80,6 +96,11 @@ export function TimerCard({
         <span className="font-mono tabular-nums text-2xl font-semibold">
           {formatTime(display)}
         </span>
+        {showClock && (
+          <span data-testid="timer-clock" className="font-mono tabular-nums text-sm text-muted-foreground">
+            {formatClock(now)}
+          </span>
+        )}
         <div className="flex gap-1.5">
           {timer.running ? (
             <Button size="sm" variant="outline" onClick={stop}>Stop</Button>
@@ -98,10 +119,14 @@ type TimerMode = "off" | "up" | "down";
 export function TimerSettingsDialog({
   settings,
   onSettingsChange,
+  showClock,
+  onShowClockChange,
   onClose,
 }: {
   settings: PresentationSettings;
   onSettingsChange: (s: PresentationSettings) => void;
+  showClock: boolean;
+  onShowClockChange: (show: boolean) => void;
   onClose: () => void;
 }) {
   const timerMode: TimerMode = (settings.timerMode ?? "off") as TimerMode;
@@ -173,6 +198,21 @@ export function TimerSettingsDialog({
             </div>
           </>
         )}
+        <button
+          type="button"
+          data-testid="timer-show-clock"
+          onClick={() => onShowClockChange(!showClock)}
+          className="flex items-center gap-2 w-full px-0.5 py-1 text-xs font-medium rounded hover:bg-accent transition-colors text-left"
+        >
+          <span
+            className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+              showClock ? "bg-primary border-primary text-primary-foreground" : "border-input"
+            }`}
+          >
+            {showClock && <Check size={11} strokeWidth={3} />}
+          </span>
+          Show current time
+        </button>
       </div>
       <Button className="w-full" variant="ghost" onClick={onClose}>
         Close
