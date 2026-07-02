@@ -4,7 +4,9 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { loadPdf, loadPdfData, renderPage, clearCache, loadMediaPlacements, type MediaPlacement } from "@/lib/pdf";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
-import type { LaserPoint } from "@/lib/annotations";
+import { hasAnyStrokes, parseDrawing, serializeDrawing, type AnnotationsBySlide, type LaserPoint, type Stroke } from "@/lib/annotations";
+import { renderAnnotatedPdf } from "@/lib/annotatedPdf";
+import { lsGet, lsSet, annotationsKey } from "@/lib/storage";
 import { socket } from "@/lib/socket";
 import { startClockSync } from "@/lib/clock";
 import { supabase } from "@/lib/supabaseClient";
@@ -55,6 +57,15 @@ export default function Presentation() {
   const [audioState, setAudioState] = useState<AudioState>(defaultAudioState);
   // Laser pointer position streamed from the controller (null = hidden).
   const [laser, setLaser] = useState<LaserPoint | null>(null);
+  // Committed drawings per slide. The controller seeds from localStorage so a
+  // reload (or a server restart, via annotations_sync) doesn't lose them.
+  const [annotations, setAnnotations] = useState<AnnotationsBySlide>(() =>
+    requestedRole === "controller" ? lsGet(annotationsKey(id!), {}) : {}
+  );
+  // In-progress stroke streamed from the controller (viewer windows).
+  const [remoteDraft, setRemoteDraft] = useState<{ slide: number; stroke: Stroke | null } | null>(null);
+  const annotationsRef = useRef(annotations);
+  annotationsRef.current = annotations;
 
   const currentCanvasRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
@@ -62,7 +73,7 @@ export default function Presentation() {
   const localUrlRef = useRef("");
   // Latest broadcastable state, for replying to a local window's state_request
   // without re-subscribing the channel on every slide change.
-  const stateRef = useRef({ currentSlide: 1, totalSlides: 0, blanked: false, showCode: false, settings: defaultSettings });
+  const stateRef = useRef({ currentSlide: 1, totalSlides: 0, blanked: false, showCode: false, settings: defaultSettings, annotations: {} as AnnotationsBySlide });
 
   // Resolved during load: true if this presentation's PDF lives in this
   // browser's IndexedDB (local session). null until known.
@@ -72,7 +83,26 @@ export default function Presentation() {
   const outOfSync = isViewer && viewerSlide !== null;
   const displaySlide = outOfSync ? viewerSlide! : currentSlide;
 
-  stateRef.current = { currentSlide, totalSlides, blanked, showCode, settings };
+  stateRef.current = { currentSlide, totalSlides, blanked, showCode, settings, annotations };
+
+  // Persist the controller's drawings across reloads.
+  useEffect(() => {
+    if (role === "controller") lsSet(annotationsKey(id!), annotations);
+  }, [annotations, role, id]);
+
+  // Shared stroke mutations, applied identically whether the change originated
+  // locally (controller) or arrived over the socket / BroadcastChannel.
+  const applyCommit = useCallback((slide: number, stroke: Stroke) => {
+    setAnnotations((prev) => ({ ...prev, [slide]: [...(prev[slide] ?? []), stroke] }));
+  }, []);
+  const applyUndo = useCallback((slide: number) => {
+    setAnnotations((prev) =>
+      prev[slide]?.length ? { ...prev, [slide]: prev[slide].slice(0, -1) } : prev
+    );
+  }, []);
+  const applyClear = useCallback((slide: number) => {
+    setAnnotations((prev) => (prev[slide]?.length ? { ...prev, [slide]: [] } : prev));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,6 +191,11 @@ export default function Presentation() {
       else if (type === "media_time_update") setMediaTime(payload);
       else if (type === "audio_update") setAudioState(payload);
       else if (type === "laser_update") setLaser(payload);
+      else if (type === "stroke_progress") setRemoteDraft(payload);
+      else if (type === "stroke_commit") applyCommit(payload.slide, payload.stroke);
+      else if (type === "stroke_undo") applyUndo(payload.slide);
+      else if (type === "annotations_clear") applyClear(payload.slide);
+      else if (type === "annotations_state") setAnnotations(payload);
       else if (type === "session_ended") navigate("/", { replace: true });
       else if (type === "state_request") {
         // Controller is the source of truth for a local session; reply so a
@@ -174,6 +209,7 @@ export default function Presentation() {
         setBlanked(payload.blanked);
         setShowCode(!!payload.showCode);
         setSettings(payload.settings);
+        if (requestedRole !== "controller" && payload.annotations) setAnnotations(payload.annotations);
       }
     };
 
@@ -236,10 +272,17 @@ export default function Presentation() {
       }
     }, RECONNECT_EVERY_MS);
 
-    socket.on("session_state", ({ currentSlide, totalSlides, role: grantedRole, settings: s }) => {
+    socket.on("session_state", ({ currentSlide, totalSlides, role: grantedRole, settings: s, annotations: serverAnnotations }) => {
       setCurrentSlide(currentSlide);
       setTotalSlides(totalSlides);
       if (s) setSettings(s);
+      if (serverAnnotations && Object.keys(serverAnnotations).length) {
+        setAnnotations(serverAnnotations);
+      } else if (requestedRole === "controller" && hasAnyStrokes(annotationsRef.current)) {
+        // The server has no drawings for this session (fresh boot / restart);
+        // reseed it from this controller's persisted copy.
+        socket.emit("annotations_sync", annotationsRef.current);
+      }
       if (grantedRole && grantedRole !== requestedRole) {
         setRole(grantedRole);
         setSearchParams({ role: grantedRole }, { replace: true });
@@ -284,6 +327,26 @@ export default function Presentation() {
       setLaser(payload);
     });
 
+    socket.on("stroke_progress", (payload: { slide: number; stroke: Stroke | null }) => {
+      setRemoteDraft(payload);
+    });
+
+    socket.on("stroke_commit", ({ slide, stroke }: { slide: number; stroke: Stroke }) => {
+      applyCommit(slide, stroke);
+    });
+
+    socket.on("stroke_undo", ({ slide }: { slide: number }) => {
+      applyUndo(slide);
+    });
+
+    socket.on("annotations_clear", ({ slide }: { slide: number }) => {
+      applyClear(slide);
+    });
+
+    socket.on("annotations_state", (bySlide: AnnotationsBySlide) => {
+      setAnnotations(bySlide);
+    });
+
     socket.on("error", ({ message }) => {
       setError(message);
     });
@@ -308,11 +371,16 @@ export default function Presentation() {
       socket.off("media_time_update");
       socket.off("audio_update");
       socket.off("laser_update");
+      socket.off("stroke_progress");
+      socket.off("stroke_commit");
+      socket.off("stroke_undo");
+      socket.off("annotations_clear");
+      socket.off("annotations_state");
       socket.off("error");
       socket.off("session_ended");
       socket.disconnect();
     };
-  }, [id, local, requestedRole, navigate, setSearchParams]);
+  }, [id, local, requestedRole, navigate, setSearchParams, applyCommit, applyUndo, applyClear]);
 
   useEffect(() => {
     setMediaState((s) => (s.id === null ? s : { id: null, action: "pause", seq: Date.now() }));
@@ -476,6 +544,94 @@ export default function Presentation() {
     [broadcast]
   );
 
+  // --- Drawing (controller side) ---
+
+  const onStrokeProgress = useCallback(
+    (stroke: Stroke | null) => {
+      const payload = { slide: currentSlide, stroke };
+      broadcast(
+        { type: "stroke_progress", payload },
+        { event: "stroke_progress", payload }
+      );
+    },
+    [currentSlide, broadcast]
+  );
+
+  const onStrokeCommit = useCallback(
+    (stroke: Stroke) => {
+      applyCommit(currentSlide, stroke);
+      const payload = { slide: currentSlide, stroke };
+      broadcast(
+        { type: "stroke_commit", payload },
+        { event: "stroke_commit", payload }
+      );
+    },
+    [currentSlide, broadcast, applyCommit]
+  );
+
+  const onStrokeUndo = useCallback(() => {
+    applyUndo(currentSlide);
+    const payload = { slide: currentSlide };
+    broadcast({ type: "stroke_undo", payload }, { event: "stroke_undo", payload });
+  }, [currentSlide, broadcast, applyUndo]);
+
+  const onAnnotationsClear = useCallback(() => {
+    applyClear(currentSlide);
+    const payload = { slide: currentSlide };
+    broadcast({ type: "annotations_clear", payload }, { event: "annotations_clear", payload });
+  }, [currentSlide, broadcast, applyClear]);
+
+  const onAnnotationsReplace = useCallback(
+    (bySlide: AnnotationsBySlide) => {
+      setAnnotations(bySlide);
+      broadcast(
+        { type: "annotations_state", payload: bySlide },
+        { event: "annotations_sync", payload: bySlide }
+      );
+    },
+    [broadcast]
+  );
+
+  const triggerDownload = (blob: Blob, name: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const onDownloadAnnotatedPdf = useCallback(async () => {
+    if (!pdf) return;
+    const original = await pdf.getData();
+    const annotated = await renderAnnotatedPdf(original, annotationsRef.current);
+    const buf = annotated.buffer.slice(
+      annotated.byteOffset,
+      annotated.byteOffset + annotated.byteLength
+    ) as ArrayBuffer;
+    triggerDownload(new Blob([buf], { type: "application/pdf" }), `${filename || "slides"}-annotated.pdf`);
+  }, [pdf, filename]);
+
+  const onSaveDrawing = useCallback(() => {
+    triggerDownload(
+      new Blob([serializeDrawing(annotationsRef.current)], { type: "application/json" }),
+      `${filename || "slides"}-drawing.json`
+    );
+  }, [filename]);
+
+  const onLoadDrawing = useCallback(
+    async (file: File) => {
+      try {
+        onAnnotationsReplace(parseDrawing(await file.text()));
+      } catch (e) {
+        window.alert(e instanceof Error ? e.message : "Failed to load drawing");
+      }
+    },
+    [onAnnotationsReplace]
+  );
+
   const onAudioChange = useCallback(
     (next: { muted: boolean; target: AudioState["target"] }) => {
       const payload: AudioState = { ...next, seq: Date.now() };
@@ -556,6 +712,8 @@ export default function Presentation() {
         onViewerGoTo={viewerGoTo}
         onResync={resync}
         laser={laser}
+        strokes={annotations[displaySlide] ?? []}
+        draft={remoteDraft && remoteDraft.slide === displaySlide ? remoteDraft.stroke : null}
       />
     );
   }
@@ -607,6 +765,14 @@ export default function Presentation() {
       audioState={audioState}
       onAudioChange={onAudioChange}
       onLaserMove={onLaserMove}
+      annotations={annotations}
+      onStrokeProgress={onStrokeProgress}
+      onStrokeCommit={onStrokeCommit}
+      onStrokeUndo={onStrokeUndo}
+      onAnnotationsClear={onAnnotationsClear}
+      onDownloadAnnotatedPdf={onDownloadAnnotatedPdf}
+      onSaveDrawing={onSaveDrawing}
+      onLoadDrawing={onLoadDrawing}
     />
   );
 }

@@ -18,9 +18,12 @@ export const STORAGE_KEYS = {
   controllerOnboarded: "presio_controller_onboarded",
   // Whether the mobile "best on desktop" notice has been dismissed.
   mobileNoticeSeen: "presio_mobile_notice_seen",
+  // Last-used drawing color/width for the annotation tools.
+  penStyle: "presio_pen_style",
 } as const;
 
 export const timerKey = (id: string) => `presio_timer_${id}`;
+export const annotationsKey = (id: string) => `presio_annotations_${id}`;
 export const sessionKey = (id: string) => `session_${id}`;
 export const viewerOpenedKey = (id: string) => `presio_viewer_opened_${id}`;
 

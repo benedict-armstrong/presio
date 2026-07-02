@@ -13,7 +13,7 @@ import {
 import { MediaOverlay, type MediaState, type AudioState, type AudioTarget } from "@/components/MediaOverlay";
 import { AnnotationOverlay } from "@/components/AnnotationOverlay";
 import { AnnotationToolbar } from "@/components/AnnotationToolbar";
-import type { Tool, LaserPoint } from "@/lib/annotations";
+import { DEFAULT_PEN_STYLE, type LaserPoint, type PenStyle, type Stroke, type Tool } from "@/lib/annotations";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
@@ -38,6 +38,17 @@ interface Props {
   tool?: Tool;
   onToolChange?: (tool: Tool) => void;
   onLaserMove?: (pt: LaserPoint | null) => void;
+  penStyle?: PenStyle;
+  onPenStyleChange?: (style: PenStyle) => void;
+  strokes?: readonly Stroke[];
+  hasDrawing?: boolean;
+  onStrokeProgress?: (stroke: Stroke | null) => void;
+  onStrokeCommit?: (stroke: Stroke) => void;
+  onStrokeUndo?: () => void;
+  onAnnotationsClear?: () => void;
+  onDownloadAnnotatedPdf?: () => void;
+  onSaveDrawing?: () => void;
+  onLoadDrawing?: (file: File) => void;
 }
 
 const TARGET_LABEL: Record<AudioTarget, string> = {
@@ -66,6 +77,17 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
       tool = "none",
       onToolChange,
       onLaserMove,
+      penStyle = DEFAULT_PEN_STYLE,
+      onPenStyleChange,
+      strokes = [],
+      hasDrawing = false,
+      onStrokeProgress,
+      onStrokeCommit,
+      onStrokeUndo,
+      onAnnotationsClear,
+      onDownloadAnnotatedPdf,
+      onSaveDrawing,
+      onLoadDrawing,
     },
     ref
   ) => {
@@ -92,9 +114,27 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
           <AnnotationOverlay
             containerRef={ref as React.RefObject<HTMLDivElement | null>}
             tool={tool}
+            penStyle={penStyle}
+            strokes={strokes}
             onLaserMove={onLaserMove}
+            onStrokeProgress={onStrokeProgress}
+            onStrokeCommit={onStrokeCommit}
           />
-          {onToolChange && <AnnotationToolbar tool={tool} onToolChange={onToolChange} />}
+          {onToolChange && onPenStyleChange && (
+            <AnnotationToolbar
+              tool={tool}
+              onToolChange={onToolChange}
+              penStyle={penStyle}
+              onPenStyleChange={onPenStyleChange}
+              canUndo={strokes.length > 0}
+              onUndo={onStrokeUndo ?? (() => {})}
+              onClear={onAnnotationsClear ?? (() => {})}
+              hasDrawing={hasDrawing}
+              onDownloadAnnotatedPdf={onDownloadAnnotatedPdf ?? (() => {})}
+              onSaveDrawing={onSaveDrawing ?? (() => {})}
+              onLoadDrawing={onLoadDrawing ?? (() => {})}
+            />
+          )}
         </div>
         {showControls && (
           <div className="flex flex-col gap-2 shrink-0 w-full">

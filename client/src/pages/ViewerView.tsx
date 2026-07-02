@@ -11,7 +11,7 @@ import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import type { PresentationSettings } from "./Presentation";
 import { MediaOverlay, type MediaState, type MediaTimeSync } from "@/components/MediaOverlay";
 import { AnnotationOverlay } from "@/components/AnnotationOverlay";
-import type { LaserPoint } from "@/lib/annotations";
+import type { LaserPoint, Stroke } from "@/lib/annotations";
 import type { MediaPlacement } from "@/lib/pdf";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
@@ -37,6 +37,8 @@ export function ViewerView({
   onViewerGoTo,
   onResync,
   laser,
+  strokes,
+  draft,
 }: {
   id: string;
   local: boolean;
@@ -57,6 +59,8 @@ export function ViewerView({
   onViewerGoTo: (slide: number) => void;
   onResync: () => void;
   laser: LaserPoint | null;
+  strokes: readonly Stroke[];
+  draft: Stroke | null;
 }) {
   const navigate = useNavigate();
   const [cursorVisible, setCursorVisible] = useState(true);
@@ -150,7 +154,7 @@ export function ViewerView({
         role="viewer"
       />
 
-      <AnnotationOverlay containerRef={canvasRef} remoteLaser={laser} />
+      <AnnotationOverlay containerRef={canvasRef} remoteLaser={laser} strokes={strokes} remoteDraft={draft} />
 
       <ViewerHint canNavigate={!local} />
 

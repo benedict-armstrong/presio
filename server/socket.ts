@@ -1,6 +1,14 @@
 import type { Server, Socket } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { sanitizeSettings, isValidSlideNumber, sanitizeLaserPoint } from "./validation.js";
+import {
+  sanitizeSettings,
+  isValidSlideNumber,
+  sanitizeLaserPoint,
+  sanitizeStroke,
+  sanitizeAnnotations,
+  MAX_STROKES_PER_SLIDE,
+  type AnnotationsBySlide,
+} from "./validation.js";
 
 export interface SocketState {
   // Which socket is the controller for each session.
@@ -9,10 +17,26 @@ export interface SocketState {
   blankedSessions: Set<string>;
   // Sessions currently showing the join code / QR on all viewers (transient).
   codeSessions: Set<string>;
+  // Committed drawings per session (in-memory; the controller re-seeds them
+  // after a server restart from its own persisted copy).
+  annotations: Map<string, AnnotationsBySlide>;
 }
 
 export function createSocketState(): SocketState {
-  return { controllers: new Map(), blankedSessions: new Set(), codeSessions: new Set() };
+  return {
+    controllers: new Map(),
+    blankedSessions: new Set(),
+    codeSessions: new Set(),
+    annotations: new Map(),
+  };
+}
+
+// Drop a session's transient socket state (on end / expiry).
+export function clearSessionState(state: SocketState, sessionId: string) {
+  state.controllers.delete(sessionId);
+  state.blankedSessions.delete(sessionId);
+  state.codeSessions.delete(sessionId);
+  state.annotations.delete(sessionId);
 }
 
 export function registerSocketHandlers(
@@ -20,7 +44,7 @@ export function registerSocketHandlers(
   supabase: SupabaseClient,
   state: SocketState
 ) {
-  const { controllers, blankedSessions, codeSessions } = state;
+  const { controllers, blankedSessions, codeSessions, annotations } = state;
 
   // Wrap an event handler so it only runs for the session's registered
   // controller, passing the resolved sessionId through. Mutating events
@@ -72,6 +96,7 @@ export function registerSocketHandlers(
           timerThreshold: data.timer_threshold,
           notePrefix: data.note_prefix,
         },
+        annotations: annotations.get(sessionId) ?? {},
       });
     });
 
@@ -131,6 +156,58 @@ export function registerSocketHandlers(
       const pt = sanitizeLaserPoint(payload);
       if (pt === undefined) return;
       socket.to(sessionId).emit("laser_update", pt);
+    }));
+
+    // --- Drawing annotations ---
+
+    // In-progress stroke preview: relay-only, nothing persisted.
+    socket.on("stroke_progress", controllerOnly(socket, (sessionId, payload: { slide?: unknown; stroke?: unknown }) => {
+      if (!isValidSlideNumber(payload?.slide, socket.data.totalSlides)) return;
+      if (payload.stroke === null) {
+        socket.to(sessionId).emit("stroke_progress", { slide: payload.slide, stroke: null });
+        return;
+      }
+      const stroke = sanitizeStroke(payload.stroke);
+      if (!stroke) return;
+      socket.to(sessionId).emit("stroke_progress", { slide: payload.slide, stroke });
+    }));
+
+    socket.on("stroke_commit", controllerOnly(socket, (sessionId, payload: { slide?: unknown; stroke?: unknown }) => {
+      const slide = payload?.slide as number;
+      if (!isValidSlideNumber(slide, socket.data.totalSlides)) return;
+      const stroke = sanitizeStroke(payload.stroke);
+      if (!stroke) return;
+      const bySlide = annotations.get(sessionId) ?? {};
+      const existing = bySlide[slide] ?? [];
+      if (existing.length >= MAX_STROKES_PER_SLIDE) return;
+      bySlide[slide] = [...existing, stroke];
+      annotations.set(sessionId, bySlide);
+      socket.to(sessionId).emit("stroke_commit", { slide, stroke });
+    }));
+
+    socket.on("stroke_undo", controllerOnly(socket, (sessionId, payload: { slide?: unknown }) => {
+      const slide = payload?.slide as number;
+      if (!isValidSlideNumber(slide, socket.data.totalSlides)) return;
+      const bySlide = annotations.get(sessionId);
+      if (bySlide?.[slide]?.length) bySlide[slide] = bySlide[slide].slice(0, -1);
+      socket.to(sessionId).emit("stroke_undo", { slide });
+    }));
+
+    socket.on("annotations_clear", controllerOnly(socket, (sessionId, payload: { slide?: unknown }) => {
+      const slide = payload?.slide as number;
+      if (!isValidSlideNumber(slide, socket.data.totalSlides)) return;
+      const bySlide = annotations.get(sessionId);
+      if (bySlide) delete bySlide[slide];
+      socket.to(sessionId).emit("annotations_clear", { slide });
+    }));
+
+    // Full replace: the controller reseeding after a server restart, or the
+    // presenter loading a saved drawing file.
+    socket.on("annotations_sync", controllerOnly(socket, (sessionId, payload: unknown) => {
+      const bySlide = sanitizeAnnotations(payload, socket.data.totalSlides);
+      if (!bySlide) return;
+      annotations.set(sessionId, bySlide);
+      socket.to(sessionId).emit("annotations_state", bySlide);
     }));
 
     socket.on("media_control", controllerOnly(socket, (sessionId, payload: { id: string; action: "play" | "pause" | "reset" }) => {

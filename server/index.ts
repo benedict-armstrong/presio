@@ -5,16 +5,17 @@ import { Server } from "socket.io";
 import { supabase } from "./supabase.js";
 import { createApp } from "./app.js";
 import { getAllowedOrigins } from "./security.js";
-import { registerSocketHandlers, createSocketState } from "./socket.js";
+import { registerSocketHandlers, createSocketState, clearSessionState } from "./socket.js";
 
 const allowedOrigins = getAllowedOrigins();
 const io = new Server({ cors: { origin: allowedOrigins.length ? allowedOrigins : false } });
 
-const app = createApp({ supabase, io });
+const socketState = createSocketState();
+const app = createApp({ supabase, io, socketState });
 const server = http.createServer(app);
 io.attach(server);
 
-registerSocketHandlers(io, supabase, createSocketState());
+registerSocketHandlers(io, supabase, socketState);
 
 // --- Cleanup expired sessions (every hour) ---
 
@@ -35,6 +36,7 @@ async function cleanupExpired() {
   // Mark as expired rather than deleting — the row is retained as a record.
   const ids = expired.map((s) => s.id);
   await supabase.from("sessions").update({ status: "expired" }).in("id", ids);
+  for (const id of ids) clearSessionState(socketState, id);
 
   console.log(`Expired ${expired.length} session(s)`);
 }

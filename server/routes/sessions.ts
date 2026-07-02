@@ -6,10 +6,12 @@ import { nanoid, customAlphabet } from "nanoid";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { isValidHttpsUrl } from "../validation.js";
 import { getBearerToken, resolveOptionalUserId, requireUser } from "../auth.js";
+import { clearSessionState, type SocketState } from "../socket.js";
 
 export interface RouteDeps {
   supabase: SupabaseClient;
   io: Server;
+  socketState?: SocketState;
 }
 
 const generateSessionId = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
@@ -20,7 +22,7 @@ const generatePassphrase = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 8)
 // not lifetime — presentations.
 export const MAX_CONCURRENT_PRESENTATIONS = 3;
 
-export function registerSessionRoutes(app: express.Express, { supabase, io }: RouteDeps) {
+export function registerSessionRoutes(app: express.Express, { supabase, io, socketState }: RouteDeps) {
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
   // Reserve a session code for a presentation kept local to the browser. No PDF
@@ -353,6 +355,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io }: Ro
       s.emit("session_ended");
       s.disconnect(true);
     }
+    if (socketState) clearSessionState(socketState, data.id);
 
     res.json({ ok: true });
   });

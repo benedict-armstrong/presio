@@ -50,12 +50,12 @@ import {
   removeLeaf,
   visibleKeys,
 } from "@/lib/controllerLayout";
-import { lsGetString, lsSetString, viewerOpenedKey } from "@/lib/storage";
+import { lsGet, lsSet, lsGetString, lsSetString, viewerOpenedKey, STORAGE_KEYS } from "@/lib/storage";
 import { type MosaicNode } from "react-mosaic-component";
 import type { PresentationSettings } from "./Presentation";
 import type { MediaState, AudioState } from "@/components/MediaOverlay";
 import type { MediaPlacement } from "@/lib/pdf";
-import type { Tool, LaserPoint } from "@/lib/annotations";
+import { DEFAULT_PEN_STYLE, hasAnyStrokes, type AnnotationsBySlide, type LaserPoint, type PenStyle, type Stroke, type Tool } from "@/lib/annotations";
 
 // --- Component ---
 
@@ -89,6 +89,14 @@ interface ControllerViewProps {
   audioState: AudioState;
   onAudioChange: (next: { muted: boolean; target: AudioState["target"] }) => void;
   onLaserMove: (pt: LaserPoint | null) => void;
+  annotations: AnnotationsBySlide;
+  onStrokeProgress: (stroke: Stroke | null) => void;
+  onStrokeCommit: (stroke: Stroke) => void;
+  onStrokeUndo: () => void;
+  onAnnotationsClear: () => void;
+  onDownloadAnnotatedPdf: () => void;
+  onSaveDrawing: () => void;
+  onLoadDrawing: (file: File) => void;
 }
 
 export function ControllerView({
@@ -120,6 +128,14 @@ export function ControllerView({
   audioState,
   onAudioChange,
   onLaserMove,
+  annotations,
+  onStrokeProgress,
+  onStrokeCommit,
+  onStrokeUndo,
+  onAnnotationsClear,
+  onDownloadAnnotatedPdf,
+  onSaveDrawing,
+  onLoadDrawing,
 }: ControllerViewProps) {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
@@ -138,6 +154,12 @@ export function ControllerView({
   const [onboardingOpen, setOnboardingOpen] = useState(() => !hasCompletedControllerOnboarding());
   // Active annotation tool for the current-slide card (laser pointer etc.).
   const [tool, setTool] = useState<Tool>("none");
+  // Drawing color/width, remembered across presentations.
+  const [penStyle, setPenStyle] = useState<PenStyle>(() => lsGet(STORAGE_KEYS.penStyle, DEFAULT_PEN_STYLE));
+  const changePenStyle = useCallback((style: PenStyle) => {
+    setPenStyle(style);
+    lsSet(STORAGE_KEYS.penStyle, style);
+  }, []);
 
   const { user } = useAuth();
   const loggedIn = !!user;
@@ -269,6 +291,17 @@ export function ControllerView({
           tool={tool}
           onToolChange={setTool}
           onLaserMove={onLaserMove}
+          penStyle={penStyle}
+          onPenStyleChange={changePenStyle}
+          strokes={annotations[currentSlide] ?? []}
+          hasDrawing={hasAnyStrokes(annotations)}
+          onStrokeProgress={onStrokeProgress}
+          onStrokeCommit={onStrokeCommit}
+          onStrokeUndo={onStrokeUndo}
+          onAnnotationsClear={onAnnotationsClear}
+          onDownloadAnnotatedPdf={onDownloadAnnotatedPdf}
+          onSaveDrawing={onSaveDrawing}
+          onLoadDrawing={onLoadDrawing}
         />
       ),
     },

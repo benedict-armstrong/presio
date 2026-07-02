@@ -9,13 +9,15 @@ import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAllowedOrigins, buildCspDirectives } from "./security.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
+import type { SocketState } from "./socket.js";
 
 export interface AppDeps {
   supabase: SupabaseClient;
   io: Server;
+  socketState?: SocketState;
 }
 
-export function createApp({ supabase, io }: AppDeps): express.Express {
+export function createApp({ supabase, io, socketState }: AppDeps): express.Express {
   const app = express();
 
   const allowedOrigins = getAllowedOrigins();
@@ -51,7 +53,7 @@ export function createApp({ supabase, io }: AppDeps): express.Express {
   const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false });
   app.use("/api", apiLimiter);
 
-  registerSessionRoutes(app, { supabase, io });
+  registerSessionRoutes(app, { supabase, io, socketState });
 
   // --- Serve client in production ---
 
