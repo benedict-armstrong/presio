@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, Laptop, MonitorPlay, Share2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Laptop, MonitorPlay, Share2, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { markControllerOnboarded } from "@/lib/onboarding";
@@ -55,7 +55,8 @@ function buildSteps(onOpenViewer: () => void): Step[] {
             keep your notes and controls here. Open it now:
           </p>
           <div className="flex justify-center pt-2">
-            <Button onClick={onOpenViewer}>Open Viewer</Button>
+            {/* Stop propagation so the card's click-to-advance doesn't fire too. */}
+            <Button onClick={(e) => { e.stopPropagation(); onOpenViewer(); }}>Open Viewer</Button>
           </div>
           <p className="text-center text-xs">
             You can always open it later from the menu bar at the top.
@@ -165,7 +166,16 @@ export function ControllerOnboarding({
 
   return (
     <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <Card className="w-full max-w-xl min-h-[60vh] flex flex-col">
+      {/* Clicking the card advances, like Space; interactive controls stop propagation. */}
+      <Card className="relative w-full max-w-xl min-h-[60vh] flex flex-col cursor-pointer" onClick={next}>
+        <button
+          type="button"
+          aria-label="Close tutorial"
+          onClick={(e) => { e.stopPropagation(); finish(); }}
+          className="absolute top-3 right-3 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted"
+        >
+          <X size={16} />
+        </button>
         <CardContent className="pt-6 flex flex-col flex-1 gap-5">
           <h2 className="text-lg font-semibold">{current.title}</h2>
 
@@ -186,7 +196,7 @@ export function ControllerOnboarding({
             {step > 0 ? (
               <button
                 type="button"
-                onClick={prev}
+                onClick={(e) => { e.stopPropagation(); prev(); }}
                 className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4"
               >
                 Back
