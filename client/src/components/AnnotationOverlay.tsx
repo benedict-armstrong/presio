@@ -59,7 +59,9 @@ export function AnnotationOverlay({
 }: Props) {
   const [rect, setRect] = useState<ContentRect | null>(null);
   const [localLaser, setLocalLaser] = useState<LaserPoint | null>(null);
-  const [remoteVisible, setRemoteVisible] = useState(false);
+  // The remote dot is visible until no update has arrived for REMOTE_HIDE_MS:
+  // `expired` remembers which laser point the hide timer already fired for.
+  const [expiredLaser, setExpiredLaser] = useState<LaserPoint | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const draftRef = useRef<Stroke | null>(null);
   const lastEmit = useRef(0);
@@ -85,16 +87,14 @@ export function AnnotationOverlay({
     };
   }, [containerRef]);
 
-  // Auto-hide the remote dot when updates stop arriving.
+  // Auto-hide the remote dot when updates stop arriving. Each update is a new
+  // point object, so a fresh point un-expires the dot without extra state.
   useEffect(() => {
-    if (!remoteLaser) {
-      setRemoteVisible(false);
-      return;
-    }
-    setRemoteVisible(true);
-    const t = setTimeout(() => setRemoteVisible(false), REMOTE_HIDE_MS);
+    if (!remoteLaser) return;
+    const t = setTimeout(() => setExpiredLaser(remoteLaser), REMOTE_HIDE_MS);
     return () => clearTimeout(t);
   }, [remoteLaser]);
+  const remoteVisible = !!remoteLaser && remoteLaser !== expiredLaser;
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;

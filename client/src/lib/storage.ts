@@ -18,11 +18,15 @@ export const STORAGE_KEYS = {
   controllerOnboarded: "presio_controller_onboarded",
   // Whether the mobile "best on desktop" notice has been dismissed.
   mobileNoticeSeen: "presio_mobile_notice_seen",
+  // Hidden ?desktop=1 escape hatch: force the desktop layout on mobile.
+  forceDesktop: "presio_force_desktop",
   // Last-used drawing color/width for the annotation tools.
   penStyle: "presio_pen_style",
   highlighterStyle: "presio_highlighter_style",
   // Whether the timer card also shows the current wall-clock time.
   timerShowClock: "presio_timer_show_clock",
+  // Timer mode/duration/warning — a device preference, not synced anywhere.
+  timerSettings: "presio_timer_settings",
   // Font-size multiplier for the speaker notes card.
   notesFontScale: "presio_notes_font_scale",
   // Email list prompt: "subscribed" | "dismissed" (absent = not asked yet).

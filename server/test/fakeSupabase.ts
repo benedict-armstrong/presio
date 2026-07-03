@@ -10,9 +10,6 @@ export interface SessionRow {
   filename?: string;
   total_slides?: number;
   current_slide?: number;
-  timer_mode?: string | null;
-  timer_duration?: number | null;
-  timer_threshold?: number | null;
   note_prefix?: string;
   controller_token?: string;
   passphrase?: string;

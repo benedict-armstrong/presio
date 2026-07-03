@@ -17,20 +17,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ControllerView } from "./ControllerView";
 import { ViewerView } from "./ViewerView";
 
-export interface PresentationSettings {
-  timerMode: string | null;
-  timerDuration: number | null;
-  timerThreshold: number | null;
-  notePrefix: string;
-}
-
-const defaultSettings: PresentationSettings = {
-  timerMode: null,
-  timerDuration: null,
-  timerThreshold: null,
-  notePrefix: "note:",
-};
-
 export default function Presentation() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -46,8 +32,6 @@ export default function Presentation() {
   const [totalSlides, setTotalSlides] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [settings, setSettings] = useState<PresentationSettings>(defaultSettings);
-  const [startedAt] = useState(() => Date.now());
   const [blanked, setBlanked] = useState(false);
   // Whether all viewers are currently showing the join code / QR overlay.
   const [showCode, setShowCode] = useState(false);
@@ -73,7 +57,7 @@ export default function Presentation() {
   const localUrlRef = useRef("");
   // Latest broadcastable state, for replying to a local window's state_request
   // without re-subscribing the channel on every slide change.
-  const stateRef = useRef({ currentSlide: 1, totalSlides: 0, blanked: false, showCode: false, settings: defaultSettings, annotations: {} as AnnotationsBySlide });
+  const stateRef = useRef({ currentSlide: 1, totalSlides: 0, blanked: false, showCode: false, annotations: {} as AnnotationsBySlide });
 
   // Resolved during load: true if this presentation's PDF lives in this
   // browser's IndexedDB (local session). null until known.
@@ -83,7 +67,7 @@ export default function Presentation() {
   const outOfSync = isViewer && viewerSlide !== null;
   const displaySlide = outOfSync ? viewerSlide! : currentSlide;
 
-  stateRef.current = { currentSlide, totalSlides, blanked, showCode, settings, annotations };
+  stateRef.current = { currentSlide, totalSlides, blanked, showCode, annotations };
 
   // Persist the controller's drawings across reloads.
   useEffect(() => {
@@ -150,12 +134,6 @@ export default function Presentation() {
         setFilename(session.filename);
         setTotalSlides(session.total_slides);
         setCurrentSlide(session.current_slide);
-        setSettings({
-          timerMode: session.timer_mode ?? null,
-          timerDuration: session.timer_duration ?? null,
-          timerThreshold: session.timer_threshold ?? null,
-          notePrefix: session.note_prefix ?? "note:",
-        });
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load presentation");
       } finally {
@@ -186,7 +164,6 @@ export default function Presentation() {
       if (type === "slide_update") setCurrentSlide(payload.slideNumber);
       else if (type === "blank_update") setBlanked(payload.blanked);
       else if (type === "code_update") setShowCode(payload.showCode);
-      else if (type === "settings_update") setSettings(payload);
       else if (type === "media_update") setMediaState(payload);
       else if (type === "media_time_update") setMediaTime(payload);
       else if (type === "audio_update") setAudioState(payload);
@@ -208,7 +185,6 @@ export default function Presentation() {
         if (payload.totalSlides) setTotalSlides(payload.totalSlides);
         setBlanked(payload.blanked);
         setShowCode(!!payload.showCode);
-        setSettings(payload.settings);
         if (requestedRole !== "controller" && payload.annotations) setAnnotations(payload.annotations);
       }
     };
@@ -272,10 +248,9 @@ export default function Presentation() {
       }
     }, RECONNECT_EVERY_MS);
 
-    socket.on("session_state", ({ currentSlide, totalSlides, role: grantedRole, settings: s, annotations: serverAnnotations }) => {
+    socket.on("session_state", ({ currentSlide, totalSlides, role: grantedRole, annotations: serverAnnotations }) => {
       setCurrentSlide(currentSlide);
       setTotalSlides(totalSlides);
-      if (s) setSettings(s);
       if (serverAnnotations && Object.keys(serverAnnotations).length) {
         setAnnotations(serverAnnotations);
       } else if (requestedRole === "controller" && hasAnyStrokes(annotationsRef.current)) {
@@ -297,10 +272,6 @@ export default function Presentation() {
 
     socket.on("sync_all", () => {
       setViewerSlide(null);
-    });
-
-    socket.on("settings_update", (s: PresentationSettings) => {
-      setSettings(s);
     });
 
     socket.on("blank_update", ({ blanked }: { blanked: boolean }) => {
@@ -364,7 +335,6 @@ export default function Presentation() {
       socket.off("session_state");
       socket.off("slide_update");
       socket.off("sync_all");
-      socket.off("settings_update");
       socket.off("blank_update");
       socket.off("code_update");
       socket.off("media_update");
@@ -698,8 +668,6 @@ export default function Presentation() {
         pdf={pdf!}
         pdfUrl={pdfUrl}
         canvasRef={currentCanvasRef}
-        settings={settings}
-        startedAt={startedAt}
         blanked={blanked}
         mediaPlacements={currentMedia}
         mediaState={mediaState}
@@ -732,15 +700,6 @@ export default function Presentation() {
       onSynced={() => setLocal(false)}
       onSaveNotes={saveNotes}
       currentCanvasRef={currentCanvasRef}
-      settings={settings}
-      onSettingsChange={(s) => {
-        setSettings(s);
-        broadcast(
-          { type: "settings_update", payload: s },
-          { event: "settings_change", payload: s }
-        );
-      }}
-      startedAt={startedAt}
       blanked={blanked}
       onBlankToggle={() => {
         const next = !blanked;

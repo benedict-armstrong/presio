@@ -17,9 +17,6 @@ const SESSION = {
   controller_token: "ctrl-tok",
   total_slides: 12,
   current_slide: 1,
-  timer_mode: "down",
-  timer_duration: 600,
-  timer_threshold: 60,
   note_prefix: "note:",
 };
 
@@ -152,26 +149,3 @@ describe("code_toggle authorization", () => {
   });
 });
 
-describe("settings_change authorization", () => {
-  it("emits coerced settings from the controller", async () => {
-    const ctrl = connect();
-    await join(ctrl, "controller", "ctrl-tok");
-
-    const got = once<{ timerMode: string | null; notePrefix: string }>(ctrl, "settings_update");
-    ctrl.emit("settings_change", { timerMode: "bogus", timerDuration: -3, notePrefix: "x:" });
-    const s = await got;
-    expect(s.timerMode).toBeNull(); // bogus coerced to null
-    expect(s.notePrefix).toBe("x:");
-  });
-
-  it("ignores settings changes from a viewer", async () => {
-    const ctrl = connect();
-    const viewer = connect();
-    await join(ctrl, "controller", "ctrl-tok");
-    await join(viewer, "viewer");
-
-    const ignored = notReceived(ctrl, "settings_update");
-    viewer.emit("settings_change", { timerMode: "up" });
-    expect(await ignored).toBe(true);
-  });
-});

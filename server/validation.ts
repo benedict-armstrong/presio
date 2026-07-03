@@ -13,35 +13,6 @@ export function isValidHttpsUrl(value: unknown): value is string {
   }
 }
 
-export interface RawSettings {
-  timerMode?: string | null;
-  timerDuration?: number | null;
-  timerThreshold?: number | null;
-  notePrefix?: string;
-}
-
-export interface SanitizedSettings {
-  timerMode: "up" | "down" | null;
-  timerDuration: number | null;
-  timerThreshold: number | null;
-  notePrefix: string;
-}
-
-// Coerce a settings payload to known-good values so a malformed message can't
-// corrupt the session row.
-export function sanitizeSettings(settings: RawSettings): SanitizedSettings {
-  const timerMode =
-    settings.timerMode === "up" || settings.timerMode === "down" ? settings.timerMode : null;
-  const sanitizeDuration = (n: number | null | undefined) =>
-    typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : null;
-  return {
-    timerMode,
-    timerDuration: sanitizeDuration(settings.timerDuration),
-    timerThreshold: sanitizeDuration(settings.timerThreshold),
-    notePrefix: typeof settings.notePrefix === "string" ? settings.notePrefix.slice(0, 100) : "note:",
-  };
-}
-
 // Light-touch email validation for the newsletter list: something@something.tld
 // with sane length. Deliverability is not our problem here.
 export function isValidEmail(value: unknown): value is string {

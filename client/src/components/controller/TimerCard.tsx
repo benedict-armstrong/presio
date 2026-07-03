@@ -2,8 +2,17 @@ import { useState, useEffect, useCallback } from "react";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
-import type { PresentationSettings } from "@/pages/Presentation";
 import { SettingsGearButton } from "./SettingsGearButton";
+
+// Presenter-side timer preferences. Purely a device-local concern (persisted in
+// localStorage by the controller) — never synced to the server or viewers.
+export interface TimerSettings {
+  mode: "up" | "down";
+  /** Countdown start, in seconds. Only meaningful in "down" mode. */
+  duration: number | null;
+  /** Warning point, in seconds: "down" = remaining time, "up" = elapsed time. */
+  threshold: number | null;
+}
 
 interface TimerState {
   running: boolean;
@@ -31,6 +40,69 @@ function formatTime(totalSeconds: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
 
+function elapsedOf(t: TimerState): number {
+  return t.running && t.startedAt
+    ? t.accumulated + Math.floor((Date.now() - t.startedAt) / 1000)
+    : t.accumulated;
+}
+
+/** Elapsed-seconds stopwatch persisted per session, shared by the desktop card
+ *  and the mobile footer readout. */
+function useSessionTimer(id: string) {
+  const [timer, setTimer] = useState<TimerState>(() => loadTimerState(id));
+  const [elapsed, setElapsed] = useState(() => elapsedOf(loadTimerState(id)));
+
+  useEffect(() => {
+    if (!timer.running) return;
+    const interval = setInterval(() => setElapsed(elapsedOf(timer)), 1000);
+    return () => clearInterval(interval);
+  }, [timer]);
+
+  useEffect(() => {
+    saveTimerState(id, timer);
+  }, [id, timer]);
+
+  const start = useCallback(() => {
+    setTimer((t) => t.running ? t : { ...t, running: true, startedAt: Date.now() });
+  }, []);
+
+  const stop = useCallback(() => {
+    if (!timer.running) return;
+    const total = elapsedOf(timer);
+    setTimer({ running: false, startedAt: null, accumulated: total });
+    setElapsed(total);
+  }, [timer]);
+
+  const reset = useCallback(() => {
+    setTimer({ running: false, startedAt: null, accumulated: 0 });
+    setElapsed(0);
+  }, []);
+
+  return { elapsed, running: timer.running, start, stop, reset };
+}
+
+// Map elapsed seconds through the settings: what to display and how far into
+// the warning zone we are (0 = none, ramping to 1 = fully overdue).
+function timerReadout(elapsed: number, settings: TimerSettings): { seconds: number; warning: number } {
+  const threshold = settings.threshold ?? 0;
+  if (settings.mode === "down" && settings.duration) {
+    const remaining = Math.max(0, settings.duration - elapsed);
+    if (remaining === 0) return { seconds: 0, warning: 1 };
+    if (threshold > 0 && remaining <= threshold) {
+      return { seconds: remaining, warning: 1 - remaining / threshold };
+    }
+    return { seconds: remaining, warning: 0 };
+  }
+  if (threshold > 0 && elapsed >= threshold) {
+    // Ramp to full red over the minute after the warning point.
+    return { seconds: elapsed, warning: Math.min(1, (elapsed - threshold) / 60) };
+  }
+  return { seconds: elapsed, warning: 0 };
+}
+
+const warningStyle = (warning: number) =>
+  warning > 0 ? { color: `hsl(${(1 - warning) * 30}, 90%, 50%)` } : undefined;
+
 const inputCls = "w-14 rounded-md border border-input bg-background px-1.5 py-1 text-xs text-center placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 function formatClock(d: Date): string {
@@ -40,14 +112,15 @@ function formatClock(d: Date): string {
 
 export function TimerCard({
   id,
+  settings,
   showClock = false,
 }: {
   id: string;
+  settings: TimerSettings;
   /** Also show the current wall-clock time under the elapsed timer. */
   showClock?: boolean;
 }) {
-  const [timer, setTimer] = useState<TimerState>(() => loadTimerState(id));
-  const [display, setDisplay] = useState(0);
+  const { elapsed, running, start, stop, reset } = useSessionTimer(id);
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -56,45 +129,16 @@ export function TimerCard({
     return () => clearInterval(interval);
   }, [showClock]);
 
-  const computeElapsed = useCallback(() => {
-    if (timer.running && timer.startedAt) {
-      return timer.accumulated + Math.floor((Date.now() - timer.startedAt) / 1000);
-    }
-    return timer.accumulated;
-  }, [timer]);
-
-  useEffect(() => {
-    setDisplay(computeElapsed());
-    if (!timer.running) return;
-    const interval = setInterval(() => setDisplay(computeElapsed()), 1000);
-    return () => clearInterval(interval);
-  }, [timer, computeElapsed]);
-
-  useEffect(() => {
-    saveTimerState(id, timer);
-  }, [id, timer]);
-
-  const start = () => {
-    setTimer((t) => t.running ? t : { ...t, running: true, startedAt: Date.now() });
-  };
-
-  const stop = () => {
-    setTimer((t) => {
-      if (!t.running) return t;
-      const extra = t.startedAt ? Math.floor((Date.now() - t.startedAt) / 1000) : 0;
-      return { running: false, startedAt: null, accumulated: t.accumulated + extra };
-    });
-  };
-
-  const reset = () => {
-    setTimer({ running: false, startedAt: null, accumulated: 0 });
-  };
+  const { seconds, warning } = timerReadout(elapsed, settings);
 
   return (
     <div className="flex flex-col h-full gap-2">
       <div className="flex flex-col items-center justify-center flex-1 gap-2">
-        <span className="font-mono tabular-nums text-2xl font-semibold">
-          {formatTime(display)}
+        <span
+          className="font-mono tabular-nums text-2xl font-semibold transition-colors duration-500"
+          style={warningStyle(warning)}
+        >
+          {formatTime(seconds)}
         </span>
         {showClock && (
           <span data-testid="timer-clock" className="font-mono tabular-nums text-sm text-muted-foreground">
@@ -102,7 +146,7 @@ export function TimerCard({
           </span>
         )}
         <div className="flex gap-1.5">
-          {timer.running ? (
+          {running ? (
             <Button size="sm" variant="outline" onClick={stop}>Stop</Button>
           ) : (
             <Button size="sm" variant="outline" onClick={start}>Start</Button>
@@ -114,7 +158,26 @@ export function TimerCard({
   );
 }
 
-type TimerMode = "off" | "up" | "down";
+/** Compact tap-to-start/stop readout of the same per-session timer, for the
+ *  mobile controller footer. */
+export function MobileTimer({ id, settings }: { id: string; settings: TimerSettings }) {
+  const { elapsed, running, start, stop } = useSessionTimer(id);
+  const { seconds, warning } = timerReadout(elapsed, settings);
+
+  return (
+    <button
+      type="button"
+      onClick={running ? stop : start}
+      title={running ? "Stop timer" : "Start timer"}
+      className={`font-mono tabular-nums text-xs font-medium transition-colors duration-500 ${
+        running ? "" : "text-muted-foreground"
+      }`}
+      style={warningStyle(warning)}
+    >
+      {formatTime(seconds)}
+    </button>
+  );
+}
 
 export function TimerSettingsDialog({
   settings,
@@ -123,22 +186,20 @@ export function TimerSettingsDialog({
   onShowClockChange,
   onClose,
 }: {
-  settings: PresentationSettings;
-  onSettingsChange: (s: PresentationSettings) => void;
+  settings: TimerSettings;
+  onSettingsChange: (s: TimerSettings) => void;
   showClock: boolean;
   onShowClockChange: (show: boolean) => void;
   onClose: () => void;
 }) {
-  const timerMode: TimerMode = (settings.timerMode ?? "off") as TimerMode;
-
-  const updateSetting = (patch: Partial<PresentationSettings>) => {
+  const updateSetting = (patch: Partial<TimerSettings>) => {
     onSettingsChange({ ...settings, ...patch });
   };
 
-  const durMin = settings.timerDuration ? String(Math.floor(settings.timerDuration / 60)) : "";
-  const durSec = settings.timerDuration ? String(settings.timerDuration % 60) : "";
-  const thrMin = settings.timerThreshold ? String(Math.floor(settings.timerThreshold / 60)) : "";
-  const thrSec = settings.timerThreshold ? String(settings.timerThreshold % 60) : "";
+  const durMin = settings.duration ? String(Math.floor(settings.duration / 60)) : "";
+  const durSec = settings.duration ? String(settings.duration % 60) : "";
+  const thrMin = settings.threshold ? String(Math.floor(settings.threshold / 60)) : "";
+  const thrSec = settings.threshold ? String(settings.threshold % 60) : "";
 
   const parseDuration = (min: string, sec: string) => {
     const v = (parseInt(min || "0", 10) * 60) + parseInt(sec || "0", 10);
@@ -152,52 +213,53 @@ export function TimerSettingsDialog({
         <div className="space-y-1">
           <label className="text-xs font-medium">Mode</label>
           <div className="flex gap-1">
-            {(["off", "up", "down"] as const).map((m) => (
+            {(["up", "down"] as const).map((m) => (
               <button
                 key={m}
                 type="button"
-                onClick={() => updateSetting({ timerMode: m === "off" ? null : m })}
+                onClick={() => updateSetting({ mode: m })}
                 className={`flex-1 rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
-                  timerMode === m
+                  settings.mode === m
                     ? "border-primary bg-primary text-primary-foreground"
                     : "border-input hover:bg-accent"
                 }`}
               >
-                {m === "off" ? "Off" : m === "up" ? "Up" : "Down"}
+                {m === "up" ? "Count up" : "Count down"}
               </button>
             ))}
           </div>
         </div>
-        {timerMode !== "off" && (
-          <>
-            {timerMode === "down" && (
-              <div className="space-y-1">
-                <label className="text-xs font-medium">Duration</label>
-                <div className="flex items-center gap-1">
-                  <input type="number" min="0" max="999" placeholder="mm" value={durMin}
-                    onChange={(e) => updateSetting({ timerDuration: parseDuration(e.target.value, durSec) })}
-                    className={inputCls} />
-                  <span className="text-muted-foreground text-xs">:</span>
-                  <input type="number" min="0" max="59" placeholder="ss" value={durSec}
-                    onChange={(e) => updateSetting({ timerDuration: parseDuration(durMin, e.target.value) })}
-                    className={inputCls} />
-                </div>
-              </div>
-            )}
-            <div className="space-y-1">
-              <label className="text-xs font-medium">Warning</label>
-              <div className="flex items-center gap-1">
-                <input type="number" min="0" max="999" placeholder="mm" value={thrMin}
-                  onChange={(e) => updateSetting({ timerThreshold: parseDuration(e.target.value, thrSec) })}
-                  className={inputCls} />
-                <span className="text-muted-foreground text-xs">:</span>
-                <input type="number" min="0" max="59" placeholder="ss" value={thrSec}
-                  onChange={(e) => updateSetting({ timerThreshold: parseDuration(thrMin, e.target.value) })}
-                  className={inputCls} />
-              </div>
+        {settings.mode === "down" && (
+          <div className="space-y-1">
+            <label className="text-xs font-medium">Duration</label>
+            <div className="flex items-center gap-1">
+              <input type="number" min="0" max="999" placeholder="mm" value={durMin}
+                onChange={(e) => updateSetting({ duration: parseDuration(e.target.value, durSec) })}
+                className={inputCls} />
+              <span className="text-muted-foreground text-xs">:</span>
+              <input type="number" min="0" max="59" placeholder="ss" value={durSec}
+                onChange={(e) => updateSetting({ duration: parseDuration(durMin, e.target.value) })}
+                className={inputCls} />
             </div>
-          </>
+          </div>
         )}
+        <div className="space-y-1">
+          <label className="text-xs font-medium">Warning</label>
+          <div className="flex items-center gap-1">
+            <input type="number" min="0" max="999" placeholder="mm" value={thrMin}
+              onChange={(e) => updateSetting({ threshold: parseDuration(e.target.value, thrSec) })}
+              className={inputCls} />
+            <span className="text-muted-foreground text-xs">:</span>
+            <input type="number" min="0" max="59" placeholder="ss" value={thrSec}
+              onChange={(e) => updateSetting({ threshold: parseDuration(thrMin, e.target.value) })}
+              className={inputCls} />
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {settings.mode === "down"
+              ? "Turns the timer red when this much time remains."
+              : "Turns the timer red after this much time has passed."}
+          </p>
+        </div>
         <button
           type="button"
           data-testid="timer-show-clock"

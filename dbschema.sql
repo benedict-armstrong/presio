@@ -8,9 +8,6 @@ create table if not exists sessions (
   current_slide integer not null default 1,
   controller_token text not null,
   passphrase text not null,
-  timer_mode text,
-  timer_duration integer,
-  timer_threshold integer,
   note_prefix text not null default 'note:',
   local boolean not null default false,
   user_id uuid references auth.users,
@@ -32,6 +29,12 @@ alter table sessions add column if not exists user_id uuid references auth.users
 -- external; pdf_path <> '' ⇒ Supabase-hosted.
 alter table sessions add column if not exists pdf_url text not null default '';
 alter table sessions add column if not exists status text not null default 'active';
+
+-- The timer became a device-local preference (never synced), so the settings
+-- columns are gone. Drop them from deployments that predate the change.
+alter table sessions drop column if exists timer_mode;
+alter table sessions drop column if exists timer_duration;
+alter table sessions drop column if exists timer_threshold;
 
 -- Index for cleanup query
 create index if not exists idx_sessions_expires_at on sessions (expires_at);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isValidHttpsUrl, sanitizeSettings, isValidSlideNumber } from "./validation.js";
+import { isValidHttpsUrl, isValidSlideNumber } from "./validation.js";
 
 describe("isValidHttpsUrl", () => {
   it("accepts well-formed https URLs", () => {
@@ -15,26 +15,6 @@ describe("isValidHttpsUrl", () => {
     expect(isValidHttpsUrl("")).toBe(false);
     expect(isValidHttpsUrl(undefined)).toBe(false);
     expect(isValidHttpsUrl(42)).toBe(false);
-  });
-});
-
-describe("sanitizeSettings", () => {
-  it("passes through valid values", () => {
-    expect(
-      sanitizeSettings({ timerMode: "down", timerDuration: 600, timerThreshold: 60, notePrefix: "n:" })
-    ).toEqual({ timerMode: "down", timerDuration: 600, timerThreshold: 60, notePrefix: "n:" });
-  });
-  it("coerces an unknown timerMode to null", () => {
-    expect(sanitizeSettings({ timerMode: "sideways" }).timerMode).toBeNull();
-  });
-  it("nulls negative / non-finite durations", () => {
-    const out = sanitizeSettings({ timerDuration: -5, timerThreshold: Infinity });
-    expect(out.timerDuration).toBeNull();
-    expect(out.timerThreshold).toBeNull();
-  });
-  it("defaults notePrefix to 'note:' and caps it at 100 chars", () => {
-    expect(sanitizeSettings({}).notePrefix).toBe("note:");
-    expect(sanitizeSettings({ notePrefix: "x".repeat(150) }).notePrefix).toHaveLength(100);
   });
 });
 

@@ -263,7 +263,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   app.get("/api/sessions/:id", async (req, res) => {
     const { data, error } = await supabase
       .from("sessions")
-      .select("id, pdf_path, pdf_url, filename, total_slides, current_slide, timer_mode, timer_duration, timer_threshold, note_prefix, local")
+      .select("id, pdf_path, pdf_url, filename, total_slides, current_slide, local")
       .eq("id", req.params.id)
       .neq("status", "expired")
       .single();
@@ -288,10 +288,6 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       filename: data.filename,
       total_slides: data.total_slides,
       current_slide: data.current_slide,
-      timer_mode: data.timer_mode,
-      timer_duration: data.timer_duration,
-      timer_threshold: data.timer_threshold,
-      note_prefix: data.note_prefix,
       local: data.local,
       pdfUrl,
     });

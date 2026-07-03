@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { cn, getSessionAuth } from "@/lib/utils";
 import { Settings, Check, Option, Plus, Share2, ExternalLink, QrCode } from "lucide-react";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Separator } from "@/components/ui/separator";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import { CopyField } from "@/components/CopyField";
@@ -11,8 +12,8 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { LoginDialog } from "@/components/LoginDialog";
 import { AccountControl } from "@/components/AccountControl";
 import { ControllerOnboarding } from "@/components/ControllerOnboarding";
-import { NewsletterDialog, useNewsletterPrompt } from "@/components/NewsletterDialog";
-import { PresentationTimer } from "@/components/PresentationTimer";
+import { NewsletterDialog } from "@/components/NewsletterDialog";
+import { useNewsletterPrompt } from "@/lib/useNewsletterPrompt";
 import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
 import { hasCompletedControllerOnboarding } from "@/lib/onboarding";
 import { useAuth } from "@/lib/useAuth";
@@ -21,7 +22,7 @@ import { CurrentSlideCard } from "@/components/controller/CurrentSlideCard";
 import { NextSlideCard } from "@/components/controller/NextSlideCard";
 import { SpeakerNotesCard, NotesSizeAction } from "@/components/controller/SpeakerNotesCard";
 import { ThumbnailsCard } from "@/components/controller/ThumbnailsCard";
-import { TimerCard, TimerAction, TimerSettingsDialog } from "@/components/controller/TimerCard";
+import { TimerCard, TimerAction, TimerSettingsDialog, MobileTimer, type TimerSettings } from "@/components/controller/TimerCard";
 import { ShortcutsEditor } from "@/components/controller/ShortcutsEditor";
 import { ControllerHeader } from "@/components/controller/ControllerHeader";
 import { ControllerNav } from "@/components/controller/ControllerNav";
@@ -53,7 +54,6 @@ import {
 } from "@/lib/controllerLayout";
 import { lsGet, lsSet, lsGetString, lsSetString, viewerOpenedKey, STORAGE_KEYS } from "@/lib/storage";
 import { type MosaicNode } from "react-mosaic-component";
-import type { PresentationSettings } from "./Presentation";
 import type { MediaState, AudioState } from "@/components/MediaOverlay";
 import type { MediaPlacement } from "@/lib/pdf";
 import { DEFAULT_PEN_STYLE, DEFAULT_HIGHLIGHTER_STYLE, hasAnyStrokes, type AnnotationsBySlide, type LaserPoint, type PenStyle, type Stroke, type Tool } from "@/lib/annotations";
@@ -73,9 +73,6 @@ interface ControllerViewProps {
   onSynced: () => void;
   onSaveNotes: (slide: number, notes: string) => Promise<void>;
   currentCanvasRef: React.RefObject<HTMLDivElement | null>;
-  settings: PresentationSettings;
-  onSettingsChange: (settings: PresentationSettings) => void;
-  startedAt: number;
   blanked: boolean;
   onBlankToggle: () => void;
   showCode: boolean;
@@ -113,9 +110,6 @@ export function ControllerView({
   onSynced,
   onSaveNotes,
   currentCanvasRef,
-  settings,
-  onSettingsChange,
-  startedAt,
   blanked,
   onBlankToggle,
   showCode,
@@ -166,6 +160,14 @@ export function ControllerView({
   const changeShowClock = useCallback((show: boolean) => {
     setShowClock(show);
     lsSetString(STORAGE_KEYS.timerShowClock, String(show));
+  }, []);
+  // Timer mode/duration/warning (device preference).
+  const [timerSettings, setTimerSettings] = useState<TimerSettings>(() =>
+    lsGet<TimerSettings>(STORAGE_KEYS.timerSettings, { mode: "up", duration: null, threshold: null })
+  );
+  const changeTimerSettings = useCallback((s: TimerSettings) => {
+    setTimerSettings(s);
+    lsSet(STORAGE_KEYS.timerSettings, s);
   }, []);
   // Drawing color/width per tool, remembered across presentations.
   const [penStyle, setPenStyle] = useState<PenStyle>(() => lsGet(STORAGE_KEYS.penStyle, DEFAULT_PEN_STYLE));
@@ -338,7 +340,7 @@ export function ControllerView({
       content: <NextSlideCard pdf={pdf} currentSlide={currentSlide} totalSlides={totalSlides} />,
     },
     timer: {
-      content: <TimerCard id={id} showClock={showClock} />,
+      content: <TimerCard id={id} settings={timerSettings} showClock={showClock} />,
       action: <TimerAction open={timerSettingsOpen} onToggle={() => setTimerSettingsOpen(!timerSettingsOpen)} />,
     },
     notes: {
@@ -439,13 +441,7 @@ export function ControllerView({
       {isMobile ? (
         <div className="border-t px-3 py-3 space-y-2">
           <div className="flex items-center justify-center gap-3">
-            <PresentationTimer
-              mode={settings.timerMode}
-              duration={settings.timerDuration}
-              threshold={settings.timerThreshold}
-              startedAt={startedAt}
-              className="text-xs font-medium"
-            />
+            <MobileTimer id={id} settings={timerSettings} />
             <p className="text-center text-xs text-muted-foreground tabular-nums">
               {currentSlide} / {totalSlides}
             </p>
@@ -603,8 +599,8 @@ export function ControllerView({
 
       {timerSettingsOpen && (
         <TimerSettingsDialog
-          settings={settings}
-          onSettingsChange={onSettingsChange}
+          settings={timerSettings}
+          onSettingsChange={changeTimerSettings}
           showClock={showClock}
           onShowClockChange={changeShowClock}
           onClose={() => setTimerSettingsOpen(false)}

@@ -1,7 +1,6 @@
 import type { Server, Socket } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  sanitizeSettings,
   isValidSlideNumber,
   sanitizeLaserPoint,
   sanitizeStroke,
@@ -48,7 +47,7 @@ export function registerSocketHandlers(
 
   // Wrap an event handler so it only runs for the session's registered
   // controller, passing the resolved sessionId through. Mutating events
-  // (slide/settings/blank/media) all share this guard.
+  // (slide/blank/media) all share this guard.
   const controllerOnly = <A extends unknown[]>(
     socket: Socket,
     handler: (sessionId: string, ...args: A) => void
@@ -62,7 +61,7 @@ export function registerSocketHandlers(
     socket.on("join_session", async ({ sessionId, role, token }: { sessionId: string; role: string; token?: string }) => {
       const { data } = await supabase
         .from("sessions")
-        .select("current_slide, total_slides, controller_token, timer_mode, timer_duration, timer_threshold, note_prefix")
+        .select("current_slide, total_slides, controller_token")
         .eq("id", sessionId)
         .neq("status", "expired")
         .single();
@@ -90,12 +89,6 @@ export function registerSocketHandlers(
         currentSlide: data.current_slide,
         totalSlides: data.total_slides,
         role: grantedRole,
-        settings: {
-          timerMode: data.timer_mode,
-          timerDuration: data.timer_duration,
-          timerThreshold: data.timer_threshold,
-          notePrefix: data.note_prefix,
-        },
         annotations: annotations.get(sessionId) ?? {},
       });
     });
@@ -114,22 +107,6 @@ export function registerSocketHandlers(
 
     socket.on("sync_all", controllerOnly(socket, (sessionId) => {
       io.to(sessionId).emit("sync_all");
-    }));
-
-    socket.on("settings_change", controllerOnly(socket, async (sessionId, settings: { timerMode?: string | null; timerDuration?: number | null; timerThreshold?: number | null; notePrefix?: string }) => {
-      const sanitized = sanitizeSettings(settings);
-
-      await supabase
-        .from("sessions")
-        .update({
-          timer_mode: sanitized.timerMode,
-          timer_duration: sanitized.timerDuration,
-          timer_threshold: sanitized.timerThreshold,
-          note_prefix: sanitized.notePrefix,
-        })
-        .eq("id", sessionId);
-
-      io.to(sessionId).emit("settings_update", sanitized);
     }));
 
     socket.on("blank_toggle", controllerOnly(socket, (sessionId) => {

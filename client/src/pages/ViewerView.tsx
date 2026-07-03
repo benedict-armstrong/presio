@@ -6,9 +6,7 @@ import { Button } from "@/components/ui/button";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import { QRCodeSVG } from "qrcode.react";
 import { SessionQRCode } from "@/components/SessionQRCode";
-import { PresentationTimer } from "@/components/PresentationTimer";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
-import type { PresentationSettings } from "./Presentation";
 import { MediaOverlay, type MediaState, type MediaTimeSync } from "@/components/MediaOverlay";
 import { AnnotationOverlay } from "@/components/AnnotationOverlay";
 import type { LaserPoint, Stroke } from "@/lib/annotations";
@@ -23,8 +21,6 @@ export function ViewerView({
   pdf,
   pdfUrl,
   canvasRef,
-  settings,
-  startedAt,
   blanked,
   mediaPlacements,
   mediaState,
@@ -45,8 +41,6 @@ export function ViewerView({
   pdf: PDFDocumentProxy;
   pdfUrl: string;
   canvasRef: React.RefObject<HTMLDivElement | null>;
-  settings: PresentationSettings;
-  startedAt: number;
   blanked: boolean;
   mediaPlacements: MediaPlacement[];
   mediaState: MediaState;
@@ -205,15 +199,6 @@ export function ViewerView({
             {currentSlide} / {totalSlides}
           </span>
         )}
-        <PresentationTimer
-          mode={settings.timerMode}
-          duration={settings.timerDuration}
-          threshold={settings.timerThreshold}
-          startedAt={startedAt}
-          className={`text-white/70 text-sm transition-opacity duration-300 ${
-            cursorVisible ? "opacity-100" : "opacity-0"
-          }`}
-        />
       </div>
 
       <button

@@ -1,4 +1,4 @@
-import { useTheme } from "@/lib/theme";
+import { useTheme } from "@/lib/useTheme";
 import { Button } from "@/components/ui/button";
 
 const icons = {
