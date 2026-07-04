@@ -1,7 +1,5 @@
 import { useState, useEffect } from "react";
-import type { PDFDocumentProxy } from "pdfjs-dist";
 import { AArrowDown, AArrowUp } from "lucide-react";
-import { extractSpeakerNotes } from "@/lib/pdf";
 import { Button } from "@/components/ui/button";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -12,14 +10,15 @@ export const NOTES_SCALE_MAX = 2.5;
 export const NOTES_SCALE_STEP = 0.125;
 
 export function SpeakerNotesCard({
-  pdf,
+  notes,
   currentSlide,
   editable,
   onSave,
   onRequestLogin,
   fontScale = 1,
 }: {
-  pdf: PDFDocumentProxy;
+  /** This slide's notes, from the deck (kept fresh by the parent on save). */
+  notes: string;
   currentSlide: number;
   editable: boolean;
   onSave: (slide: number, notes: string) => Promise<void>;
@@ -27,7 +26,6 @@ export function SpeakerNotesCard({
   /** Multiplier on the default notes text size. */
   fontScale?: number;
 }) {
-  const [notes, setNotes] = useState("");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
@@ -36,8 +34,7 @@ export function SpeakerNotesCard({
   useEffect(() => {
     setEditing(false);
     setError("");
-    extractSpeakerNotes(pdf, currentSlide).then(setNotes);
-  }, [pdf, currentSlide]);
+  }, [currentSlide]);
 
   const startEdit = () => {
     if (!editable) {
@@ -53,9 +50,7 @@ export function SpeakerNotesCard({
     setSaving(true);
     setError("");
     try {
-      const next = draft.trim();
-      await onSave(currentSlide, next);
-      setNotes(next);
+      await onSave(currentSlide, draft.trim());
       setEditing(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save notes");

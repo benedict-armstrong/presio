@@ -93,7 +93,6 @@ async function loadNotesFromAttachments(pdf: PDFDocumentProxy): Promise<Map<numb
 
   const map = new Map<number, string>();
   const attachments = await pdf.getAttachments();
-  console.log("[pdf] attachments:", attachments);
   if (attachments) {
     for (const [, attachment] of Object.entries(
       attachments as Record<string, { filename?: string; content: Uint8Array }>

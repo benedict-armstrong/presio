@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import type { PDFDocumentProxy } from "pdfjs-dist";
 import { cn, getSessionAuth } from "@/lib/utils";
 import { Settings, Check, Option, Plus, Share2, ExternalLink, QrCode } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -55,18 +54,16 @@ import {
 import { lsGet, lsSet, lsGetString, lsSetString, viewerOpenedKey, STORAGE_KEYS } from "@/lib/storage";
 import { type MosaicNode } from "react-mosaic-component";
 import type { MediaState, AudioState } from "@/components/MediaOverlay";
-import type { MediaPlacement } from "@/lib/pdf";
-import { DEFAULT_PEN_STYLE, DEFAULT_HIGHLIGHTER_STYLE, hasAnyStrokes, type AnnotationsBySlide, type LaserPoint, type PenStyle, type Stroke, type Tool } from "@/lib/annotations";
+import type { Deck } from "@/lib/deck";
+import { DEFAULT_PEN_STYLE, DEFAULT_HIGHLIGHTER_STYLE, hasAnyStrokes, type LaserPoint, type PenStyle, type Stroke, type Tool } from "@/lib/annotations";
 
 // --- Component ---
 
 interface ControllerViewProps {
   id: string;
   local: boolean;
-  pdf: PDFDocumentProxy;
-  pdfUrl: string;
+  deck: Deck;
   currentSlide: number;
-  totalSlides: number;
   onGoTo: (slide: number) => void;
   onSyncAll: () => void;
   onEnd: () => void;
@@ -77,9 +74,6 @@ interface ControllerViewProps {
   onBlankToggle: () => void;
   showCode: boolean;
   onShowCodeToggle: () => void;
-  mediaPlacements: MediaPlacement[];
-  /** All slides' media, keyed by slide number — used for thumbnail posters. */
-  mediaBySlide: Map<number, MediaPlacement[]>;
   mediaState: MediaState;
   onMediaControl: (id: string, action: "play" | "pause" | "reset") => void;
   onMediaTime: (id: string, t: number, playing: boolean, sampledAt: number) => void;
@@ -87,7 +81,6 @@ interface ControllerViewProps {
   audioState: AudioState;
   onAudioChange: (next: { muted: boolean; target: AudioState["target"] }) => void;
   onLaserMove: (pt: LaserPoint | null) => void;
-  annotations: AnnotationsBySlide;
   onStrokeProgress: (stroke: Stroke | null) => void;
   onStrokeCommit: (stroke: Stroke) => void;
   onStrokeUndo: () => void;
@@ -100,10 +93,8 @@ interface ControllerViewProps {
 export function ControllerView({
   id,
   local,
-  pdf,
-  pdfUrl,
+  deck,
   currentSlide,
-  totalSlides,
   onGoTo,
   onSyncAll,
   onEnd,
@@ -114,8 +105,6 @@ export function ControllerView({
   onBlankToggle,
   showCode,
   onShowCodeToggle,
-  mediaPlacements,
-  mediaBySlide,
   mediaState,
   onMediaControl,
   onMediaTime,
@@ -123,7 +112,6 @@ export function ControllerView({
   audioState,
   onAudioChange,
   onLaserMove,
-  annotations,
   onStrokeProgress,
   onStrokeCommit,
   onStrokeUndo,
@@ -132,6 +120,8 @@ export function ControllerView({
   onSaveDrawing,
   onLoadDrawing,
 }: ControllerViewProps) {
+  const { totalSlides, annotations } = deck;
+  const mediaPlacements = deck.mediaBySlide.get(currentSlide) ?? [];
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -337,7 +327,7 @@ export function ControllerView({
       ),
     },
     nextSlide: {
-      content: <NextSlideCard pdf={pdf} currentSlide={currentSlide} totalSlides={totalSlides} />,
+      content: <NextSlideCard deck={deck} currentSlide={currentSlide} />,
     },
     timer: {
       content: <TimerCard id={id} settings={timerSettings} showClock={showClock} />,
@@ -346,7 +336,7 @@ export function ControllerView({
     notes: {
       content: (
         <SpeakerNotesCard
-          pdf={pdf}
+          notes={deck.notes.get(currentSlide) ?? ""}
           currentSlide={currentSlide}
           editable={loggedIn}
           onSave={onSaveNotes}
@@ -357,7 +347,7 @@ export function ControllerView({
       action: <NotesSizeAction scale={notesScale} onChange={changeNotesScale} />,
     },
     thumbnails: {
-      content: <ThumbnailsCard pdf={pdf} totalSlides={totalSlides} currentSlide={currentSlide} onGoTo={onGoTo} mediaBySlide={mediaBySlide} />,
+      content: <ThumbnailsCard deck={deck} currentSlide={currentSlide} onGoTo={onGoTo} />,
     },
   };
 
@@ -398,8 +388,7 @@ export function ControllerView({
       open={menuOpen}
       onOpen={() => setMenuOpen(true)}
       onClose={() => setMenuOpen(false)}
-      pdf={pdf}
-      pdfUrl={pdfUrl}
+      deck={deck}
       hasPassphrase={!!passphrase}
       canShowCode={!local}
       showingCode={showCode}
@@ -424,9 +413,8 @@ export function ControllerView({
 
       {isMobile ? (
         <ControllerStack
-          pdf={pdf}
+          deck={deck}
           currentSlide={currentSlide}
-          totalSlides={totalSlides}
           currentCanvasRef={currentCanvasRef}
         />
       ) : (
@@ -485,14 +473,12 @@ export function ControllerView({
             </Button>
           )}
           <div className="ml-auto flex items-center gap-2">
-            {pdfUrl && (
-              <Button variant="ghost" size="sm" asChild>
-                <a href={pdfUrl} download>
-                  Download PDF
-                </a>
-              </Button>
-            )}
-            <DownloadStrippedButton pdf={pdf} pdfUrl={pdfUrl} />
+            <Button variant="ghost" size="sm" asChild>
+              <a href={deck.url} download>
+                Download PDF
+              </a>
+            </Button>
+            <DownloadStrippedButton deck={deck} />
             <Button variant="destructive" size="sm" onClick={() => setConfirmEnd(true)}>
               End Presentation
             </Button>

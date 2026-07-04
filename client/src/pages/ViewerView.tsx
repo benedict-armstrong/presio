@@ -10,24 +10,20 @@ import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { MediaOverlay, type MediaState, type MediaTimeSync } from "@/components/MediaOverlay";
 import { AnnotationOverlay } from "@/components/AnnotationOverlay";
 import type { LaserPoint, Stroke } from "@/lib/annotations";
-import type { MediaPlacement } from "@/lib/pdf";
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { Deck } from "@/lib/deck";
 import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
 import { ViewerHint } from "@/components/ViewerHint";
 
 export function ViewerView({
   id,
   local,
-  pdf,
-  pdfUrl,
+  deck,
   canvasRef,
   blanked,
-  mediaPlacements,
   mediaState,
   mediaTime,
   muted,
   currentSlide,
-  totalSlides,
   showCode,
   outOfSync,
   onViewerGoTo,
@@ -38,16 +34,13 @@ export function ViewerView({
 }: {
   id: string;
   local: boolean;
-  pdf: PDFDocumentProxy;
-  pdfUrl: string;
+  deck: Deck;
   canvasRef: React.RefObject<HTMLDivElement | null>;
   blanked: boolean;
-  mediaPlacements: MediaPlacement[];
   mediaState: MediaState;
   mediaTime: MediaTimeSync | null;
   muted: boolean;
   currentSlide: number;
-  totalSlides: number;
   showCode: boolean;
   outOfSync: boolean;
   onViewerGoTo: (slide: number) => void;
@@ -56,6 +49,8 @@ export function ViewerView({
   strokes: readonly Stroke[];
   draft: Stroke | null;
 }) {
+  const { url: pdfUrl, totalSlides } = deck;
+  const mediaPlacements = deck.mediaBySlide.get(currentSlide) ?? [];
   const navigate = useNavigate();
   const [cursorVisible, setCursorVisible] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -237,7 +232,7 @@ export function ViewerView({
                 </a>
               </Button>
             )}
-            <DownloadStrippedButton pdf={pdf} pdfUrl={pdfUrl} variant="outline" size="default" block />
+            <DownloadStrippedButton deck={deck} variant="outline" size="default" block />
             <Button
               className="w-full"
               variant="outline"

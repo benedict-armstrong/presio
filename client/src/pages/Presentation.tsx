@@ -1,7 +1,8 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, useSearchParams, useNavigate, Link } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { loadPdf, loadPdfData, renderPage, clearCache, loadMediaPlacements, type MediaPlacement } from "@/lib/pdf";
+import { loadPdf, loadPdfData, renderPage, clearCache } from "@/lib/pdf";
+import { loadDeckInfo, type Deck, type DeckInfo } from "@/lib/deck";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
 import { hasAnyStrokes, parseDrawing, serializeDrawing, type AnnotationsBySlide, type LaserPoint, type Stroke } from "@/lib/annotations";
@@ -35,7 +36,6 @@ export default function Presentation() {
   const [blanked, setBlanked] = useState(false);
   // Whether all viewers are currently showing the join code / QR overlay.
   const [showCode, setShowCode] = useState(false);
-  const [mediaPlacements, setMediaPlacements] = useState<Map<number, MediaPlacement[]>>(new Map());
   const [mediaState, setMediaState] = useState<MediaState>({ id: null, action: "pause", seq: 0 });
   const [mediaTime, setMediaTime] = useState<MediaTimeSync | null>(null);
   const [audioState, setAudioState] = useState<AudioState>(defaultAudioState);
@@ -50,6 +50,24 @@ export default function Presentation() {
   const [remoteDraft, setRemoteDraft] = useState<{ slide: number; stroke: Stroke | null } | null>(null);
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
+
+  // Everything extracted from the loaded PDF (notes, media, attachments…),
+  // re-derived whenever the document is swapped (e.g. after a notes edit).
+  const [deckInfo, setDeckInfo] = useState<DeckInfo | null>(null);
+  useEffect(() => {
+    if (!pdf) return;
+    let cancelled = false;
+    loadDeckInfo(pdf, pdfUrl, filename).then((info) => {
+      if (!cancelled) setDeckInfo(info);
+    });
+    return () => { cancelled = true; };
+  }, [pdf, pdfUrl, filename]);
+
+  // The one object the views work with: the PDF bundle plus live drawings.
+  const deck = useMemo<Deck | null>(
+    () => (deckInfo ? { ...deckInfo, annotations } : null),
+    [deckInfo, annotations]
+  );
 
   const currentCanvasRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
@@ -107,9 +125,6 @@ export default function Presentation() {
           if (cancelled) return;
           setPdfUrl(localUrl);
           setPdf(doc);
-          loadMediaPlacements(doc).then((m) => {
-            if (!cancelled) setMediaPlacements(m);
-          }).catch(() => { /* ignore — no media */ });
           setFilename(rec.filename);
           setTotalSlides(rec.totalSlides);
           return;
@@ -128,9 +143,6 @@ export default function Presentation() {
         if (cancelled) return;
         setPdfUrl(session.pdfUrl);
         setPdf(doc);
-        loadMediaPlacements(doc).then((m) => {
-          if (!cancelled) setMediaPlacements(m);
-        }).catch(() => { /* ignore — no media */ });
         setFilename(session.filename);
         setTotalSlides(session.total_slides);
         setCurrentSlide(session.current_slide);
@@ -462,6 +474,16 @@ export default function Presentation() {
         }
       }
 
+      // Reflect the edit immediately; the deck re-derives from the new pdf.
+      setDeckInfo((info) => {
+        if (!info) return info;
+        const notes = new Map(info.notes);
+        const trimmed = text.trim();
+        if (trimmed) notes.set(slide, trimmed);
+        else notes.delete(slide);
+        return { ...info, notes };
+      });
+
       const doc = await loadPdfData(updated);
       setPdf(doc);
       if (local) {
@@ -616,7 +638,7 @@ export default function Presentation() {
 
   const effectiveMuted = isMutedForRole(role === "controller" ? "controller" : "viewer", audioState);
 
-  const currentMedia = mediaPlacements.get(displaySlide) ?? [];
+  const currentMedia = deck?.mediaBySlide.get(displaySlide) ?? [];
 
   // When the controller lands on a slide whose media is marked autoplay, start
   // it through the shared mediaState. This makes the controller the time-sync
@@ -629,9 +651,9 @@ export default function Presentation() {
     if (auto) onMediaControl(auto.id, "play");
     // displaySlide drives currentMedia; re-run on slide change or once media loads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displaySlide, role, mediaPlacements]);
+  }, [displaySlide, role, deckInfo]);
 
-  if (loading) {
+  if (loading || (!error && !deck)) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <p className="text-muted-foreground">Loading presentation...</p>
@@ -665,16 +687,13 @@ export default function Presentation() {
       <ViewerView
         id={id!}
         local={!!local}
-        pdf={pdf!}
-        pdfUrl={pdfUrl}
+        deck={deck!}
         canvasRef={currentCanvasRef}
         blanked={blanked}
-        mediaPlacements={currentMedia}
         mediaState={mediaState}
         mediaTime={mediaTime}
         muted={effectiveMuted}
         currentSlide={displaySlide}
-        totalSlides={totalSlides}
         showCode={showCode}
         outOfSync={outOfSync}
         onViewerGoTo={viewerGoTo}
@@ -690,10 +709,8 @@ export default function Presentation() {
     <ControllerView
       id={id!}
       local={!!local}
-      pdf={pdf!}
-      pdfUrl={pdfUrl}
+      deck={deck!}
       currentSlide={currentSlide}
-      totalSlides={totalSlides}
       onGoTo={goTo}
       onSyncAll={syncAll}
       onEnd={endPresentation}
@@ -715,8 +732,6 @@ export default function Presentation() {
         if (local) setShowCode(next);
         broadcast({ type: "code_update", payload: { showCode: next } }, { event: "code_toggle" });
       }}
-      mediaPlacements={currentMedia}
-      mediaBySlide={mediaPlacements}
       mediaState={mediaState}
       onMediaControl={onMediaControl}
       onMediaTime={onMediaTime}
@@ -724,7 +739,6 @@ export default function Presentation() {
       audioState={audioState}
       onAudioChange={onAudioChange}
       onLaserMove={onLaserMove}
-      annotations={annotations}
       onStrokeProgress={onStrokeProgress}
       onStrokeCommit={onStrokeCommit}
       onStrokeUndo={onStrokeUndo}

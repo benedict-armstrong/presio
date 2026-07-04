@@ -1,4 +1,4 @@
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { Deck } from "@/lib/deck";
 import { Menu, X, QrCode } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -11,8 +11,7 @@ export function ControllerMenu({
   open,
   onOpen,
   onClose,
-  pdf,
-  pdfUrl,
+  deck,
   hasPassphrase,
   canShowCode,
   showingCode,
@@ -25,8 +24,7 @@ export function ControllerMenu({
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
-  pdf: PDFDocumentProxy;
-  pdfUrl: string;
+  deck: Deck;
   hasPassphrase: boolean;
   /** Whether the "show join code on viewers" toggle applies (synced sessions only). */
   canShowCode: boolean;
@@ -79,12 +77,10 @@ export function ControllerMenu({
               <Button variant="ghost" className="justify-start" onClick={act(onSwitchToViewer)}>
                 Switch to Viewer
               </Button>
-              {pdfUrl && (
-                <Button variant="ghost" className="justify-start" asChild>
-                  <a href={pdfUrl} download>Download PDF</a>
-                </Button>
-              )}
-              <DownloadStrippedButton pdf={pdf} pdfUrl={pdfUrl} block />
+              <Button variant="ghost" className="justify-start" asChild>
+                <a href={deck.url} download>Download PDF</a>
+              </Button>
+              <DownloadStrippedButton deck={deck} block />
               <div className="flex items-center justify-between px-4 py-2">
                 <span className="text-sm">Theme</span>
                 <ThemeToggle size="icon" />

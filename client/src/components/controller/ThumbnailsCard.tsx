@@ -1,21 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import type { PDFDocumentProxy } from "pdfjs-dist";
 import { renderPage, type MediaPlacement } from "@/lib/pdf";
+import type { Deck } from "@/lib/deck";
 import { getMediaPoster } from "@/lib/mediaPoster";
 
 export function ThumbnailsCard({
-  pdf,
-  totalSlides,
+  deck,
   currentSlide,
   onGoTo,
-  mediaBySlide,
 }: {
-  pdf: PDFDocumentProxy;
-  totalSlides: number;
+  deck: Deck;
   currentSlide: number;
   onGoTo: (slide: number) => void;
-  mediaBySlide?: Map<number, MediaPlacement[]>;
 }) {
+  const { pdf, totalSlides, mediaBySlide } = deck;
   const containerRef = useRef<HTMLDivElement>(null);
   const thumbRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const [aspectRatio, setAspectRatio] = useState<number | null>(null);

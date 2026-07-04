@@ -1,16 +1,15 @@
 import { useEffect, useRef } from "react";
-import type { PDFDocumentProxy } from "pdfjs-dist";
 import { renderPage } from "@/lib/pdf";
+import type { Deck } from "@/lib/deck";
 
 export function NextSlideCard({
-  pdf,
+  deck,
   currentSlide,
-  totalSlides,
 }: {
-  pdf: PDFDocumentProxy;
+  deck: Deck;
   currentSlide: number;
-  totalSlides: number;
 }) {
+  const { pdf, totalSlides } = deck;
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
