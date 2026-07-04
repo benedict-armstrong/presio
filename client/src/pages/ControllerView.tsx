@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { cn, getSessionAuth } from "@/lib/utils";
-import { Settings, Check, Option, Plus, Share2, ExternalLink, QrCode } from "lucide-react";
+import { Settings, Check, Option, Plus, Share2, ExternalLink, QrCode, Save, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Separator } from "@/components/ui/separator";
@@ -85,7 +85,6 @@ interface ControllerViewProps {
   onStrokeCommit: (stroke: Stroke) => void;
   onStrokeUndo: () => void;
   onAnnotationsClear: () => void;
-  onDownloadAnnotatedPdf: () => void;
   onSaveDrawing: () => void;
   onLoadDrawing: (file: File) => void;
 }
@@ -116,7 +115,6 @@ export function ControllerView({
   onStrokeCommit,
   onStrokeUndo,
   onAnnotationsClear,
-  onDownloadAnnotatedPdf,
   onSaveDrawing,
   onLoadDrawing,
 }: ControllerViewProps) {
@@ -177,6 +175,9 @@ export function ControllerView({
     },
     [tool]
   );
+
+  // Hidden file input for loading a saved drawing from Settings.
+  const drawingFileRef = useRef<HTMLInputElement | null>(null);
 
   const { user } = useAuth();
   const loggedIn = !!user;
@@ -315,14 +316,10 @@ export function ControllerView({
           penStyle={activeStyle}
           onPenStyleChange={changeActiveStyle}
           strokes={annotations[currentSlide] ?? []}
-          hasDrawing={hasAnyStrokes(annotations)}
           onStrokeProgress={onStrokeProgress}
           onStrokeCommit={onStrokeCommit}
           onStrokeUndo={onStrokeUndo}
           onAnnotationsClear={onAnnotationsClear}
-          onDownloadAnnotatedPdf={onDownloadAnnotatedPdf}
-          onSaveDrawing={onSaveDrawing}
-          onLoadDrawing={onLoadDrawing}
         />
       ),
     },
@@ -537,6 +534,48 @@ export function ControllerView({
               <Button size="sm" variant="outline" onClick={resetLayout}>
                 Reset to default
               </Button>
+            </div>
+          </section>
+
+          <Separator />
+
+          <section className="space-y-2">
+            <h3 className="text-sm font-medium">Drawing</h3>
+            <p className="text-xs text-muted-foreground">
+              Save the drawings made on the slides to a file, or load a previously saved drawing.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="drawing-save"
+                disabled={!hasAnyStrokes(annotations)}
+                onClick={onSaveDrawing}
+              >
+                <Save size={14} className="mr-1" />
+                Save drawing
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="drawing-load"
+                onClick={() => drawingFileRef.current?.click()}
+              >
+                <FolderOpen size={14} className="mr-1" />
+                Load drawing
+              </Button>
+              <input
+                ref={drawingFileRef}
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                data-testid="drawing-load-input"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) onLoadDrawing(file);
+                  e.target.value = "";
+                }}
+              />
             </div>
           </section>
 

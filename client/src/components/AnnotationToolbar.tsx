@@ -1,5 +1,4 @@
-import { useRef } from "react";
-import { MousePointer2, Target, PenLine, Highlighter, Undo2, Trash2, FileDown, Save, FolderOpen } from "lucide-react";
+import { MousePointer2, Target, PenLine, Highlighter, Undo2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PEN_COLORS, HIGHLIGHTER_COLORS, PEN_REFERENCE_WIDTH, type PenStyle, type Tool } from "@/lib/annotations";
 
@@ -58,16 +57,11 @@ interface Props {
   canUndo: boolean;
   onUndo: () => void;
   onClear: () => void;
-  /** Whether any slide has strokes (enables saving). */
-  hasDrawing: boolean;
-  onDownloadAnnotatedPdf: () => void;
-  onSaveDrawing: () => void;
-  onLoadDrawing: (file: File) => void;
 }
 
 // Floating tool picker shown over the controller's current slide. When a
 // drawing tool is active, a second panel offers that tool's colors/widths plus
-// the undo/clear/save/load actions.
+// the undo/clear actions. Saving/loading drawings lives in Settings.
 export function AnnotationToolbar({
   tool,
   onToolChange,
@@ -76,12 +70,7 @@ export function AnnotationToolbar({
   canUndo,
   onUndo,
   onClear,
-  hasDrawing,
-  onDownloadAnnotatedPdf,
-  onSaveDrawing,
-  onLoadDrawing,
 }: Props) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const drawing = tool === "pen" || tool === "highlighter";
   const colors = tool === "highlighter" ? HIGHLIGHTER_COLORS : PEN_COLORS;
   const sizes = tool === "highlighter" ? HIGHLIGHTER_SIZES : PEN_SIZES;
@@ -158,34 +147,6 @@ export function AnnotationToolbar({
             <IconButton title="Clear drawings on this slide" disabled={!canUndo} onClick={onClear} testId="pen-clear">
               <Trash2 size={14} />
             </IconButton>
-          </div>
-          <div className="flex items-center gap-0.5 border-t pt-1">
-            <IconButton
-              title="Download PDF with drawings"
-              disabled={!hasDrawing}
-              onClick={onDownloadAnnotatedPdf}
-              testId="pen-download-pdf"
-            >
-              <FileDown size={14} />
-            </IconButton>
-            <IconButton title="Save drawing to file" disabled={!hasDrawing} onClick={onSaveDrawing} testId="pen-save">
-              <Save size={14} />
-            </IconButton>
-            <IconButton title="Load drawing from file" onClick={() => fileInputRef.current?.click()} testId="pen-load">
-              <FolderOpen size={14} />
-            </IconButton>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json,application/json"
-              className="hidden"
-              data-testid="pen-load-input"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) onLoadDrawing(file);
-                e.target.value = "";
-              }}
-            />
           </div>
         </div>
       )}

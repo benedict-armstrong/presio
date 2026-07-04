@@ -41,14 +41,10 @@ interface Props {
   penStyle?: PenStyle;
   onPenStyleChange?: (style: PenStyle) => void;
   strokes?: readonly Stroke[];
-  hasDrawing?: boolean;
   onStrokeProgress?: (stroke: Stroke | null) => void;
   onStrokeCommit?: (stroke: Stroke) => void;
   onStrokeUndo?: () => void;
   onAnnotationsClear?: () => void;
-  onDownloadAnnotatedPdf?: () => void;
-  onSaveDrawing?: () => void;
-  onLoadDrawing?: (file: File) => void;
 }
 
 const TARGET_LABEL: Record<AudioTarget, string> = {
@@ -80,14 +76,10 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
       penStyle = DEFAULT_PEN_STYLE,
       onPenStyleChange,
       strokes = [],
-      hasDrawing = false,
       onStrokeProgress,
       onStrokeCommit,
       onStrokeUndo,
       onAnnotationsClear,
-      onDownloadAnnotatedPdf,
-      onSaveDrawing,
-      onLoadDrawing,
     },
     ref
   ) => {
@@ -129,10 +121,6 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
               canUndo={strokes.length > 0}
               onUndo={onStrokeUndo ?? (() => {})}
               onClear={onAnnotationsClear ?? (() => {})}
-              hasDrawing={hasDrawing}
-              onDownloadAnnotatedPdf={onDownloadAnnotatedPdf ?? (() => {})}
-              onSaveDrawing={onSaveDrawing ?? (() => {})}
-              onLoadDrawing={onLoadDrawing ?? (() => {})}
             />
           )}
         </div>

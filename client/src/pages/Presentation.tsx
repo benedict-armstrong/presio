@@ -6,7 +6,6 @@ import { loadDeckInfo, type Deck, type DeckInfo } from "@/lib/deck";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
 import { hasAnyStrokes, parseDrawing, serializeDrawing, type AnnotationsBySlide, type LaserPoint, type Stroke } from "@/lib/annotations";
-import { renderAnnotatedPdf } from "@/lib/annotatedPdf";
 import { lsGet, lsSet, annotationsKey } from "@/lib/storage";
 import { socket } from "@/lib/socket";
 import { startClockSync } from "@/lib/clock";
@@ -595,17 +594,6 @@ export default function Presentation() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const onDownloadAnnotatedPdf = useCallback(async () => {
-    if (!pdf) return;
-    const original = await pdf.getData();
-    const annotated = await renderAnnotatedPdf(original, annotationsRef.current);
-    const buf = annotated.buffer.slice(
-      annotated.byteOffset,
-      annotated.byteOffset + annotated.byteLength
-    ) as ArrayBuffer;
-    triggerDownload(new Blob([buf], { type: "application/pdf" }), `${filename || "slides"}-annotated.pdf`);
-  }, [pdf, filename]);
-
   const onSaveDrawing = useCallback(() => {
     triggerDownload(
       new Blob([serializeDrawing(annotationsRef.current)], { type: "application/json" }),
@@ -743,7 +731,6 @@ export default function Presentation() {
       onStrokeCommit={onStrokeCommit}
       onStrokeUndo={onStrokeUndo}
       onAnnotationsClear={onAnnotationsClear}
-      onDownloadAnnotatedPdf={onDownloadAnnotatedPdf}
       onSaveDrawing={onSaveDrawing}
       onLoadDrawing={onLoadDrawing}
     />
