@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MousePointer2, Target, PenLine, Highlighter, Undo2, Trash2, GripHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PEN_COLORS, HIGHLIGHTER_COLORS, PEN_REFERENCE_WIDTH, type PenStyle, type Tool } from "@/lib/annotations";
@@ -82,9 +82,12 @@ export function AnnotationToolbar({
 
   // Options panel minimized state (toggled by re-clicking the active tool).
   const [optionsOpen, setOptionsOpen] = useState(true);
-  // Hover expands the collapsed palette; `pinnedOpen` does the same for touch,
-  // where there is no hover — tapping the collapsed palette expands it until a
-  // tool is chosen.
+  // The palette expands while the mouse hovers it, or while "pinned" open —
+  // the touch path, where there is no hover: picking a tool pins the palette
+  // so it survives the finger lifting, touching anywhere else (e.g. starting
+  // to draw) unpins it, and tapping the collapsed palette pins it again.
+  // Hover state is mouse-only: on touch, pointerenter/leave fire on every tap
+  // and would collapse the palette the moment the finger lifts.
   const [hovered, setHovered] = useState(false);
   const [pinnedOpen, setPinnedOpen] = useState(false);
 
@@ -100,8 +103,21 @@ export function AnnotationToolbar({
     }
     onToolChange(key);
     setOptionsOpen(true);
-    setPinnedOpen(false);
+    // Keep the palette open so a color/width can be picked next; it collapses
+    // once the slide (or anything else outside) is touched.
+    setPinnedOpen(true);
   };
+
+  // Unpin when the user starts interacting anywhere outside the palette.
+  useEffect(() => {
+    const onDocPointerDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setPinnedOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, []);
 
   // Position within the slide card (the offset parent), draggable by the grip.
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -134,8 +150,15 @@ export function AnnotationToolbar({
       ref={rootRef}
       className="absolute z-10 flex items-start gap-1"
       style={{ left: pos.x, top: pos.y }}
-      onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
+      onPointerEnter={(e) => {
+        if (e.pointerType === "mouse") setHovered(true);
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType === "mouse") {
+          setHovered(false);
+          setPinnedOpen(false);
+        }
+      }}
     >
       <div className="flex flex-col gap-0.5 rounded-md border bg-background/85 backdrop-blur p-0.5 shadow-sm">
         <div
