@@ -13,7 +13,7 @@ import { AccountControl } from "@/components/AccountControl";
 import { ControllerOnboarding } from "@/components/ControllerOnboarding";
 import { NewsletterDialog } from "@/components/NewsletterDialog";
 import { useNewsletterPrompt } from "@/lib/useNewsletterPrompt";
-import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
+import { DownloadButton } from "@/components/DownloadButton";
 import { hasCompletedControllerOnboarding } from "@/lib/onboarding";
 import { useAuth } from "@/lib/useAuth";
 import { useClaim } from "@/lib/useClaim";
@@ -473,12 +473,7 @@ export function ControllerView({
             </Button>
           )}
           <div className="ml-auto flex items-center gap-2">
-            <Button variant="ghost" size="sm" asChild>
-              <a href={deck.url} download>
-                Download PDF
-              </a>
-            </Button>
-            <DownloadStrippedButton deck={deck} />
+            <DownloadButton deck={deck} />
             <Button variant="destructive" size="sm" onClick={() => setConfirmEnd(true)}>
               End Presentation
             </Button>

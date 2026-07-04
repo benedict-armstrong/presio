@@ -13,21 +13,23 @@ import { renderAnnotatedPdf } from "@/lib/annotatedPdf";
 import { hasAnyStrokes } from "@/lib/annotations";
 import type { Deck } from "@/lib/deck";
 
+type Mode = "everything" | "no-drawings" | "no-attachments";
+
 interface Props {
   deck: Deck;
   className?: string;
   variant?: React.ComponentProps<typeof Button>["variant"];
   size?: React.ComponentProps<typeof Button>["size"];
-  /** Render full-width (mobile menu style). */
+  /** Render full-width (menu style). */
   block?: boolean;
 }
 
-// Renders a "Download without attachments" split button, but only if the PDF
-// has any embedded files. The main button strips the attachments on click and
-// triggers a browser download; the attached dropdown (opening upward, the
-// button lives in bottom bars) offers the same download with or without the
-// presenter's drawings burned into the pages.
-export function DownloadStrippedButton({
+// Split "Download PDF" button. The main action downloads the deck with
+// everything in it: the presenter's drawings burned into the pages and any
+// embedded attachments kept. The dropdown (opening upward — the button lives
+// in bottom bars and menus) offers the same file minus the drawings (i.e. the
+// original upload) or minus the attachments (presio's notes/media sidecars).
+export function DownloadButton({
   deck,
   className,
   variant = "ghost",
@@ -37,40 +39,39 @@ export function DownloadStrippedButton({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!deck.hasAttachments) return null;
-
   const hasDrawing = hasAnyStrokes(deck.annotations);
+  const stem = (deck.filename || "slides").replace(/\.pdf$/i, "");
 
-  const download = async (withDrawings: boolean) => {
+  const download = async (mode: Mode) => {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      let { blob } = await stripAttachments(deck.url);
-      if (withDrawings) {
-        const bytes = await renderAnnotatedPdf(
-          new Uint8Array(await blob.arrayBuffer()),
-          deck.annotations
-        );
-        const buf = bytes.buffer.slice(
-          bytes.byteOffset,
-          bytes.byteOffset + bytes.byteLength
-        ) as ArrayBuffer;
-        blob = new Blob([buf], { type: "application/pdf" });
+      let bytes = await deck.pdf.getData();
+      let name = `${stem}.pdf`;
+      if (mode === "no-attachments" && deck.hasAttachments) {
+        bytes = await stripAttachments(bytes);
+        name = `${stem}-no-attachments.pdf`;
       }
-      const url = URL.createObjectURL(blob);
+      if (mode !== "no-drawings" && hasDrawing) {
+        bytes = await renderAnnotatedPdf(bytes, deck.annotations);
+      }
+      // Coerce to a plain ArrayBuffer slice so Blob's BlobPart typing is happy.
+      const buf = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength
+      ) as ArrayBuffer;
+      const url = URL.createObjectURL(new Blob([buf], { type: "application/pdf" }));
       const a = document.createElement("a");
       a.href = url;
-      const base = deck.url.split("/").pop()?.split("?")[0] || "slides.pdf";
-      const stem = base.replace(/\.pdf$/i, "");
-      a.download = `${stem}-no-attachments${withDrawings ? "-drawings" : ""}.pdf`;
+      a.download = name;
       document.body.appendChild(a);
       a.click();
       a.remove();
       // Give the browser a tick before revoking; Safari has been finicky.
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to strip PDF");
+      setError(e instanceof Error ? e.message : "Download failed");
     } finally {
       setBusy(false);
     }
@@ -83,11 +84,12 @@ export function DownloadStrippedButton({
           type="button"
           variant={variant}
           size={size}
-          onClick={() => download(false)}
+          onClick={() => download("everything")}
           disabled={busy}
+          data-testid="download-pdf"
           className={(block ? "flex-1 justify-start " : "") + (className ?? "")}
         >
-          {busy ? "Stripping…" : "Download without attachments"}
+          {busy ? "Preparing…" : "Download PDF"}
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -97,17 +99,26 @@ export function DownloadStrippedButton({
               size={size}
               disabled={busy}
               aria-label="More download options"
+              data-testid="download-menu"
               className="px-1.5"
             >
               <ChevronUp size={14} />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="end">
-            <DropdownMenuItem onSelect={() => download(false)}>
+            <DropdownMenuItem
+              disabled={!hasDrawing}
+              data-testid="download-no-drawings"
+              onSelect={() => download("no-drawings")}
+            >
               Without drawings
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={!hasDrawing} onSelect={() => download(true)}>
-              With drawings
+            <DropdownMenuItem
+              disabled={!deck.hasAttachments}
+              data-testid="download-no-attachments"
+              onSelect={() => download("no-attachments")}
+            >
+              Without attachments
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

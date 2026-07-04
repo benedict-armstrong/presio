@@ -11,7 +11,7 @@ import { MediaOverlay, type MediaState, type MediaTimeSync } from "@/components/
 import { AnnotationOverlay } from "@/components/AnnotationOverlay";
 import type { LaserPoint, Stroke } from "@/lib/annotations";
 import type { Deck } from "@/lib/deck";
-import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
+import { DownloadButton } from "@/components/DownloadButton";
 import { ViewerHint } from "@/components/ViewerHint";
 
 export function ViewerView({
@@ -49,7 +49,7 @@ export function ViewerView({
   strokes: readonly Stroke[];
   draft: Stroke | null;
 }) {
-  const { url: pdfUrl, totalSlides } = deck;
+  const { totalSlides } = deck;
   const mediaPlacements = deck.mediaBySlide.get(currentSlide) ?? [];
   const navigate = useNavigate();
   const [cursorVisible, setCursorVisible] = useState(true);
@@ -225,14 +225,7 @@ export function ViewerView({
             >
               Switch to Controller
             </Button>
-            {pdfUrl && (
-              <Button className="w-full" variant="outline" asChild>
-                <a href={pdfUrl} download>
-                  Download PDF
-                </a>
-              </Button>
-            )}
-            <DownloadStrippedButton deck={deck} variant="outline" size="default" block />
+            <DownloadButton deck={deck} variant="outline" size="default" block />
             <Button
               className="w-full"
               variant="outline"

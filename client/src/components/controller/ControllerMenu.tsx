@@ -2,7 +2,7 @@ import type { Deck } from "@/lib/deck";
 import { Menu, X, QrCode } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { DownloadStrippedButton } from "@/components/DownloadStrippedButton";
+import { DownloadButton } from "@/components/DownloadButton";
 
 // Mobile slide-over menu. Purely presentational: every action is a callback the
 // parent (ControllerView) wires to its single set of dialogs/handlers, so there
@@ -77,10 +77,7 @@ export function ControllerMenu({
               <Button variant="ghost" className="justify-start" onClick={act(onSwitchToViewer)}>
                 Switch to Viewer
               </Button>
-              <Button variant="ghost" className="justify-start" asChild>
-                <a href={deck.url} download>Download PDF</a>
-              </Button>
-              <DownloadStrippedButton deck={deck} block />
+              <DownloadButton deck={deck} block />
               <div className="flex items-center justify-between px-4 py-2">
                 <span className="text-sm">Theme</span>
                 <ThemeToggle size="icon" />
