@@ -1,4 +1,5 @@
-import { MousePointer2, Target, PenLine, Highlighter, Undo2, Trash2 } from "lucide-react";
+import { useRef, useState } from "react";
+import { MousePointer2, Target, PenLine, Highlighter, Undo2, Trash2, GripHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PEN_COLORS, HIGHLIGHTER_COLORS, PEN_REFERENCE_WIDTH, type PenStyle, type Tool } from "@/lib/annotations";
 
@@ -59,9 +60,10 @@ interface Props {
   onClear: () => void;
 }
 
-// Floating tool picker shown over the controller's current slide. When a
-// drawing tool is active, a second panel offers that tool's colors/widths plus
-// the undo/clear actions. Saving/loading drawings lives in Settings.
+// Floating tool palette shown over the controller's current slide, movable by
+// its grip handle. When a drawing tool is active, a second panel offers that
+// tool's colors/widths plus the undo/clear actions. Saving/loading drawings
+// lives in Settings.
 export function AnnotationToolbar({
   tool,
   onToolChange,
@@ -75,9 +77,46 @@ export function AnnotationToolbar({
   const colors = tool === "highlighter" ? HIGHLIGHTER_COLORS : PEN_COLORS;
   const sizes = tool === "highlighter" ? HIGHLIGHTER_SIZES : PEN_SIZES;
 
+  // Position within the slide card (the offset parent), draggable by the grip.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState({ x: 8, y: 8 });
+  // clientX/Y minus the palette position at drag start, so moves are relative.
+  const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+
+  const onGripDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.isPrimary) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
+  };
+  const onGripMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    const el = rootRef.current;
+    const parent = el?.parentElement;
+    if (!drag || !el || !parent) return;
+    const clamp = (n: number, max: number) => Math.min(Math.max(0, n), Math.max(0, max));
+    setPos({
+      x: clamp(e.clientX - drag.dx, parent.clientWidth - el.offsetWidth),
+      y: clamp(e.clientY - drag.dy, parent.clientHeight - el.offsetHeight),
+    });
+  };
+  const onGripUp = () => {
+    dragRef.current = null;
+  };
+
   return (
-    <div className="absolute left-2 top-2 z-10 flex items-start gap-1">
+    <div ref={rootRef} className="absolute z-10 flex items-start gap-1" style={{ left: pos.x, top: pos.y }}>
       <div className="flex flex-col gap-0.5 rounded-md border bg-background/85 backdrop-blur p-0.5 shadow-sm">
+        <div
+          title="Move toolbar"
+          data-testid="toolbar-drag"
+          onPointerDown={onGripDown}
+          onPointerMove={onGripMove}
+          onPointerUp={onGripUp}
+          onPointerCancel={onGripUp}
+          className="flex items-center justify-center h-4 -mb-0.5 cursor-grab active:cursor-grabbing touch-none text-muted-foreground"
+        >
+          <GripHorizontal size={12} />
+        </div>
         {TOOLS.map(({ key, icon: Icon, label }) => (
           <IconButton
             key={key}

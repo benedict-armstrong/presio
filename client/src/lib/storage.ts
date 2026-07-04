@@ -23,6 +23,8 @@ export const STORAGE_KEYS = {
   // Last-used drawing color/width for the annotation tools.
   penStyle: "presio_pen_style",
   highlighterStyle: "presio_highlighter_style",
+  // Whether the floating drawing/laser toolbar is shown on the current slide.
+  annotationToolbar: "presio_annotation_toolbar",
   // Whether the timer card also shows the current wall-clock time.
   timerShowClock: "presio_timer_show_clock",
   // Timer mode/duration/warning — a device preference, not synced anywhere.

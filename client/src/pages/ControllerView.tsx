@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { cn, getSessionAuth } from "@/lib/utils";
-import { Settings, Check, Option, Plus, Share2, ExternalLink, QrCode, Save, FolderOpen } from "lucide-react";
+import { Settings, Check, Option, Plus, Share2, ExternalLink, QrCode, Save, FolderOpen, PenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Separator } from "@/components/ui/separator";
@@ -137,6 +137,17 @@ export function ControllerView({
   const [onboardingOpen, setOnboardingOpen] = useState(() => !hasCompletedControllerOnboarding());
   // Active annotation tool for the current-slide card (laser pointer etc.).
   const [tool, setTool] = useState<Tool>("none");
+  // Floating tool palette visibility (device preference, toggled in the card
+  // header). Hiding it also drops the active tool so the slide is click-through.
+  const [toolsOpen, setToolsOpen] = useState(() => lsGetString(STORAGE_KEYS.annotationToolbar) !== "false");
+  const toggleTools = useCallback(() => {
+    setToolsOpen((open) => {
+      const next = !open;
+      lsSetString(STORAGE_KEYS.annotationToolbar, String(next));
+      if (!next) setTool("none");
+      return next;
+    });
+  }, []);
   // Speaker-notes text size multiplier (device preference).
   const [notesScale, setNotesScale] = useState(() => lsGet(STORAGE_KEYS.notesFontScale, 1));
   const changeNotesScale = useCallback((scale: number) => {
@@ -311,6 +322,7 @@ export function ControllerView({
           audioState={audioState}
           onAudioChange={onAudioChange}
           tool={tool}
+          toolbarVisible={toolsOpen}
           onToolChange={setTool}
           onLaserMove={onLaserMove}
           penStyle={activeStyle}
@@ -321,6 +333,22 @@ export function ControllerView({
           onStrokeUndo={onStrokeUndo}
           onAnnotationsClear={onAnnotationsClear}
         />
+      ),
+      action: (
+        <button
+          type="button"
+          data-testid="toolbar-toggle"
+          title={toolsOpen ? "Hide drawing tools" : "Show drawing tools"}
+          aria-pressed={toolsOpen}
+          onClick={toggleTools}
+          className={`inline-flex items-center justify-center h-5 w-5 rounded transition-colors ${
+            toolsOpen
+              ? "text-foreground bg-accent"
+              : "text-muted-foreground hover:text-foreground hover:bg-accent"
+          }`}
+        >
+          <PenLine size={13} />
+        </button>
       ),
     },
     nextSlide: {

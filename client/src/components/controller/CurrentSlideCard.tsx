@@ -36,6 +36,8 @@ interface Props {
   audioState?: AudioState;
   onAudioChange?: (next: { muted: boolean; target: AudioTarget }) => void;
   tool?: Tool;
+  /** Whether the floating tool palette is shown (toggled in the card header). */
+  toolbarVisible?: boolean;
   onToolChange?: (tool: Tool) => void;
   onLaserMove?: (pt: LaserPoint | null) => void;
   penStyle?: PenStyle;
@@ -71,6 +73,7 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
       audioState,
       onAudioChange,
       tool = "none",
+      toolbarVisible = true,
       onToolChange,
       onLaserMove,
       penStyle = DEFAULT_PEN_STYLE,
@@ -112,7 +115,7 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
             onStrokeProgress={onStrokeProgress}
             onStrokeCommit={onStrokeCommit}
           />
-          {onToolChange && onPenStyleChange && (
+          {toolbarVisible && onToolChange && onPenStyleChange && (
             <AnnotationToolbar
               tool={tool}
               onToolChange={onToolChange}
