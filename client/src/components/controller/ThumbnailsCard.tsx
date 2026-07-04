@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { renderPage, type MediaPlacement } from "@/lib/pdf";
 import type { Deck } from "@/lib/deck";
+import { drawStrokes, type Stroke } from "@/lib/annotations";
 import { getMediaPoster } from "@/lib/mediaPoster";
 
 export function ThumbnailsCard({
@@ -75,13 +76,36 @@ export function ThumbnailsCard({
             data-page={num}
             className="w-full h-full"
           />
-          {mediaBySlide?.get(num)?.map((p) => (
+          {mediaBySlide.get(num)?.map((p) => (
             <MediaPoster key={p.id} placement={p} />
           ))}
+          <ThumbStrokes strokes={deck.annotations[num]} />
         </button>
       ))}
     </div>
   );
+}
+
+// Paints the slide's drawings over its thumbnail. The thumb container matches
+// the page's aspect ratio exactly (no letterboxing), so a full-size canvas in
+// normalized coordinates lines up with the page.
+function ThumbStrokes({ strokes }: { strokes?: readonly Stroke[] }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas || !strokes?.length) return;
+    const dpr = window.devicePixelRatio || 1;
+    const box = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.round(box.width * dpr));
+    canvas.height = Math.max(1, Math.round(box.height * dpr));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    drawStrokes(ctx, strokes, canvas.width, canvas.height);
+  }, [strokes]);
+
+  if (!strokes?.length) return null;
+  return <canvas ref={ref} className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden />;
 }
 
 // Overlays a static preview image for media that has no frame baked into the

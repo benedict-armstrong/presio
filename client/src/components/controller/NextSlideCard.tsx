@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { renderPage } from "@/lib/pdf";
 import type { Deck } from "@/lib/deck";
+import { AnnotationOverlay } from "@/components/AnnotationOverlay";
 
 export function NextSlideCard({
   deck,
@@ -29,7 +30,14 @@ export function NextSlideCard({
     }
   }, [pdf, currentSlide, totalSlides]);
 
+  const nextStrokes = deck.annotations[currentSlide + 1];
+
   return (
-    <div ref={containerRef} className="h-full rounded overflow-hidden bg-white" />
+    <div className="h-full relative rounded overflow-hidden bg-white">
+      <div ref={containerRef} className="absolute inset-0" />
+      {!!nextStrokes?.length && (
+        <AnnotationOverlay containerRef={containerRef} strokes={nextStrokes} />
+      )}
+    </div>
   );
 }
