@@ -62,8 +62,11 @@ interface Props {
 
 // Floating tool palette shown over the controller's current slide, movable by
 // its grip handle. When a drawing tool is active, a second panel offers that
-// tool's colors/widths plus the undo/clear actions. Saving/loading drawings
-// lives in Settings.
+// tool's colors/widths plus the undo/clear actions; clicking the active tool
+// again minimizes that panel. While a tool is in use and the pointer is away
+// from the toolbar, the whole palette collapses to just the grip and the
+// active tool so it stays out of the slide. Saving/loading drawings lives in
+// Settings.
 export function AnnotationToolbar({
   tool,
   onToolChange,
@@ -76,6 +79,29 @@ export function AnnotationToolbar({
   const drawing = tool === "pen" || tool === "highlighter";
   const colors = tool === "highlighter" ? HIGHLIGHTER_COLORS : PEN_COLORS;
   const sizes = tool === "highlighter" ? HIGHLIGHTER_SIZES : PEN_SIZES;
+
+  // Options panel minimized state (toggled by re-clicking the active tool).
+  const [optionsOpen, setOptionsOpen] = useState(true);
+  // Hover expands the collapsed palette; `pinnedOpen` does the same for touch,
+  // where there is no hover — tapping the collapsed palette expands it until a
+  // tool is chosen.
+  const [hovered, setHovered] = useState(false);
+  const [pinnedOpen, setPinnedOpen] = useState(false);
+
+  const expanded = tool === "none" || hovered || pinnedOpen;
+  const activeTool = TOOLS.find((t) => t.key === tool) ?? TOOLS[0];
+  const ActiveIcon = activeTool.icon;
+
+  const selectTool = (key: Tool) => {
+    if (key === tool) {
+      // Re-clicking the active drawing tool tucks its options away / back.
+      if (drawing) setOptionsOpen((open) => !open);
+      return;
+    }
+    onToolChange(key);
+    setOptionsOpen(true);
+    setPinnedOpen(false);
+  };
 
   // Position within the slide card (the offset parent), draggable by the grip.
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -104,7 +130,13 @@ export function AnnotationToolbar({
   };
 
   return (
-    <div ref={rootRef} className="absolute z-10 flex items-start gap-1" style={{ left: pos.x, top: pos.y }}>
+    <div
+      ref={rootRef}
+      className="absolute z-10 flex items-start gap-1"
+      style={{ left: pos.x, top: pos.y }}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+    >
       <div className="flex flex-col gap-0.5 rounded-md border bg-background/85 backdrop-blur p-0.5 shadow-sm">
         <div
           title="Move toolbar"
@@ -117,20 +149,31 @@ export function AnnotationToolbar({
         >
           <GripHorizontal size={12} />
         </div>
-        {TOOLS.map(({ key, icon: Icon, label }) => (
+        {expanded ? (
+          TOOLS.map(({ key, icon: Icon, label }) => (
+            <IconButton
+              key={key}
+              title={label}
+              active={tool === key}
+              testId={`tool-${key}`}
+              onClick={() => selectTool(key)}
+            >
+              <Icon size={15} />
+            </IconButton>
+          ))
+        ) : (
           <IconButton
-            key={key}
-            title={label}
-            active={tool === key}
-            testId={`tool-${key}`}
-            onClick={() => onToolChange(key)}
+            title={`${activeTool.label} — tap to show all tools`}
+            active
+            testId="tool-collapsed"
+            onClick={() => setPinnedOpen(true)}
           >
-            <Icon size={15} />
+            <ActiveIcon size={15} />
           </IconButton>
-        ))}
+        )}
       </div>
 
-      {drawing && (
+      {drawing && expanded && optionsOpen && (
         <div
           data-testid="pen-options"
           className="flex flex-col gap-1.5 rounded-md border bg-background/85 backdrop-blur p-1.5 shadow-sm"
