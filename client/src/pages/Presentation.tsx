@@ -264,10 +264,16 @@ export default function Presentation() {
       setTotalSlides(totalSlides);
       if (serverAnnotations && Object.keys(serverAnnotations).length) {
         setAnnotations(serverAnnotations);
-      } else if (requestedRole === "controller" && hasAnyStrokes(annotationsRef.current)) {
+      } else if (requestedRole === "controller") {
         // The server has no drawings for this session (fresh boot / restart);
         // reseed it from this controller's persisted copy.
-        socket.emit("annotations_sync", annotationsRef.current);
+        if (hasAnyStrokes(annotationsRef.current)) {
+          socket.emit("annotations_sync", annotationsRef.current);
+        }
+      } else {
+        // Viewers mirror the server unconditionally — keeping a stale local
+        // copy when the server has none would resurrect cleared drawings.
+        setAnnotations({});
       }
       if (grantedRole && grantedRole !== requestedRole) {
         setRole(grantedRole);
