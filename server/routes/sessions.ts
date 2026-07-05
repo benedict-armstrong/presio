@@ -4,7 +4,7 @@ import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { nanoid, customAlphabet } from "nanoid";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { isValidHttpsUrl } from "../validation.js";
+import { isValidHttpsUrl, isValidTotalSlides, MAX_TOTAL_SLIDES } from "../validation.js";
 import { getBearerToken, resolveOptionalUserId, requireUser, safeEqual } from "../auth.js";
 import { clearSessionState, type SocketState } from "../socket.js";
 
@@ -48,7 +48,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   app.post("/api/sessions/local", async (req, res) => {
     const filename = typeof req.body.filename === "string" ? req.body.filename : "";
     const totalSlides = parseInt(req.body.total_slides, 10);
-    if (!filename || !Number.isFinite(totalSlides) || totalSlides < 1) {
+    if (!filename || !isValidTotalSlides(totalSlides)) {
       res.status(400).json({ error: "filename and total_slides are required" });
       return;
     }
@@ -89,7 +89,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       res.status(400).json({ error: "A valid https PDF URL is required" });
       return;
     }
-    if (!filename || !Number.isFinite(totalSlides) || totalSlides < 1) {
+    if (!filename || !isValidTotalSlides(totalSlides)) {
       res.status(400).json({ error: "filename and total_slides are required" });
       return;
     }
@@ -180,6 +180,10 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       const doc = await getDocument({ data: new Uint8Array(file.buffer) }).promise;
       const totalSlides = doc.numPages;
       doc.destroy();
+      if (!isValidTotalSlides(totalSlides)) {
+        res.status(400).json({ error: `PDF exceeds the ${MAX_TOTAL_SLIDES}-page limit` });
+        return;
+      }
 
       const { error: uploadError } = await supabase.storage
         .from("presentations")

@@ -40,6 +40,15 @@ export type AnnotationsBySlide = Record<number, StrokeData[]>;
 export const MAX_STROKES_PER_SLIDE = 300;
 const MAX_STROKE_POINTS = 4000; // flat x/y list => 2000 points
 
+// Upper bound on a deck's declared page count. total_slides is client-supplied
+// at session creation and multiplies the annotation caps above, so it must be
+// bounded; no real presentation comes close.
+export const MAX_TOTAL_SLIDES = 3000;
+
+export function isValidTotalSlides(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 1 && (value as number) <= MAX_TOTAL_SLIDES;
+}
+
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 // Coerce a stroke payload to known-good values, or null when malformed.
