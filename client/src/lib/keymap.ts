@@ -29,8 +29,9 @@ export const KEYMAP_LABELS: Record<KeymapAction, string> = {
 };
 
 export const DEFAULT_KEYMAP: Keymap = {
-  nextSlide: [{ key: "ArrowRight" }, { key: " " }],
-  prevSlide: [{ key: "ArrowLeft" }],
+  // PageDown/PageUp are what presenter remotes (clickers) send for next/prev.
+  nextSlide: [{ key: "ArrowRight" }, { key: " " }, { key: "PageDown" }],
+  prevSlide: [{ key: "ArrowLeft" }, { key: "PageUp" }],
   firstSlide: [{ key: "ArrowLeft", meta: true }],
   lastSlide: [{ key: "ArrowRight", meta: true }],
   toggleBlank: [{ key: "b" }],
@@ -61,6 +62,7 @@ export function formatBinding(b: KeyBinding): string {
   const display: Record<string, string> = {
     ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓",
     " ": "Space", Escape: "Esc", Enter: "Enter",
+    PageDown: "PgDn", PageUp: "PgUp",
   };
   parts.push(display[b.key] || b.key.toUpperCase());
   return parts.join("");
