@@ -18,9 +18,14 @@ const generateSessionId = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
 const generatePassphrase = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 8);
 
 // How many synced presentations a single user may have live at once. Sessions
-// expire after 24h (and are marked 'expired' on end), so this caps concurrent —
+// expire (and are marked 'expired' on end), so this caps concurrent —
 // not lifetime — presentations.
 export const MAX_CONCURRENT_PRESENTATIONS = 3;
+
+// Anonymous sessions keep the DB default expiry (24h). Sessions owned by a
+// logged-in user live a week — long enough to prepare a deck days ahead.
+export const OWNED_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const ownedExpiry = () => new Date(Date.now() + OWNED_SESSION_TTL_MS).toISOString();
 
 export function registerSessionRoutes(app: express.Express, { supabase, io, socketState }: RouteDeps) {
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -66,6 +71,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       passphrase: generatePassphrase(),
       local: true,
       user_id: userId,
+      ...(userId ? { expires_at: ownedExpiry() } : {}),
     });
 
     if (!id) {
@@ -107,6 +113,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       passphrase,
       local: false,
       user_id: userId,
+      ...(userId ? { expires_at: ownedExpiry() } : {}),
     });
 
     if (!id) {
@@ -201,6 +208,8 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         pdf_path: pdfPath,
         total_slides: totalSlides,
         user_id: userData.user.id,
+        // Claiming attaches a logged-in owner, so extend to the owned TTL.
+        expires_at: ownedExpiry(),
       };
       if (Number.isFinite(currentSlide) && currentSlide >= 1) update.current_slide = currentSlide;
 
