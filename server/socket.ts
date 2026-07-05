@@ -81,6 +81,13 @@ export function registerSocketHandlers(
         if (typeof token !== "string" || !safeEqual(token, data.controller_token)) {
           grantedRole = "viewer";
         } else {
+          // Last join wins controllership. Tell the socket being displaced
+          // (e.g. the controller opened in a second tab) so it can demote
+          // itself — otherwise its controls just silently stop working.
+          const prev = controllers.get(sessionId);
+          if (prev && prev !== socket.id) {
+            io.sockets.sockets.get(prev)?.emit("controller_replaced");
+          }
           controllers.set(sessionId, socket.id);
         }
       }

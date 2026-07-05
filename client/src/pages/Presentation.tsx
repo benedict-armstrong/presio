@@ -335,6 +335,15 @@ export default function Presentation() {
       setAnnotations(bySlide);
     });
 
+    // Another window took controllership (same token, e.g. a second tab).
+    // Demote this one to a viewer — updating the role param re-runs this
+    // effect, so the tab rejoins as a viewer and won't grab control back on
+    // its next reconnect.
+    socket.on("controller_replaced", () => {
+      setRole("viewer");
+      setSearchParams({ role: "viewer" }, { replace: true });
+    });
+
     socket.on("error", ({ message }) => {
       setError(message);
     });
@@ -363,6 +372,7 @@ export default function Presentation() {
       socket.off("stroke_undo");
       socket.off("annotations_clear");
       socket.off("annotations_state");
+      socket.off("controller_replaced");
       socket.off("error");
       socket.off("session_ended");
       socket.disconnect();
