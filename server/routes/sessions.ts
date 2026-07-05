@@ -25,6 +25,23 @@ export const MAX_CONCURRENT_PRESENTATIONS = 3;
 export function registerSessionRoutes(app: express.Express, { supabase, io, socketState }: RouteDeps) {
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
+  // Insert a session row, retrying with a fresh code on collision. Expired
+  // rows are retained indefinitely, so the 6-char code space slowly fills and
+  // a collision must be a retry, not a 500.
+  async function insertSession(row: Record<string, unknown>): Promise<string | null> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const id = generateSessionId();
+      const { error } = await supabase.from("sessions").insert({ ...row, id });
+      if (!error) return id;
+      if (error.code !== "23505") {
+        console.error("Failed to create session:", error);
+        return null;
+      }
+    }
+    console.error("Failed to create session: code collision after 3 attempts");
+    return null;
+  }
+
   // Reserve a session code for a presentation kept local to the browser. No PDF
   // is uploaded — the bytes stay in the client's IndexedDB. We only record the
   // code so it is unique/trackable (and claimable once the user logs in).
@@ -41,9 +58,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
     // still allowed — the token is optional, and an invalid one is simply ignored.
     const userId = await resolveOptionalUserId(supabase, req);
 
-    const id = generateSessionId();
-    const { error } = await supabase.from("sessions").insert({
-      id,
+    const id = await insertSession({
       pdf_path: "",
       filename,
       total_slides: totalSlides,
@@ -53,8 +68,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       user_id: userId,
     });
 
-    if (error) {
-      console.error("Failed to create local session:", error);
+    if (!id) {
       res.status(500).json({ error: "Failed to create session" });
       return;
     }
@@ -82,11 +96,9 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
 
     const userId = await resolveOptionalUserId(supabase, req);
 
-    const id = generateSessionId();
     const controllerToken = nanoid(24);
     const passphrase = generatePassphrase();
-    const { error } = await supabase.from("sessions").insert({
-      id,
+    const id = await insertSession({
       pdf_path: "",
       pdf_url: url,
       filename,
@@ -97,8 +109,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       user_id: userId,
     });
 
-    if (error) {
-      console.error("Failed to create external session:", error);
+    if (!id) {
       res.status(500).json({ error: "Failed to create session" });
       return;
     }
