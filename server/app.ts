@@ -21,6 +21,12 @@ export interface AppDeps {
 export function createApp({ supabase, io, socketState }: AppDeps): express.Express {
   const app = express();
 
+  // Exactly one reverse-proxy hop (Traefik) sits in front in production, so
+  // trust one level of X-Forwarded-For. Without this every request appears to
+  // come from the proxy's IP and the rate limiter throttles all users as one;
+  // trusting more hops would let clients spoof their IP via the header.
+  app.set("trust proxy", 1);
+
   const allowedOrigins = getAllowedOrigins();
   const corsOrigin: cors.CorsOptions["origin"] = (origin, callback) => {
     // No Origin header => same-origin / non-browser client (curl, server-to-server).
