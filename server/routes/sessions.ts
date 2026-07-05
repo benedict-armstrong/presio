@@ -209,6 +209,29 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         return;
       }
 
+      // The pre-claim count check races with concurrent claims (check-then-act
+      // isn't atomic). Re-count now that this claim is visible; if parallel
+      // claims overshot the cap, roll this one back. Fail-closed: in the rare
+      // tie both claims revert and the user simply retries one.
+      const { count: afterCount } = await supabase
+        .from("sessions")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userData.user.id)
+        .eq("local", false)
+        .neq("status", "expired")
+        .gt("expires_at", new Date().toISOString());
+      if ((afterCount ?? 0) > MAX_CONCURRENT_PRESENTATIONS) {
+        await supabase.storage.from("presentations").remove([pdfPath]);
+        await supabase
+          .from("sessions")
+          .update({ local: true, pdf_path: "" })
+          .eq("id", row.id);
+        res.status(403).json({
+          error: `You can have at most ${MAX_CONCURRENT_PRESENTATIONS} synced presentations at once. End one before syncing another.`,
+        });
+        return;
+      }
+
       res.json({
         id: row.id,
         totalSlides,
