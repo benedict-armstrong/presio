@@ -2,6 +2,7 @@ import { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "@/lib/theme";
 import { AuthProvider } from "@/lib/auth";
+import { PasswordRecoveryDialog } from "@/components/PasswordRecoveryDialog";
 import Home from "@/pages/Home";
 import Presentation from "@/pages/Presentation";
 import Present from "@/pages/Present";
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="/s/:id/share" element={<Share />} />
             <Route path="/about" element={<Suspense fallback={null}><About /></Suspense>} />
           </Routes>
+          <PasswordRecoveryDialog />
         </BrowserRouter>
       </AuthProvider>
     </ThemeProvider>

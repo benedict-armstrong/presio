@@ -12,8 +12,8 @@ function GitHubIcon() {
 }
 
 export function LoginDialog({ onClose }: { onClose: () => void }) {
-  const { signInWithGitHub, signInWithPassword, signUp } = useAuth();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const { signInWithGitHub, signInWithPassword, signUp, resetPassword } = useAuth();
+  const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -27,8 +27,11 @@ export function LoginDialog({ onClose }: { onClose: () => void }) {
     try {
       if (mode === "signup") {
         await signUp(email, password);
-        setInfo("Account created. Check your email if confirmation is required, then sign in.");
+        setInfo("Account created. Check your email for a confirmation link, then sign in.");
         setMode("signin");
+      } else if (mode === "reset") {
+        await resetPassword(email);
+        setInfo("If an account exists for that address, a reset link is on its way.");
       } else {
         await signInWithPassword(email, password);
         onClose();
@@ -53,25 +56,33 @@ export function LoginDialog({ onClose }: { onClose: () => void }) {
   return (
     <DialogOverlay onClose={onClose} maxWidth="max-w-xs">
       <div className="space-y-1 text-center">
-        <h2 className="text-lg font-semibold">{mode === "signup" ? "Create account" : "Log in"}</h2>
+        <h2 className="text-lg font-semibold">
+          {mode === "signup" ? "Create account" : mode === "reset" ? "Reset password" : "Log in"}
+        </h2>
         <p className="text-xs text-muted-foreground">
-          Log in to share presentations online across devices.
+          {mode === "reset"
+            ? "Enter your email and we'll send you a reset link."
+            : "Log in to share presentations online across devices."}
         </p>
       </div>
 
-      <Button variant="outline" className="w-full" onClick={github}>
-        <GitHubIcon />
-        Continue with GitHub
-      </Button>
+      {mode !== "reset" && (
+        <>
+          <Button variant="outline" className="w-full" onClick={github}>
+            <GitHubIcon />
+            Continue with GitHub
+          </Button>
 
-      <div className="relative">
-        <div className="absolute inset-0 flex items-center">
-          <span className="w-full border-t" />
-        </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-card px-2 text-muted-foreground">or</span>
-        </div>
-      </div>
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">or</span>
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="space-y-2">
         <input
@@ -82,28 +93,43 @@ export function LoginDialog({ onClose }: { onClose: () => void }) {
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           autoComplete="email"
         />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && email && password) submit(); }}
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          autoComplete={mode === "signup" ? "new-password" : "current-password"}
-        />
+        {mode !== "reset" && (
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && email && password) submit(); }}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
+          />
+        )}
         {error && <p className="text-sm text-destructive">{error}</p>}
         {info && <p className="text-sm text-muted-foreground">{info}</p>}
-        <Button className="w-full" disabled={!email || !password || loading} onClick={submit}>
-          {loading ? "Please wait…" : mode === "signup" ? "Sign up" : "Log in"}
+        <Button
+          className="w-full"
+          disabled={!email || (mode !== "reset" && !password) || loading}
+          onClick={submit}
+        >
+          {loading ? "Please wait…" : mode === "signup" ? "Sign up" : mode === "reset" ? "Send reset link" : "Log in"}
         </Button>
       </div>
 
+      {mode === "signin" && (
+        <button
+          type="button"
+          onClick={() => { setMode("reset"); setError(""); setInfo(""); }}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 mx-auto block"
+        >
+          Forgot password?
+        </button>
+      )}
       <button
         type="button"
-        onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setError(""); setInfo(""); }}
+        onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); setInfo(""); }}
         className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 mx-auto block"
       >
-        {mode === "signup" ? "Already have an account? Log in" : "Need an account? Sign up"}
+        {mode === "signin" ? "Need an account? Sign up" : "Already have an account? Log in"}
       </button>
     </DialogOverlay>
   );
