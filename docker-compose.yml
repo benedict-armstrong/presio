@@ -558,8 +558,12 @@ services:
     image: supabase/supavisor:2.9.5
     restart: unless-stopped
     ports:
-      - ${POSTGRES_PORT}:5432
-      - ${POOLER_PROXY_PORT_TRANSACTION}:6543
+      # Loopback only: everything in the stack reaches the pooler over the
+      # compose network; these binds exist purely for host-local admin access.
+      # Publishing them unqualified would expose Postgres to the internet
+      # (Docker's iptables rules bypass ufw).
+      - 127.0.0.1:${POSTGRES_PORT}:5432
+      - 127.0.0.1:${POOLER_PROXY_PORT_TRANSACTION}:6543
     volumes:
       - ./deploy/volumes/pooler/pooler.exs:/etc/pooler/pooler.exs:ro,z
     healthcheck:
