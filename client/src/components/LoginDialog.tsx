@@ -46,7 +46,9 @@ export function LoginDialog({ onClose }: { onClose: () => void }) {
   const github = async () => {
     setError("");
     try {
-      await signInWithGitHub(window.location.href);
+      // No explicit target: the provider defaults to the current page with the
+      // hash stripped (a stray `#` corrupts GoTrue's token fragment).
+      await signInWithGitHub();
       // Redirects away; nothing more to do here.
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "GitHub sign-in failed");

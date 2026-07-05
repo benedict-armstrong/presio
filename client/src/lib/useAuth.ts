@@ -16,6 +16,9 @@ export interface AuthContextValue {
   /** True while the user arrived via a reset link and must choose a new password. */
   passwordRecovery: boolean;
   clearPasswordRecovery: () => void;
+  /** Error from an auth email link (expired/used), parsed from the URL fragment. */
+  authLinkError: string | null;
+  clearAuthLinkError: () => void;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
