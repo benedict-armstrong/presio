@@ -63,6 +63,12 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   registerSessionRoutes(app, { supabase, io, socketState });
   registerNewsletterRoutes(app, supabase);
 
+  // Unknown API paths must 404 as JSON — falling through to the SPA catch-all
+  // returns index.html with a 200, which masks client bugs as parse errors.
+  app.use("/api", (_req, res) => {
+    res.status(404).json({ error: "Not found" });
+  });
+
   // --- Serve client in production ---
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
