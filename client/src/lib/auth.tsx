@@ -84,6 +84,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       if (error) throw error;
     },
+    verifyResetCode: async (email, code) => {
+      // Same recovery session as clicking the email link, minus the redirect —
+      // works even when a mail scanner has prefetched (voided) the link.
+      const { error } = await supabase.auth.verifyOtp({ email, token: code, type: "recovery" });
+      if (error) throw error;
+      setPasswordRecovery(true);
+    },
     updatePassword: async (password) => {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;

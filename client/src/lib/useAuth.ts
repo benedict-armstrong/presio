@@ -11,6 +11,8 @@ export interface AuthContextValue {
   signOut: () => Promise<void>;
   /** Email a password-reset link that returns the user to the current page. */
   resetPassword: (email: string) => Promise<void>;
+  /** Verify the one-time code from the reset email; starts password recovery. */
+  verifyResetCode: (email: string, code: string) => Promise<void>;
   /** Set a new password (valid during the recovery session from the email link). */
   updatePassword: (password: string) => Promise<void>;
   /** True while the user arrived via a reset link and must choose a new password. */

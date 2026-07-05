@@ -12,13 +12,16 @@ function GitHubIcon() {
 }
 
 export function LoginDialog({ onClose }: { onClose: () => void }) {
-  const { signInWithGitHub, signInWithPassword, signUp, resetPassword } = useAuth();
+  const { signInWithGitHub, signInWithPassword, signUp, resetPassword, verifyResetCode } = useAuth();
   const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [info, setInfo] = useState("");
+  // Reset flow: set once the email is sent; shows the one-time-code input.
+  const [resetSent, setResetSent] = useState(false);
+  const [resetCode, setResetCode] = useState("");
 
   const submit = async () => {
     setError("");
@@ -30,8 +33,16 @@ export function LoginDialog({ onClose }: { onClose: () => void }) {
         setInfo("Account created. Check your email for a confirmation link, then sign in.");
         setMode("signin");
       } else if (mode === "reset") {
-        await resetPassword(email);
-        setInfo("If an account exists for that address, a reset link is on its way.");
+        if (resetSent) {
+          // Verifying the emailed code starts the recovery session; the global
+          // "set a new password" dialog takes over from here.
+          await verifyResetCode(email, resetCode.trim());
+          onClose();
+        } else {
+          await resetPassword(email);
+          setResetSent(true);
+          setInfo("If an account exists for that address, an email is on its way. Follow its link, or enter the code from it below.");
+        }
       } else {
         await signInWithPassword(email, password);
         onClose();
@@ -63,7 +74,7 @@ export function LoginDialog({ onClose }: { onClose: () => void }) {
         </h2>
         <p className="text-xs text-muted-foreground">
           {mode === "reset"
-            ? "Enter your email and we'll send you a reset link."
+            ? "Enter your email and we'll send you a reset link and code."
             : "Log in to share presentations online across devices."}
         </p>
       </div>
@@ -106,21 +117,40 @@ export function LoginDialog({ onClose }: { onClose: () => void }) {
             autoComplete={mode === "signup" ? "new-password" : "current-password"}
           />
         )}
+        {mode === "reset" && resetSent && (
+          <input
+            type="text"
+            inputMode="numeric"
+            placeholder="Code from the email"
+            value={resetCode}
+            onChange={(e) => setResetCode(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && resetCode) submit(); }}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-center font-mono tracking-widest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            autoComplete="one-time-code"
+            autoFocus
+          />
+        )}
         {error && <p className="text-sm text-destructive">{error}</p>}
         {info && <p className="text-sm text-muted-foreground">{info}</p>}
         <Button
           className="w-full"
-          disabled={!email || (mode !== "reset" && !password) || loading}
+          disabled={!email || (mode !== "reset" && !password) || (mode === "reset" && resetSent && !resetCode) || loading}
           onClick={submit}
         >
-          {loading ? "Please wait…" : mode === "signup" ? "Sign up" : mode === "reset" ? "Send reset link" : "Log in"}
+          {loading
+            ? "Please wait…"
+            : mode === "signup"
+              ? "Sign up"
+              : mode === "reset"
+                ? resetSent ? "Verify code" : "Send reset email"
+                : "Log in"}
         </Button>
       </div>
 
       {mode === "signin" && (
         <button
           type="button"
-          onClick={() => { setMode("reset"); setError(""); setInfo(""); }}
+          onClick={() => { setMode("reset"); setResetSent(false); setResetCode(""); setError(""); setInfo(""); }}
           className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 mx-auto block"
         >
           Forgot password?
@@ -128,7 +158,7 @@ export function LoginDialog({ onClose }: { onClose: () => void }) {
       )}
       <button
         type="button"
-        onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); setInfo(""); }}
+        onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setResetSent(false); setResetCode(""); setError(""); setInfo(""); }}
         className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 mx-auto block"
       >
         {mode === "signin" ? "Need an account? Sign up" : "Already have an account? Log in"}
