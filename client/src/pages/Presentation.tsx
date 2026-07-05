@@ -74,7 +74,15 @@ export default function Presentation() {
   const localUrlRef = useRef("");
   // Latest broadcastable state, for replying to a local window's state_request
   // without re-subscribing the channel on every slide change.
-  const stateRef = useRef({ currentSlide: 1, totalSlides: 0, blanked: false, showCode: false, annotations: {} as AnnotationsBySlide });
+  const stateRef = useRef({
+    currentSlide: 1,
+    totalSlides: 0,
+    blanked: false,
+    showCode: false,
+    annotations: {} as AnnotationsBySlide,
+    mediaState: { id: null, action: "pause", seq: 0 } as MediaState,
+    audioState: defaultAudioState,
+  });
 
   // Resolved during load: true if this presentation's PDF lives in this
   // browser's IndexedDB (local session). null until known.
@@ -84,7 +92,7 @@ export default function Presentation() {
   const outOfSync = isViewer && viewerSlide !== null;
   const displaySlide = outOfSync ? viewerSlide! : currentSlide;
 
-  stateRef.current = { currentSlide, totalSlides, blanked, showCode, annotations };
+  stateRef.current = { currentSlide, totalSlides, blanked, showCode, annotations, mediaState, audioState };
 
   // Persist the controller's drawings across reloads.
   useEffect(() => {
@@ -196,7 +204,18 @@ export default function Presentation() {
         if (payload.totalSlides) setTotalSlides(payload.totalSlides);
         setBlanked(payload.blanked);
         setShowCode(!!payload.showCode);
-        if (requestedRole !== "controller" && payload.annotations) setAnnotations(payload.annotations);
+        if (requestedRole !== "controller") {
+          if (payload.annotations) setAnnotations(payload.annotations);
+          // Adopt media/audio too, so a window opened mid-playback doesn't
+          // sit paused/muted while everyone else is watching a video. The
+          // sync also moves displaySlide, which would trip the slide-change
+          // media reset below and wipe what we just adopted — flag it off.
+          if (payload.mediaState) {
+            skipMediaResetRef.current = true;
+            setMediaState(payload.mediaState);
+          }
+          if (payload.audioState) setAudioState(payload.audioState);
+        }
       }
     };
 
@@ -379,7 +398,15 @@ export default function Presentation() {
     };
   }, [id, local, requestedRole, navigate, setSearchParams, applyCommit, applyUndo, applyClear]);
 
+  // Set when a state_sync adopts media state alongside a slide change, so the
+  // reset below doesn't immediately discard it.
+  const skipMediaResetRef = useRef(false);
+
   useEffect(() => {
+    if (skipMediaResetRef.current) {
+      skipMediaResetRef.current = false;
+      return;
+    }
     setMediaState((s) => (s.id === null ? s : { id: null, action: "pause", seq: Date.now() }));
     setMediaTime(null);
   }, [displaySlide]);
