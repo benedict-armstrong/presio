@@ -36,7 +36,19 @@ async function cleanupExpired() {
   // Mark as expired rather than deleting — the row is retained as a record.
   const ids = expired.map((s) => s.id);
   await supabase.from("sessions").update({ status: "expired" }).in("id", ids);
-  for (const id of ids) clearSessionState(socketState, id);
+
+  // Tell any connected windows and drop them, mirroring the explicit-end
+  // route. Without this a presentation that ages out mid-use just goes dead:
+  // the controller's events are silently discarded once its registration is
+  // cleared, with no feedback to anyone.
+  for (const id of ids) {
+    const sockets = await io.in(id).fetchSockets();
+    for (const s of sockets) {
+      s.emit("session_ended");
+      s.disconnect(true);
+    }
+    clearSessionState(socketState, id);
+  }
 
   console.log(`Expired ${expired.length} session(s)`);
 }
