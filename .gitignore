@@ -1,6 +1,10 @@
 .env
 node_modules/
 
+# Supabase Studio saves ad-hoc SQL queries into its mounted volume; they're
+# runtime data, not part of the deploy config.
+deploy/volumes/snippets/
+
 # Playwright E2E artifacts
 /test-results/
 /playwright-report/
