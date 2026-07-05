@@ -45,6 +45,10 @@ export function registerSocketHandlers(
 ) {
   const { controllers, blankedSessions, codeSessions, annotations } = state;
 
+  // Tail of each session's in-flight current_slide write, so overlapping
+  // updates land in emit order (see slide_change).
+  const pendingSlideWrites = new Map<string, Promise<void>>();
+
   // Wrap an event handler so it only runs for the session's registered
   // controller, passing the resolved sessionId through. Mutating events
   // (slide/blank/media) all share this guard.
@@ -97,12 +101,28 @@ export function registerSocketHandlers(
       // Reject non-finite/out-of-range values rather than persisting garbage.
       if (!isValidSlideNumber(slideNumber, socket.data.totalSlides)) return;
 
-      await supabase
-        .from("sessions")
-        .update({ current_slide: slideNumber })
-        .eq("id", sessionId);
-
+      // Broadcast before persisting: awaiting the DB first let two rapid
+      // changes resolve out of order, leaving viewers (and the stored
+      // current_slide) on the older slide until the next navigation.
       io.to(sessionId).emit("slide_update", { slideNumber });
+
+      // Serialize writes per session so the row always ends on the newest
+      // slide even when update round-trips overlap.
+      const pending = pendingSlideWrites.get(sessionId) ?? Promise.resolve();
+      const write = pending
+        .then(async () => {
+          await supabase
+            .from("sessions")
+            .update({ current_slide: slideNumber })
+            .eq("id", sessionId);
+        })
+        .catch(() => { /* keep the chain alive */ })
+        .then(() => {
+          // Drop the entry once this chain has drained so the map doesn't
+          // accumulate one promise per session for the process lifetime.
+          if (pendingSlideWrites.get(sessionId) === write) pendingSlideWrites.delete(sessionId);
+        });
+      pendingSlideWrites.set(sessionId, write);
     }));
 
     socket.on("sync_all", controllerOnly(socket, (sessionId) => {
