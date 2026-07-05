@@ -321,8 +321,8 @@ export function ControllerView({
           muted={muted}
           audioState={audioState}
           onAudioChange={onAudioChange}
-          tool={tool}
-          toolbarVisible={toolsOpen}
+          tool={loggedIn ? tool : "none"}
+          toolbarVisible={toolsOpen && loggedIn}
           onToolChange={setTool}
           onLaserMove={onLaserMove}
           penStyle={activeStyle}
@@ -338,11 +338,17 @@ export function ControllerView({
         <button
           type="button"
           data-testid="toolbar-toggle"
-          title={toolsOpen ? "Hide drawing tools" : "Show drawing tools"}
-          aria-pressed={toolsOpen}
-          onClick={toggleTools}
+          title={
+            !loggedIn
+              ? "Log in to use drawing tools"
+              : toolsOpen
+                ? "Hide drawing tools"
+                : "Show drawing tools"
+          }
+          aria-pressed={toolsOpen && loggedIn}
+          onClick={loggedIn ? toggleTools : () => setLoginOpen(true)}
           className={`inline-flex items-center justify-center h-5 w-5 rounded transition-colors ${
-            toolsOpen
+            toolsOpen && loggedIn
               ? "text-foreground bg-accent"
               : "text-muted-foreground hover:text-foreground hover:bg-accent"
           }`}
@@ -569,6 +575,17 @@ export function ControllerView({
 
           <section className="space-y-2">
             <h3 className="text-sm font-medium">Drawing</h3>
+            {!loggedIn ? (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Drawing tools are available for logged-in users.
+                </p>
+                <Button size="sm" variant="outline" onClick={() => setLoginOpen(true)}>
+                  Log in
+                </Button>
+              </>
+            ) : (
+              <>
             <p className="text-xs text-muted-foreground">
               Save the drawings made on the slides to a file, or load a previously saved drawing.
             </p>
@@ -605,6 +622,8 @@ export function ControllerView({
                 }}
               />
             </div>
+              </>
+            )}
           </section>
 
           {passphrase && (
