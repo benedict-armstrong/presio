@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, Laptop, MonitorPlay, Share2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Highlighter, Laptop, MonitorPlay, PenLine, Share2, Target, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { markControllerOnboarded } from "@/lib/onboarding";
@@ -103,6 +103,37 @@ function buildSteps(onOpenViewer: () => void): Step[] {
               QR / link
             </div>
           </div>
+        </div>
+      ),
+    },
+    {
+      title: "Draw on your slides",
+      body: (
+        <div className="space-y-4 text-sm text-muted-foreground">
+          <p>
+            Click the
+            <PenLine size={14} className="inline mx-1 -mt-0.5" />
+            pen in the current slide's header to open the drawing tools.
+            Everything you draw appears live on every viewer.
+          </p>
+          <div className="flex items-center justify-center gap-6 py-2">
+            <div className="flex flex-col items-center gap-1">
+              <Target size={32} className="text-foreground" strokeWidth={1.5} />
+              <span className="text-xs">Laser pointer</span>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <PenLine size={32} className="text-foreground" strokeWidth={1.5} />
+              <span className="text-xs">Pen</span>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <Highlighter size={32} className="text-foreground" strokeWidth={1.5} />
+              <span className="text-xs">Highlighter</span>
+            </div>
+          </div>
+          <p className="text-center text-xs">
+            Drawing tools are available when you're logged in. Save or reload
+            your drawings anytime from Settings.
+          </p>
         </div>
       ),
     },
