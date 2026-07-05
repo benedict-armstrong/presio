@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { nanoid, customAlphabet } from "nanoid";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { isValidHttpsUrl } from "../validation.js";
-import { getBearerToken, resolveOptionalUserId, requireUser } from "../auth.js";
+import { getBearerToken, resolveOptionalUserId, requireUser, safeEqual } from "../auth.js";
 import { clearSessionState, type SocketState } from "../socket.js";
 
 export interface RouteDeps {
@@ -312,7 +312,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       return;
     }
 
-    if (data.passphrase !== passphrase) {
+    if (typeof passphrase !== "string" || !safeEqual(data.passphrase, passphrase)) {
       res.status(401).json({ error: "Invalid passphrase" });
       return;
     }
@@ -334,7 +334,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
 
     // Only the controller (who holds the token) may end a presentation.
     const token = req.get("x-controller-token") || "";
-    if (token !== data.controller_token) {
+    if (!safeEqual(token, data.controller_token)) {
       res.status(403).json({ error: "Not authorized" });
       return;
     }

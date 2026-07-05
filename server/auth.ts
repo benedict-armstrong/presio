@@ -1,5 +1,15 @@
+import { timingSafeEqual } from "node:crypto";
 import type express from "express";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+
+/** Constant-time string comparison for secrets (passphrases, controller
+ *  tokens), so a comparison can't leak how many leading characters matched.
+ *  Only the length is observable, which an attacker knows anyway. */
+export function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
 
 /** Extract the bearer token from an Authorization header, or "" if absent. */
 export function getBearerToken(req: express.Request): string {

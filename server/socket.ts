@@ -1,5 +1,6 @@
 import type { Server, Socket } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { safeEqual } from "./auth.js";
 import {
   isValidSlideNumber,
   sanitizeLaserPoint,
@@ -77,7 +78,7 @@ export function registerSocketHandlers(
 
       let grantedRole = role;
       if (role === "controller") {
-        if (token !== data.controller_token) {
+        if (typeof token !== "string" || !safeEqual(token, data.controller_token)) {
           grantedRole = "viewer";
         } else {
           controllers.set(sessionId, socket.id);
