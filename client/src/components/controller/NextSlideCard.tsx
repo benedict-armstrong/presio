@@ -17,13 +17,18 @@ export function NextSlideCard({
     if (!containerRef.current) return;
     const container = containerRef.current;
     if (currentSlide < totalSlides) {
+      // Renders resolve out of order (cache hits are near-instant); drop any
+      // that finish after the effect has moved to another slide.
+      let stale = false;
       renderPage(pdf, currentSlide + 1, 1).then((canvas) => {
+        if (stale) return;
         container.innerHTML = "";
         canvas.style.width = "100%";
         canvas.style.height = "100%";
         canvas.style.objectFit = "contain";
         container.appendChild(canvas);
       });
+      return () => { stale = true; };
     } else {
       container.innerHTML =
         '<div class="flex items-center justify-center h-full text-muted-foreground text-sm">End of presentation</div>';

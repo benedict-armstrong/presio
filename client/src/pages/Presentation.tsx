@@ -376,14 +376,23 @@ export default function Presentation() {
     // fixed-size canvas.
     const dpr = window.devicePixelRatio || 1;
     const targetWidth = Math.round((container.clientWidth || 1280) * dpr);
+    // renderPage resolves out of order (cached pages are near-instant, fresh
+    // ones aren't), so a rapid slide change could leave a stale page on screen
+    // — with the annotation overlay drawing the new slide's strokes over it.
+    // Drop any render that finishes after the effect has moved on.
+    let stale = false;
     renderPage(pdf, displaySlide, { targetWidth }).then((canvas) => {
+      if (stale) return;
       container.innerHTML = "";
       canvas.style.width = "100%";
       canvas.style.height = "100%";
       canvas.style.objectFit = "contain";
       container.appendChild(canvas);
     });
-  }, [pdf, displaySlide, role]);
+    return () => { stale = true; };
+    // deckInfo gates mounting of the view that owns the container, and refs
+    // don't trigger effects — re-run once the container actually exists.
+  }, [pdf, displaySlide, role, deckInfo]);
 
   // Mirror a local state change outward: always to other same-browser windows
   // (BroadcastChannel) and, for synced sessions, to the server (socket). The
