@@ -39,12 +39,4 @@ Hello world.
 #media("https://www.youtube.com/watch?v=dQw4w9WgXcQ", width: 60%, aspect-ratio: 16/9)
 ```
 
-Presio reads the attached media and notes from the PDF automatically. Notes can also be embedded by hand from plain Typst or LaTeX — see the in-app [About page](https://presio.xyz/about) for details.
-
-## Development
-
-```bash
-npm run build    # install deps and build client + server
-npm start        # start the server
-npm run test:e2e # run Playwright end-to-end tests
-```
+Presio reads the attached media and notes from the PDF automatically. Notes can also be embedded by hand from plain Typst or LaTeX. See the about page for details.

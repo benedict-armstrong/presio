@@ -184,6 +184,17 @@ Hello world.
             </div>
           </div>
 
+          <div className="rounded-md border px-3 py-2.5 text-sm text-muted-foreground">
+            Validate your compiled PDF's sidecar attachments at{" "}
+            <Link
+              to="/check"
+              className="text-foreground underline underline-offset-4 hover:text-muted-foreground"
+            >
+              presio.xyz/check
+            </Link>
+            {" "}— upload a PDF to see per-page thumbnails and check that notes and media sidecars are valid.
+          </div>
+
           <div className="flex items-center justify-between pt-2">
             <Button variant="outline" asChild>
               <Link to="/">Back to Home</Link>
