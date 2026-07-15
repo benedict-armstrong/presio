@@ -1,3 +1,9 @@
+---
+title: About Presio
+description: How Presio works — local-by-default PDF presentations with optional live cross-device sync.
+canonical: BASE/about
+---
+
 # About Presio
 
 A simple tool for presenting PDFs — locally or shared live across devices.

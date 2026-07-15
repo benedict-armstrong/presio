@@ -1,3 +1,9 @@
+---
+title: Presio API
+description: REST reference for starting local PDF presentations and validating sidecars, with curl examples.
+canonical: BASE/api.md
+---
+
 # Presio API
 
 Base URL: `BASE`

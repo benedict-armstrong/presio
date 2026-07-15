@@ -73,7 +73,15 @@ export function registerMcpRoutes(app: express.Express, supabase: SupabaseClient
   app.get("/.well-known/mcp.json", (req, res) => {
     const origin = baseUrl(req);
     res.setHeader("Cache-Control", "public, max-age=300");
+    // Public discovery metadata — readable from any origin, unlike the API.
+    res.setHeader("Access-Control-Allow-Origin", "*");
     res.json({
+      // Top-level name/description/version/endpoint duplicated for scanners
+      // that expect a flat server card rather than the nested shape.
+      name: "presio",
+      version: "1.0.0",
+      description: "Start local PDF presentations and validate Presio sidecars",
+      endpoint: `${origin}/mcp`,
       protocolVersion: "2025-11-25",
       serverInfo: {
         name: "presio",

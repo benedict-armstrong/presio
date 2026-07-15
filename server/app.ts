@@ -1,4 +1,5 @@
 import express from "express";
+import fs from "fs";
 import * as Sentry from "@sentry/node";
 import cors from "cors";
 import helmet from "helmet";
@@ -8,6 +9,7 @@ import { fileURLToPath } from "url";
 import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAllowedOrigins, buildCspDirectives } from "./security.js";
+import { baseUrl } from "./lib/baseUrl.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerNewsletterRoutes } from "./routes/newsletter.js";
 import { registerCheckRoute } from "./routes/check.js";
@@ -79,6 +81,13 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
     res.status(404).json({ error: "Not found" });
   });
 
+  // Same for /.well-known: agent discovery scanners probe many protocols
+  // (A2A, ACP, UCP, …) we don't implement; index.html with a 200 reads as a
+  // corrupt discovery document, a 404 reads as "not supported".
+  app.use("/.well-known", (_req, res) => {
+    res.status(404).json({ error: "Not found" });
+  });
+
   // --- Serve client in production ---
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -88,8 +97,23 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   app.use("/schema", express.static(path.join(__dirname, "../../schema"), { index: false }));
 
   app.use(express.static(clientDist));
-  app.get("*path", (_req, res) => {
-    res.sendFile(path.join(clientDist, "index.html"));
+
+  // Serve the SPA shell with a per-request canonical URL and og:url so every
+  // route carries correct metadata without the client rendering it.
+  let indexHtml: string | undefined;
+  app.get("*path", (req, res, next) => {
+    try {
+      indexHtml ??= fs.readFileSync(path.join(clientDist, "index.html"), "utf8");
+    } catch (err) {
+      return next(err);
+    }
+    const url = `${baseUrl(req)}${req.path === "/" ? "/" : req.path}`.replace(
+      /[<>"&]/g,
+      (c) => ({ "<": "%3C", ">": "%3E", '"': "%22", "&": "&amp;" })[c] as string
+    );
+    const tags = `<link rel="canonical" href="${url}" />\n  <meta property="og:url" content="${url}" />\n</head>`;
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(indexHtml.replace("</head>", tags));
   });
 
   // Report unhandled route errors to Sentry. No-op when Sentry isn't

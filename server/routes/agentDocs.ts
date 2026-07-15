@@ -10,6 +10,14 @@ const CONTENT = path.join(__dirname, "../agent/content");
 
 const CACHE = "public, max-age=300";
 
+// Sitemap lastmod: newest content file, set at image build time (git checkout).
+const LASTMOD = (() => {
+  const times = fs
+    .readdirSync(CONTENT)
+    .map((f) => fs.statSync(path.join(CONTENT, f)).mtime.getTime());
+  return new Date(Math.max(...times)).toISOString().slice(0, 10);
+})();
+
 function readContent(name: string): string {
   return fs.readFileSync(path.join(CONTENT, name), "utf8");
 }
@@ -18,9 +26,10 @@ function withBase(text: string, base: string): string {
   return text.replaceAll("BASE", base);
 }
 
-function sendText(res: express.Response, type: string, body: string) {
+function sendText(res: express.Response, type: string, body: string, canonical?: string) {
   res.setHeader("Content-Type", `${type}; charset=utf-8`);
   res.setHeader("Cache-Control", CACHE);
+  if (canonical) res.setHeader("Link", `<${canonical}>; rel="canonical"`);
   res.send(body);
 }
 
@@ -50,6 +59,7 @@ const SITEMAP_PATHS = [
   "/sitemap.xml",
   "/sitemap.md",
   "/.well-known/mcp.json",
+  "/.well-known/api-catalog",
 ];
 
 export function registerAgentDocRoutes(app: express.Express) {
@@ -61,25 +71,12 @@ export function registerAgentDocRoutes(app: express.Express) {
     sendText(res, "text/plain", withBase(readContent("llms-full.txt"), baseUrl(req)));
   });
 
-  app.get("/AGENTS.md", (req, res) => {
-    sendText(res, "text/markdown", withBase(readContent("AGENTS.md"), baseUrl(req)));
-  });
-
-  app.get("/api.md", (req, res) => {
-    sendText(res, "text/markdown", withBase(readContent("api.md"), baseUrl(req)));
-  });
-
-  app.get("/index.md", (req, res) => {
-    sendText(res, "text/markdown", withBase(readContent("index.md"), baseUrl(req)));
-  });
-
-  app.get("/about.md", (req, res) => {
-    sendText(res, "text/markdown", withBase(readContent("about.md"), baseUrl(req)));
-  });
-
-  app.get("/check.md", (req, res) => {
-    sendText(res, "text/markdown", withBase(readContent("check.md"), baseUrl(req)));
-  });
+  for (const name of ["AGENTS.md", "api.md", "index.md", "about.md", "check.md"] as const) {
+    app.get(`/${name}`, (req, res) => {
+      const base = baseUrl(req);
+      sendText(res, "text/markdown", withBase(readContent(name), base), `${base}/${name}`);
+    });
+  }
 
   app.get("/openapi.json", (req, res) => {
     res.setHeader("Cache-Control", CACHE);
@@ -102,7 +99,7 @@ export function registerAgentDocRoutes(app: express.Express) {
   app.get("/sitemap.xml", (req, res) => {
     const base = baseUrl(req);
     const urls = SITEMAP_PATHS.map(
-      (p) => `  <url>\n    <loc>${base}${p === "/" ? "/" : p}</loc>\n  </url>`
+      (p) => `  <url>\n    <loc>${base}${p === "/" ? "/" : p}</loc>\n    <lastmod>${LASTMOD}</lastmod>\n  </url>`
     ).join("\n");
     const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
     res.setHeader("Content-Type", "application/xml; charset=utf-8");
@@ -112,8 +109,32 @@ export function registerAgentDocRoutes(app: express.Express) {
 
   app.get("/sitemap.md", (req, res) => {
     const base = baseUrl(req);
-    const lines = ["# Sitemap", "", ...SITEMAP_PATHS.map((p) => `- ${base}${p === "/" ? "/" : p}`), ""];
-    sendText(res, "text/markdown", lines.join("\n"));
+    const lines = [
+      "# Sitemap",
+      "",
+      ...SITEMAP_PATHS.map((p) => `- [${p}](${base}${p === "/" ? "/" : p})`),
+      "",
+    ];
+    sendText(res, "text/markdown", lines.join("\n"), `${base}/sitemap.md`);
+  });
+
+  // RFC 9727 API catalog: linkset pointing agents at the OpenAPI spec and docs.
+  app.get("/.well-known/api-catalog", (req, res) => {
+    const base = baseUrl(req);
+    res.setHeader("Content-Type", "application/linkset+json");
+    res.setHeader("Cache-Control", CACHE);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.send(
+      JSON.stringify({
+        linkset: [
+          {
+            anchor: `${base}/api`,
+            "service-desc": [{ href: `${base}/openapi.json`, type: "application/openapi+json" }],
+            "service-doc": [{ href: `${base}/api.md`, type: "text/markdown" }],
+          },
+        ],
+      })
+    );
   });
 
   // Content negotiation: Prefer markdown mirrors when Accept says so.
@@ -124,7 +145,8 @@ export function registerAgentDocRoutes(app: express.Express) {
   ] as const) {
     app.get(route, (req, res, next) => {
       if (!prefersMarkdown(req)) return next();
-      sendText(res, "text/markdown", withBase(readContent(file), baseUrl(req)));
+      const base = baseUrl(req);
+      sendText(res, "text/markdown", withBase(readContent(file), base), `${base}/${file}`);
     });
   }
 }

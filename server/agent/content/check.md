@@ -1,3 +1,9 @@
+---
+title: Presio PDF sidecar checker
+description: Validate Presio speaker-notes and media sidecar attachments embedded in a PDF.
+canonical: BASE/check
+---
+
 # PDF sidecar checker
 
 Upload a Presio PDF to validate embedded speaker notes and media sidecars.
