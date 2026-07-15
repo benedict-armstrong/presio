@@ -11,7 +11,7 @@ const OWNED_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ownedExpiry = () => new Date(Date.now() + OWNED_SESSION_TTL_MS).toISOString();
 
 export const PRESENT_NEXT =
-  "Open url in a browser to start a local presentation (skips share). The PDF is copied into the browser and removed from the server.";
+  "Open url in a browser to start a local presentation (skips share). The PDF is copied into the browser and removed from the server. Unclaimed links expire after 24h (7 days when authenticated).";
 
 export type PresentResult =
   | { ok: true; id: string; url: string; filename: string; totalSlides: number; next: string; controllerToken: string }

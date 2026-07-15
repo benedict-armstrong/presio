@@ -14,7 +14,7 @@ export function buildOpenApi(base: string) {
         post: {
           summary: "Start a local presentation from a PDF",
           description:
-            "Stages the PDF and returns a url. Opening the url copies the PDF into the browser (local session), deletes the server copy, and skips the share screen.",
+            "Stages the PDF and returns a url. Opening the url copies the PDF into the browser (local session), deletes the server copy, and skips the share screen. The url works until a browser claims it; unclaimed handoffs expire after 24 hours (7 days when authenticated).",
           operationId: "present",
           requestBody: {
             required: true,
@@ -40,8 +40,16 @@ export function buildOpenApi(base: string) {
                     required: ["id", "url", "filename", "totalSlides", "next"],
                     properties: {
                       id: { type: "string" },
-                      url: { type: "string", format: "uri" },
-                      filename: { type: "string" },
+                      url: {
+                        type: "string",
+                        format: "uri",
+                        description:
+                          "Handoff link: valid until a browser claims the deck, or 24h (7 days authenticated) if unclaimed. Fetching without completing handoff does not consume it.",
+                      },
+                      filename: {
+                        type: "string",
+                        description: "Display title — the uploaded filename with its .pdf extension stripped.",
+                      },
                       totalSlides: { type: "integer" },
                       next: { type: "string" },
                     },

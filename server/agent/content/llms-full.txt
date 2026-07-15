@@ -16,11 +16,13 @@ Response:
   "url": "BASE/start/ABC123?t=…",
   "filename": "deck",
   "totalSlides": 12,
-  "next": "Open url in a browser to start a local presentation (skips share). The PDF is copied into the browser and removed from the server."
+  "next": "Open url in a browser to start a local presentation (skips share). The PDF is copied into the browser and removed from the server. Unclaimed links expire after 24h (7 days when authenticated)."
 }
 ```
 
 **Next step:** open `url` in a browser. That page pulls the PDF into IndexedDB (local session), deletes the server copy, and lands on the controller — no share screen.
+
+The `url` stays valid until a browser claims it (after that the server copy is gone and the link is dead); unclaimed handoffs expire after 24 hours (7 days when authenticated). `filename` is the display title — the uploaded name minus its `.pdf` extension.
 
 - No auth required. Optional `Authorization: Bearer <supabase-jwt>` attaches ownership.
 - Max PDF size: 50MB. Max pages: 3000.

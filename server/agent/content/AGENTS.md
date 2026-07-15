@@ -44,6 +44,7 @@ curl -s -F file=@deck.pdf BASE/api/check
 
 - PDF ≤ 50MB, ≤ 3000 pages
 - No auth required for present/check
+- Handoff `url` works until a browser claims it (then the server copy is deleted); unclaimed handoffs expire after 24 hours (7 days when authenticated)
 - Present creates a **local** session after the browser opens the link (PDF leaves the server)
 - Cross-device sync is not available from the API alone
 

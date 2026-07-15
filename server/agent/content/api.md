@@ -23,7 +23,9 @@ curl -s -F file=@deck.pdf BASE/api/present
 
 **200:** `{ id, url, filename, totalSlides, next }`
 
-Open `url` → PDF moves into the browser as a local session; server copy is deleted.
+- `url` — handoff link. Open it → PDF moves into the browser as a local session; the server copy is then deleted and the link stops working. Fetching the URL without completing handoff does not consume it.
+- Unclaimed handoffs expire after **24 hours** (7 days when authenticated).
+- `filename` — display title: the uploaded filename with its `.pdf` extension stripped.
 
 ## POST /api/check
 
