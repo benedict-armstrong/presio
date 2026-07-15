@@ -1,0 +1,42 @@
+# Presio API
+
+Base URL: `BASE`
+
+## POST /api/present
+
+Upload a PDF to start a local presentation. Returns a URL to open in a browser (skips share).
+
+- Content-Type: `multipart/form-data`
+- Field: `file` (PDF)
+- Auth: optional Bearer
+
+```bash
+curl -s -F file=@deck.pdf BASE/api/present
+```
+
+**200:** `{ id, url, filename, totalSlides, next }`
+
+Open `url` → PDF moves into the browser as a local session; server copy is deleted.
+
+## POST /api/check
+
+Validate Presio sidecar attachments (notes + media).
+
+```bash
+curl -s -F file=@deck.pdf BASE/api/check
+```
+
+**200:** CheckReport JSON (see `BASE/schema/check-report.schema.json`)
+
+## Handoff (used by the start page)
+
+- `GET /api/sessions/:id/handoff?t=TOKEN` — download staged PDF
+- `POST /api/sessions/:id/handoff/complete` — header `x-controller-token` — clear server copy
+
+## OpenAPI
+
+Machine-readable: `BASE/openapi.json`
+
+## MCP
+
+`BASE/mcp` — tools `present_pdf`, `check_pdf`

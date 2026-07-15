@@ -7,12 +7,14 @@ import "dotenv/config";
 import * as Sentry from "@sentry/node";
 
 const dsn = process.env.SENTRY_DSN;
+const isDev = process.env.NODE_ENV === "development";
 
 // Idempotent: this file is loaded both via `--import` (for full auto-
 // instrumentation, before any app module) and as the first import in index.ts
 // (a fallback so a plain `tsx index.ts` still reports errors). Skip if already
-// initialized so the two paths don't double-init.
-if (dsn && !Sentry.getClient()) {
+// initialized so the two paths don't double-init. Also skip in development so
+// local debugging doesn't spam Sentry.
+if (dsn && !isDev && !Sentry.getClient()) {
   Sentry.init({
     dsn,
     environment: process.env.NODE_ENV || "production",

@@ -11,6 +11,8 @@ import { getAllowedOrigins, buildCspDirectives } from "./security.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerNewsletterRoutes } from "./routes/newsletter.js";
 import { registerCheckRoute } from "./routes/check.js";
+import { registerAgentDocRoutes } from "./routes/agentDocs.js";
+import { registerMcpRoutes } from "./routes/mcp.js";
 import type { SocketState } from "./socket.js";
 
 export interface AppDeps {
@@ -56,14 +58,20 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
     res.json({ status: "ok", uptime: process.uptime() });
   });
 
+  // Live agent discovery docs (host-aware). Before static/SPA so they aren't
+  // swallowed by index.html.
+  registerAgentDocRoutes(app);
+
   // Throttle the JSON API to blunt brute-force (passphrase auth) and abuse.
   // Generous enough not to interfere with normal presenter/viewer flows.
   const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false });
   app.use("/api", apiLimiter);
+  app.use("/mcp", apiLimiter);
 
   registerSessionRoutes(app, { supabase, io, socketState });
   registerNewsletterRoutes(app, supabase);
   registerCheckRoute(app);
+  registerMcpRoutes(app, supabase);
 
   // Unknown API paths must 404 as JSON — falling through to the SPA catch-all
   // returns index.html with a 200, which masks client bugs as parse errors.

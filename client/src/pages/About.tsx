@@ -195,6 +195,29 @@ Hello world.
             {" "}— upload a PDF to see per-page thumbnails and check that notes and media sidecars are valid.
           </div>
 
+          <div className="rounded-md border px-3 py-2.5 text-sm text-muted-foreground space-y-1">
+            <p className="text-foreground font-medium">For AI agents</p>
+            <p>
+              Start at{" "}
+              <a
+                href="/llms.txt"
+                className="text-foreground underline underline-offset-4 hover:text-muted-foreground"
+              >
+                /llms.txt
+              </a>
+              {" "}or{" "}
+              <a
+                href="/api.md"
+                className="text-foreground underline underline-offset-4 hover:text-muted-foreground"
+              >
+                /api.md
+              </a>
+              . Upload a PDF with{" "}
+              <code className="bg-muted px-1 rounded text-xs">POST /api/present</code>
+              {" "}to open a local presentation (skips share).
+            </p>
+          </div>
+
           <div className="flex items-center justify-between pt-2">
             <Button variant="outline" asChild>
               <Link to="/">Back to Home</Link>

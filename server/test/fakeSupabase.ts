@@ -137,7 +137,15 @@ export class FakeSupabase {
         this.uploaded.set(path, buffer);
         return { data: { path }, error: null };
       },
-      remove: async (_paths: string[]) => ({ data: null, error: null }),
+      remove: async (paths: string[]) => {
+        for (const p of paths) this.uploaded.delete(p);
+        return { data: null, error: null };
+      },
+      download: async (path: string) => {
+        const buf = this.uploaded.get(path);
+        if (!buf) return { data: null, error: { message: "not found" } };
+        return { data: new Blob([Uint8Array.from(buf)]), error: null };
+      },
       getPublicUrl: (path: string) => ({
         data: { publicUrl: `https://storage.test/${path}` },
       }),

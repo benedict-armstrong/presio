@@ -88,12 +88,129 @@ interface CheckReport {
   orphans: AttachmentResult[];
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+export type { CheckReport };
 
-function issueValidity(issues: Issue[]): Validity {
-  if (issues.some((i) => i.level === "error")) return "invalid";
-  if (issues.some((i) => i.level === "warning")) return "warning";
-  return "valid";
+export type CheckResult =
+  | { ok: true; report: CheckReport }
+  | { ok: false; status: number; error: string };
+
+/** Build a sidecar validity report from PDF bytes (shared by REST and MCP). */
+export async function buildCheckReport(buffer: Buffer, schemaBaseUrl: string): Promise<CheckResult> {
+  let pdf: Awaited<ReturnType<typeof getDocument>["promise"]>;
+  try {
+    pdf = await getDocument({ data: new Uint8Array(buffer) }).promise;
+  } catch {
+    return { ok: false, status: 422, error: "Could not parse PDF" };
+  }
+
+  const pageCount = pdf.numPages;
+  const rawAttachments = await pdf.getAttachments() as Record<string, { filename?: string; content: Uint8Array }> | null;
+  await pdf.destroy();
+
+  if (!rawAttachments || Object.keys(rawAttachments).length === 0) {
+    return {
+      ok: true,
+      report: {
+        $schema: `${schemaBaseUrl}/schema/check-report.schema.json`,
+        pageCount,
+        summary: { total: 0, valid: 0, warning: 0, invalid: 0 },
+        pages: Array.from({ length: pageCount }, (_, i) => ({ page: i + 1, notes: null, media: [] })),
+        orphans: [],
+      },
+    };
+  }
+
+  const entries = Object.values(rawAttachments).map((a) => ({ filename: a.filename ?? "", content: a.content }));
+  const allFilenames = new Set(entries.map((e) => e.filename));
+
+  const referencedBinaries = new Set<string>();
+  for (const { filename, content } of entries) {
+    if (/^media-slide-\d+-.+\.json$/.test(filename)) {
+      try {
+        const m = JSON.parse(new TextDecoder().decode(content)) as Record<string, unknown>;
+        if (m.filename) referencedBinaries.add(m.filename as string);
+      } catch { /* handled below */ }
+    }
+  }
+
+  const notesMap = new Map<number, AttachmentResult>();
+  const mediaMap = new Map<number, AttachmentResult[]>();
+  const orphans: AttachmentResult[] = [];
+
+  for (const { filename, content } of entries) {
+    if (/^notes-slide-\d+\.json$/.test(filename)) {
+      const a = validateNotes(filename, content, pageCount);
+      if (a.slide !== undefined) notesMap.set(a.slide, a);
+      else orphans.push(a);
+    } else if (/^media-slide-\d+-.+\.json$/.test(filename)) {
+      const a = validateMediaJson(filename, content, pageCount, allFilenames);
+      if (a.slide !== undefined) {
+        const arr = mediaMap.get(a.slide) ?? [];
+        arr.push(a);
+        mediaMap.set(a.slide, arr);
+      } else {
+        orphans.push(a);
+      }
+    } else if (/^media-.+\.(gif|mp4|webm)$/i.test(filename)) {
+      if (!referencedBinaries.has(filename)) {
+        orphans.push({
+          filename, kind: "media-binary", validity: "warning",
+          issues: [{ level: "warning", message: "No media JSON references this binary" }],
+        });
+      }
+    } else {
+      orphans.push({
+        filename, kind: "unknown", validity: "warning",
+        issues: [{ level: "warning", message: "Unrecognized attachment — not a Presio sidecar" }],
+      });
+    }
+  }
+
+  const pages: PageResult[] = Array.from({ length: pageCount }, (_, i) => ({
+    page: i + 1,
+    notes: notesMap.get(i + 1) ?? null,
+    media: mediaMap.get(i + 1) ?? [],
+  }));
+
+  const all = [...notesMap.values(), ...[...mediaMap.values()].flat(), ...orphans];
+  const summary = { total: all.length, valid: 0, warning: 0, invalid: 0 };
+  for (const a of all) summary[a.validity]++;
+
+  return {
+    ok: true,
+    report: { $schema: `${schemaBaseUrl}/schema/check-report.schema.json`, pageCount, summary, pages, orphans },
+  };
+}
+
+// ── Route ─────────────────────────────────────────────────────────────────────
+
+export function registerCheckRoute(app: express.Express) {
+  /**
+   * POST /api/check
+   * Body: multipart/form-data, field name "file", PDF only.
+   * Returns: JSON CheckReport.
+   *
+   * Example:
+   *   curl -s -F file=@deck.pdf https://presio.xyz/api/check | jq .
+   */
+  app.post("/api/check", upload.single("file"), async (req, res) => {
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ error: 'Missing "file" field (multipart/form-data)' });
+      return;
+    }
+    if (file.mimetype !== "application/pdf" && !file.originalname.endsWith(".pdf")) {
+      res.status(400).json({ error: "File must be a PDF" });
+      return;
+    }
+
+    const result = await buildCheckReport(file.buffer, `${req.protocol}://${req.get("host")}`);
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.json(result.report);
+  });
 }
 
 function validateNotes(
@@ -202,113 +319,8 @@ function validateMediaJson(
   return { filename, kind: "media-json", slide: isNaN(slide) ? undefined : slide, validity: issueValidity(issues), issues, data };
 }
 
-// ── Route ─────────────────────────────────────────────────────────────────────
-
-export function registerCheckRoute(app: express.Express) {
-  /**
-   * POST /api/check
-   * Body: multipart/form-data, field name "file", PDF only.
-   * Returns: JSON CheckReport.
-   *
-   * Example:
-   *   curl -s -F file=@deck.pdf https://presio.xyz/api/check | jq .
-   */
-  app.post("/api/check", upload.single("file"), async (req, res) => {
-    const file = req.file;
-    if (!file) {
-      res.status(400).json({ error: 'Missing "file" field (multipart/form-data)' });
-      return;
-    }
-    if (file.mimetype !== "application/pdf" && !file.originalname.endsWith(".pdf")) {
-      res.status(400).json({ error: "File must be a PDF" });
-      return;
-    }
-
-    let pdf: Awaited<ReturnType<typeof getDocument>["promise"]>;
-    try {
-      pdf = await getDocument({ data: new Uint8Array(file.buffer) }).promise;
-    } catch {
-      res.status(422).json({ error: "Could not parse PDF" });
-      return;
-    }
-
-    const pageCount = pdf.numPages;
-    const rawAttachments = await pdf.getAttachments() as Record<string, { filename?: string; content: Uint8Array }> | null;
-    await pdf.destroy();
-
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-
-    if (!rawAttachments || Object.keys(rawAttachments).length === 0) {
-      const report: CheckReport = {
-        $schema: `${baseUrl}/schema/check-report.schema.json`,
-        pageCount,
-        summary: { total: 0, valid: 0, warning: 0, invalid: 0 },
-        pages: Array.from({ length: pageCount }, (_, i) => ({ page: i + 1, notes: null, media: [] })),
-        orphans: [],
-      };
-      res.json(report);
-      return;
-    }
-
-    const entries = Object.values(rawAttachments).map((a) => ({ filename: a.filename ?? "", content: a.content }));
-    const allFilenames = new Set(entries.map((e) => e.filename));
-
-    // First pass: find referenced binaries
-    const referencedBinaries = new Set<string>();
-    for (const { filename, content } of entries) {
-      if (/^media-slide-\d+-.+\.json$/.test(filename)) {
-        try {
-          const m = JSON.parse(new TextDecoder().decode(content)) as Record<string, unknown>;
-          if (m.filename) referencedBinaries.add(m.filename as string);
-        } catch { /* handled below */ }
-      }
-    }
-
-    const notesMap = new Map<number, AttachmentResult>();
-    const mediaMap = new Map<number, AttachmentResult[]>();
-    const orphans: AttachmentResult[] = [];
-
-    for (const { filename, content } of entries) {
-      if (/^notes-slide-\d+\.json$/.test(filename)) {
-        const a = validateNotes(filename, content, pageCount);
-        if (a.slide !== undefined) notesMap.set(a.slide, a);
-        else orphans.push(a);
-      } else if (/^media-slide-\d+-.+\.json$/.test(filename)) {
-        const a = validateMediaJson(filename, content, pageCount, allFilenames);
-        if (a.slide !== undefined) {
-          const arr = mediaMap.get(a.slide) ?? [];
-          arr.push(a);
-          mediaMap.set(a.slide, arr);
-        } else {
-          orphans.push(a);
-        }
-      } else if (/^media-.+\.(gif|mp4|webm)$/i.test(filename)) {
-        if (!referencedBinaries.has(filename)) {
-          orphans.push({
-            filename, kind: "media-binary", validity: "warning",
-            issues: [{ level: "warning", message: "No media JSON references this binary" }],
-          });
-        }
-        // Referenced binaries are implicitly validated via their media-json entry
-      } else {
-        orphans.push({
-          filename, kind: "unknown", validity: "warning",
-          issues: [{ level: "warning", message: "Unrecognized attachment — not a Presio sidecar" }],
-        });
-      }
-    }
-
-    const pages: PageResult[] = Array.from({ length: pageCount }, (_, i) => ({
-      page: i + 1,
-      notes: notesMap.get(i + 1) ?? null,
-      media: mediaMap.get(i + 1) ?? [],
-    }));
-
-    const all = [...notesMap.values(), ...[...mediaMap.values()].flat(), ...orphans];
-    const summary = { total: all.length, valid: 0, warning: 0, invalid: 0 };
-    for (const a of all) summary[a.validity]++;
-
-    const report: CheckReport = { $schema: `${baseUrl}/schema/check-report.schema.json`, pageCount, summary, pages, orphans };
-    res.json(report);
-  });
+function issueValidity(issues: Issue[]): Validity {
+  if (issues.some((i) => i.level === "error")) return "invalid";
+  if (issues.some((i) => i.level === "warning")) return "warning";
+  return "valid";
 }

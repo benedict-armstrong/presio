@@ -1,0 +1,24 @@
+# Presio
+
+> Present PDFs locally or live across devices. Local by default — your PDF stays in the browser unless you sync.
+
+Presio is a PDF presentation tool: controller + viewer windows, speaker notes, embedded media, and optional online sync.
+
+## For AI agents
+
+- [Full agent playbook](BASE/llms-full.txt): present + check workflows in one file
+- [Agent brief](BASE/AGENTS.md): capabilities, limits, when to use which endpoint
+- [API (markdown)](BASE/api.md): REST reference with curl examples
+- [OpenAPI](BASE/openapi.json): machine-readable API schema
+- [MCP server card](BASE/.well-known/mcp.json): connect at BASE/mcp
+
+## Docs
+
+- [About](BASE/about.md): how Presio works
+- [Checker](BASE/check.md): validate notes/media sidecars
+- [Home](BASE/index.md): product overview
+
+## Optional
+
+- [Sitemap](BASE/sitemap.xml)
+- [Check report schema](BASE/schema/check-report.schema.json)

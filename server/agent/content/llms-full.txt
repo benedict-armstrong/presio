@@ -1,0 +1,50 @@
+# Presio — agent playbook
+
+> Upload a PDF to start a local presentation, or validate Presio sidecar attachments.
+
+## Start a presentation (local, skip share)
+
+```bash
+curl -s -F file=@deck.pdf BASE/api/present
+```
+
+Response:
+
+```json
+{
+  "id": "ABC123",
+  "url": "BASE/start/ABC123?t=…",
+  "filename": "deck",
+  "totalSlides": 12,
+  "next": "Open url in a browser to start a local presentation (skips share). The PDF is copied into the browser and removed from the server."
+}
+```
+
+**Next step:** open `url` in a browser. That page pulls the PDF into IndexedDB (local session), deletes the server copy, and lands on the controller — no share screen.
+
+- No auth required. Optional `Authorization: Bearer <supabase-jwt>` attaches ownership.
+- Max PDF size: 50MB. Max pages: 3000.
+- Syncing across devices still requires a human login in the UI.
+
+## Validate sidecar attachments
+
+```bash
+curl -s -F file=@deck.pdf BASE/api/check | jq .
+```
+
+Returns a structured check report (`$schema` points at BASE/schema/check-report.schema.json).
+
+## MCP
+
+Connect an MCP client to `BASE/mcp` (discover via `BASE/.well-known/mcp.json`).
+
+Tools:
+
+- `present_pdf` — same as `POST /api/present` (pass `pdf_base64` + optional `filename`)
+- `check_pdf` — same as `POST /api/check`
+
+## Other surfaces
+
+- API docs: BASE/api.md · BASE/openapi.json
+- Agent brief: BASE/AGENTS.md
+- Index: BASE/llms.txt

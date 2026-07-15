@@ -3,11 +3,12 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch --import ./instrument.ts index.ts",
+    "dev": "NODE_ENV=development tsx watch --import ./instrument.ts index.ts",
     "start": "tsx --import ./instrument.ts index.ts",
     "test": "vitest run"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@sentry/node": "^10.61.0",
     "@supabase/supabase-js": "^2.99.1",
     "cors": "^2.8.6",
@@ -18,7 +19,8 @@
     "multer": "^2.1.1",
     "nanoid": "^5.1.6",
     "pdfjs-dist": "^5.5.207",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

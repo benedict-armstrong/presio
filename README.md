@@ -20,6 +20,7 @@ Upload a PDF presentation, get a short link, and control the slideshow from one 
 - **Customizable controller** — rearrange the layout and remap keyboard shortcuts.
 - **Recent presentations** — pick up where you left off from the home page.
 - **Download** — anyone can grab the PDF from the presentation view.
+- **Agent APIs** — `POST /api/present` starts a local presentation from a PDF; see [/llms.txt](https://presio.xyz/llms.txt) and [/api.md](https://presio.xyz/api.md).
 
 ## Adding videos and speaker notes
 

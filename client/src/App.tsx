@@ -6,6 +6,7 @@ import { PasswordRecoveryDialog } from "@/components/PasswordRecoveryDialog";
 import Home from "@/pages/Home";
 import Presentation from "@/pages/Presentation";
 import Present from "@/pages/Present";
+import Start from "@/pages/Start";
 import Share from "@/pages/Share";
 
 // Lazy: the About page pulls in Shiki (grammars + wasm), so keep it out of the
@@ -21,6 +22,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/present" element={<Present />} />
+            <Route path="/start/:id" element={<Start />} />
             <Route path="/s/:id" element={<Presentation />} />
             <Route path="/s/:id/share" element={<Share />} />
             <Route path="/about" element={<Suspense fallback={null}><About /></Suspense>} />

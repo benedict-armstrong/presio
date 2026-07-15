@@ -7,6 +7,8 @@ import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { isValidHttpsUrl, isValidTotalSlides, MAX_TOTAL_SLIDES } from "../validation.js";
 import { getBearerToken, resolveOptionalUserId, requireUser, safeEqual } from "../auth.js";
 import { clearSessionState, type SocketState } from "../socket.js";
+import { baseUrl } from "../lib/baseUrl.js";
+import { createPresentHandoff, handoffTokenFrom } from "../lib/presentHandoff.js";
 
 export interface RouteDeps {
   supabase: SupabaseClient;
@@ -46,6 +48,124 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
     console.error("Failed to create session: code collision after 3 attempts");
     return null;
   }
+
+  /**
+   * POST /api/present — upload a PDF; get a URL that opens a local presentation
+   * (skips share). The PDF is staged briefly, then moved into the browser.
+   *
+   *   curl -s -F file=@deck.pdf https://presio.xyz/api/present
+   *   # open the returned url
+   */
+  app.post("/api/present", upload.single("file"), async (req, res) => {
+    try {
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ error: 'Missing "file" field (multipart/form-data)' });
+        return;
+      }
+      if (file.mimetype !== "application/pdf" && !file.originalname.toLowerCase().endsWith(".pdf")) {
+        res.status(400).json({ error: "File must be a PDF" });
+        return;
+      }
+
+      const userId = await resolveOptionalUserId(supabase, req);
+      const result = await createPresentHandoff(supabase, {
+        buffer: file.buffer,
+        originalName: file.originalname,
+        userId,
+        baseUrl: baseUrl(req),
+      });
+      if (!result.ok) {
+        res.status(result.status).json({ error: result.error });
+        return;
+      }
+      res.json({
+        id: result.id,
+        url: result.url,
+        filename: result.filename,
+        totalSlides: result.totalSlides,
+        next: result.next,
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Download a staged handoff PDF (token required). Does not delete yet.
+  app.get("/api/sessions/:id/handoff", async (req, res) => {
+    try {
+      const token = handoffTokenFrom(req);
+      const { data, error } = await supabase
+        .from("sessions")
+        .select("id, local, pdf_path, controller_token, filename, total_slides")
+        .eq("id", req.params.id)
+        .neq("status", "expired")
+        .single();
+      if (error || !data) {
+        res.status(404).json({ error: "Session not found" });
+        return;
+      }
+      if (!safeEqual(token, data.controller_token)) {
+        res.status(403).json({ error: "Not authorized" });
+        return;
+      }
+      if (!data.local || !data.pdf_path) {
+        res.status(410).json({ error: "Handoff already completed or unavailable" });
+        return;
+      }
+
+      const { data: blob, error: dlError } = await supabase.storage
+        .from("presentations")
+        .download(data.pdf_path);
+      if (dlError || !blob) {
+        res.status(404).json({ error: "PDF not found" });
+        return;
+      }
+      const buf = Buffer.from(await blob.arrayBuffer());
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(data.filename)}.pdf"`);
+      res.setHeader("X-Filename", data.filename);
+      res.setHeader("X-Total-Slides", String(data.total_slides));
+      res.send(buf);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // After the browser has stored the PDF in IndexedDB, clear the server copy.
+  app.post("/api/sessions/:id/handoff/complete", async (req, res) => {
+    try {
+      const token = handoffTokenFrom(req);
+      const { data, error } = await supabase
+        .from("sessions")
+        .select("id, local, pdf_path, controller_token")
+        .eq("id", req.params.id)
+        .neq("status", "expired")
+        .single();
+      if (error || !data) {
+        res.status(404).json({ error: "Session not found" });
+        return;
+      }
+      if (!safeEqual(token, data.controller_token)) {
+        res.status(403).json({ error: "Not authorized" });
+        return;
+      }
+      if (!data.local) {
+        res.status(409).json({ error: "Not a local handoff session" });
+        return;
+      }
+      if (data.pdf_path) {
+        await supabase.storage.from("presentations").remove([data.pdf_path]);
+        await supabase.from("sessions").update({ pdf_path: "" }).eq("id", data.id);
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
 
   // Reserve a session code for a presentation kept local to the browser. No PDF
   // is uploaded — the bytes stay in the client's IndexedDB. We only record the
@@ -321,12 +441,15 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
     }
 
     // External sessions store the URL directly; Supabase-hosted ones derive a
-    // public URL from the object path; local sessions have neither.
-    const pdfUrl = data.pdf_url
-      ? data.pdf_url
-      : data.pdf_path
-        ? supabase.storage.from("presentations").getPublicUrl(data.pdf_path).data.publicUrl
-        : "";
+    // public URL from the object path. Local sessions (including staged handoffs)
+    // must never expose pdfUrl — the PDF only belongs in the presenter's browser.
+    const pdfUrl = data.local
+      ? ""
+      : data.pdf_url
+        ? data.pdf_url
+        : data.pdf_path
+          ? supabase.storage.from("presentations").getPublicUrl(data.pdf_path).data.publicUrl
+          : "";
 
     // Return only fields the client needs; never leak controller_token,
     // passphrase, owner user_id, or internal timestamps.
