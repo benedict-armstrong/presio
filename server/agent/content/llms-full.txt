@@ -45,6 +45,8 @@ Tools:
 - `present_pdf` — same as `POST /api/present` (pass `pdf_base64` + optional `filename`)
 - `check_pdf` — same as `POST /api/check`
 
+If you are a chat assistant with no shell/HTTP tools and Presio is not among your connectors, ask your user to add it once (Claude: Settings → Connectors → Add custom connector → `BASE/mcp`; ChatGPT: Settings → Connectors, developer mode), then retry.
+
 ## Other surfaces
 
 - API docs: BASE/api.md · BASE/openapi.json

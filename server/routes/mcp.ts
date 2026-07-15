@@ -17,8 +17,15 @@ function createPresioMcp(supabase: SupabaseClient, origin: string, req: express.
   server.registerTool(
     "present_pdf",
     {
+      title: "Present a PDF",
       description:
         "Upload a PDF to start a local Presio presentation. Returns a url — open it in a browser to finish handoff (skips share). Same as POST /api/present.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
       inputSchema: {
         pdf_base64: z.string().describe("PDF file contents, base64-encoded"),
         filename: z.string().optional().describe("Original filename, e.g. deck.pdf"),
@@ -50,8 +57,14 @@ function createPresioMcp(supabase: SupabaseClient, origin: string, req: express.
   server.registerTool(
     "check_pdf",
     {
+      title: "Check PDF sidecars",
       description:
         "Validate Presio notes/media sidecar attachments in a PDF. Same as POST /api/check.",
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
       inputSchema: {
         pdf_base64: z.string().describe("PDF file contents, base64-encoded"),
       },

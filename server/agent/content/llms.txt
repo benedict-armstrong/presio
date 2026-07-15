@@ -10,7 +10,7 @@ Presio is a PDF presentation tool: controller + viewer windows, speaker notes, e
 - [Agent brief](BASE/AGENTS.md): capabilities, limits, when to use which endpoint
 - [API (markdown)](BASE/api.md): REST reference with curl examples
 - [OpenAPI](BASE/openapi.json): machine-readable API schema
-- [MCP server card](BASE/.well-known/mcp.json): connect at BASE/mcp
+- [MCP server card](BASE/.well-known/mcp.json): connect at BASE/mcp (no auth; chat assistants without HTTP tools: have your user add BASE/mcp as a custom connector, then retry)
 
 ## Docs
 

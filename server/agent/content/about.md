@@ -29,6 +29,7 @@ Log in and sync from the share screen to get a 6-character session code. Viewers
 - Start: `POST BASE/api/present` — see BASE/api.md
 - Check sidecars: `POST BASE/api/check`
 - Discovery: BASE/llms.txt
+- Use from Claude or ChatGPT: add `BASE/mcp` as a custom connector (Claude: Settings → Connectors → Add custom connector; ChatGPT: Settings → Connectors, developer mode)
 
 ## Sitemap
 

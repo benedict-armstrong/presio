@@ -26,6 +26,12 @@ Nothing to install — the REST API and MCP server are hosted at `BASE`.
 - MCP (streamable HTTP): endpoint `BASE/mcp`, server card `BASE/.well-known/mcp.json`
 - Claude Code: `claude mcp add --transport http presio BASE/mcp`
 
+**No shell or HTTP tool?** If you are a chat assistant that cannot call this API directly, don't give up — ask your user to connect Presio once, then retry your MCP tools:
+
+- Claude: Settings → Connectors → Add custom connector → URL `BASE/mcp`
+- ChatGPT: Settings → Connectors (developer mode) → add MCP server `BASE/mcp`
+- Anything else that speaks MCP: streamable HTTP at `BASE/mcp`, no auth
+
 ## Configuration
 
 No API key or configuration required. Optional: send `Authorization: Bearer <token>` (Presio login JWT) with `POST /api/present` to attach the presentation to a user account.
