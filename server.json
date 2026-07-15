@@ -1,0 +1,25 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "xyz.presio/presio",
+  "title": "Presio",
+  "description": "Present PDF slideshows from the browser. Upload a PDF to start a local presentation (present_pdf) or validate Presio notes/media sidecars (check_pdf). Hosted at presio.xyz — no account or API key required.",
+  "version": "1.0.0",
+  "websiteUrl": "https://presio.xyz",
+  "repository": {
+    "url": "https://github.com/benedict-armstrong/presio",
+    "source": "github"
+  },
+  "icons": [
+    {
+      "src": "https://presio.xyz/icon-512.png",
+      "sizes": ["512x512"],
+      "mimeType": "image/png"
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://presio.xyz/mcp"
+    }
+  ]
+}
