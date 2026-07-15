@@ -2,6 +2,7 @@
 title: About Presio
 description: How Presio works — local-by-default PDF presentations with optional live cross-device sync.
 canonical: BASE/about
+last_updated: 2026-07-15
 ---
 
 # About Presio
@@ -28,3 +29,11 @@ Log in and sync from the share screen to get a 6-character session code. Viewers
 - Start: `POST BASE/api/present` — see BASE/api.md
 - Check sidecars: `POST BASE/api/check`
 - Discovery: BASE/llms.txt
+
+## Sitemap
+
+- [Home](BASE/)
+- [About](BASE/about)
+- [Checker](BASE/check)
+- [Glossary](BASE/glossary.md)
+- [Full index](BASE/sitemap.md)

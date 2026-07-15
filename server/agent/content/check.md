@@ -2,6 +2,7 @@
 title: Presio PDF sidecar checker
 description: Validate Presio speaker-notes and media sidecar attachments embedded in a PDF.
 canonical: BASE/check
+last_updated: 2026-07-15
 ---
 
 # PDF sidecar checker
@@ -22,3 +23,11 @@ Schema: BASE/schema/check-report.schema.json
 
 Notes attachments: `notes-slide-{N}.json`
 Media: `media-slide-{N}-{id}.json` plus optional binary `media-*.{gif,mp4,webm}`
+
+## Sitemap
+
+- [Home](BASE/)
+- [About](BASE/about)
+- [Checker](BASE/check)
+- [Glossary](BASE/glossary.md)
+- [Full index](BASE/sitemap.md)

@@ -96,7 +96,16 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   // JSON schemas for the sidecar format — served at /schema/*.json
   app.use("/schema", express.static(path.join(__dirname, "../../schema"), { index: false }));
 
-  app.use(express.static(clientDist));
+  // index: false so "/" falls through to the catch-all below and gets its
+  // canonical/og:url tags like every other route.
+  app.use(express.static(clientDist, { index: false }));
+
+  // Pages with a markdown mirror advertise it via rel="alternate".
+  const MD_MIRRORS: Record<string, string> = {
+    "/": "/index.md",
+    "/about": "/about.md",
+    "/check": "/check.md",
+  };
 
   // Serve the SPA shell with a per-request canonical URL and og:url so every
   // route carries correct metadata without the client rendering it.
@@ -107,13 +116,22 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
     } catch (err) {
       return next(err);
     }
-    const url = `${baseUrl(req)}${req.path === "/" ? "/" : req.path}`.replace(
+    // A markdown path reaching the SPA catch-all means the mirror doesn't
+    // exist; the HTML shell with a 200 would read as a broken mirror.
+    if (req.path.endsWith(".md")) {
+      res.status(404).type("text/plain").send("Not found");
+      return;
+    }
+    const base = baseUrl(req);
+    const url = `${base}${req.path === "/" ? "/" : req.path}`.replace(
       /[<>"&]/g,
       (c) => ({ "<": "%3C", ">": "%3E", '"': "%22", "&": "&amp;" })[c] as string
     );
-    const tags = `<link rel="canonical" href="${url}" />\n  <meta property="og:url" content="${url}" />\n</head>`;
+    let tags = `<link rel="canonical" href="${url}" />\n  <meta property="og:url" content="${url}" />`;
+    const mirror = MD_MIRRORS[req.path];
+    if (mirror) tags += `\n  <link rel="alternate" type="text/markdown" href="${base}${mirror}" />`;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(indexHtml.replace("</head>", tags));
+    res.send(indexHtml.replace("</head>", `${tags}\n</head>`));
   });
 
   // Report unhandled route errors to Sentry. No-op when Sentry isn't

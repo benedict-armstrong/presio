@@ -2,6 +2,7 @@
 title: Presio agent brief
 description: What AI agents can do with Presio — capabilities, setup, limits, and examples.
 canonical: BASE/AGENTS.md
+last_updated: 2026-07-15
 ---
 
 # Presio agent brief

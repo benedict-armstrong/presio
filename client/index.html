@@ -37,7 +37,31 @@
 </head>
 
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <!-- Static fallback content: replaced by React on mount, read by crawlers
+         and no-JS clients. Keep in sync with the home page copy. -->
+    <main>
+      <h1>Presio</h1>
+      <p>Present PDF slideshows with a controller window and a mirrored viewer. Local by default: your PDF stays in
+        your browser — nothing is uploaded unless you choose to sync. Log in to share a session code and present live
+        across devices, with speaker notes and embedded media.</p>
+      <h2>How it works</h2>
+      <p>Upload a PDF to get a controller view with slide navigation, speaker notes, and media. Open a viewer window
+        to mirror the controller, or sync online for a six-character session code that viewers can join from any
+        device. Recent presentations stay available on the home page, and local decks work offline.</p>
+      <h2>Pages</h2>
+      <ul>
+        <li><a href="/">Home</a> — upload and present a PDF</li>
+        <li><a href="/about">About</a> — how Presio works</li>
+        <li><a href="/check">Checker</a> — validate notes and media sidecars in a PDF</li>
+        <li><a href="/glossary.md">Glossary</a> — Presio terminology</li>
+      </ul>
+      <h2>For AI agents</h2>
+      <p>This app requires JavaScript, but every page has a markdown mirror. Start at <a href="/llms.txt">/llms.txt</a>
+        or read the <a href="/AGENTS.md">agent brief</a>, the <a href="/api.md">API reference</a>, or the
+        <a href="/openapi.json">OpenAPI spec</a>. An MCP server is available at /mcp.</p>
+    </main>
+  </div>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 

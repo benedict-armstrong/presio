@@ -43,6 +43,11 @@ function prefersMarkdown(req: express.Request): boolean {
   return mdIdx !== -1 && mdIdx < htmlIdx;
 }
 
+// sitemap.xml lists only canonical HTML pages — listing markdown mirrors and
+// discovery files there makes crawlers judge them as pages (and fail them on
+// HTML metadata checks). The full machine-readable index is sitemap.md.
+const HTML_PAGE_PATHS = ["/", "/about", "/check"];
+
 const SITEMAP_PATHS = [
   "/",
   "/about",
@@ -54,6 +59,7 @@ const SITEMAP_PATHS = [
   "/llms-full.txt",
   "/AGENTS.md",
   "/api.md",
+  "/glossary.md",
   "/openapi.json",
   "/robots.txt",
   "/sitemap.xml",
@@ -64,19 +70,28 @@ const SITEMAP_PATHS = [
 
 export function registerAgentDocRoutes(app: express.Express) {
   app.get("/llms.txt", (req, res) => {
-    sendText(res, "text/plain", withBase(readContent("llms.txt"), baseUrl(req)));
+    const type = prefersMarkdown(req) ? "text/markdown" : "text/plain";
+    sendText(res, type, withBase(readContent("llms.txt"), baseUrl(req)));
   });
 
   app.get("/llms-full.txt", (req, res) => {
-    sendText(res, "text/plain", withBase(readContent("llms-full.txt"), baseUrl(req)));
+    const type = prefersMarkdown(req) ? "text/markdown" : "text/plain";
+    sendText(res, type, withBase(readContent("llms-full.txt"), baseUrl(req)));
   });
 
-  for (const name of ["AGENTS.md", "api.md", "index.md", "about.md", "check.md"] as const) {
+  for (const name of ["AGENTS.md", "api.md", "index.md", "about.md", "check.md", "glossary.md"] as const) {
     app.get(`/${name}`, (req, res) => {
       const base = baseUrl(req);
       sendText(res, "text/markdown", withBase(readContent(name), base), `${base}/${name}`);
     });
   }
+
+  // Scanners derive a page's markdown mirror as `${path}.md`, which for the
+  // root is "/.md" — alias it to index.md so they don't get the SPA shell.
+  app.get("/.md", (req, res) => {
+    const base = baseUrl(req);
+    sendText(res, "text/markdown", withBase(readContent("index.md"), base), `${base}/index.md`);
+  });
 
   app.get("/openapi.json", (req, res) => {
     res.setHeader("Cache-Control", CACHE);
@@ -98,7 +113,7 @@ export function registerAgentDocRoutes(app: express.Express) {
 
   app.get("/sitemap.xml", (req, res) => {
     const base = baseUrl(req);
-    const urls = SITEMAP_PATHS.map(
+    const urls = HTML_PAGE_PATHS.map(
       (p) => `  <url>\n    <loc>${base}${p === "/" ? "/" : p}</loc>\n    <lastmod>${LASTMOD}</lastmod>\n  </url>`
     ).join("\n");
     const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
