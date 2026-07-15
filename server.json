@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "xyz.presio/presio",
   "title": "Presio",
-  "description": "Present PDF slideshows from the browser. Upload a PDF to start a local presentation (present_pdf) or validate Presio notes/media sidecars (check_pdf). Hosted at presio.xyz — no account or API key required.",
+  "description": "Present PDFs from the browser: upload to start a slideshow or validate Presio sidecars. No auth.",
   "version": "1.0.0",
   "websiteUrl": "https://presio.xyz",
   "repository": {
