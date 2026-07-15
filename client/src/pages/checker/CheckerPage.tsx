@@ -1,30 +1,38 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { loadPdfData, renderPage } from "@/lib/pdf";
-import { inspectAttachments, type DeckReport, type InspectedAttachment } from "@/lib/inspectAttachments";
+import { setSlideNotes } from "@/lib/notesAttach";
+import { removeAttachments } from "@/lib/removeAttachments";
+import { inspectAttachments, type DeckReport } from "@/lib/inspectAttachments";
+import { idbPut } from "@/lib/localStore";
+import { supabase } from "@/lib/supabaseClient";
 import { PresioLogo } from "@/components/PresioLogo";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ValidityBadge, ValidityDot } from "./ValidityBadge";
-import { AttachmentModal } from "./AttachmentModal";
+import { PageDetailModal } from "./PageDetailModal";
 import "@/lib/pdf"; // ensure worker is configured
 
-type ModalState = {
-  attachment: InspectedAttachment;
-  linkedBinary?: InspectedAttachment;
-} | null;
+type PageModalState = { page: number; tab: "notes" | "media" } | null;
 
 export default function CheckerPage() {
+  const navigate = useNavigate();
   const [filename, setFilename] = useState<string | null>(null);
   const [report, setReport] = useState<DeckReport | null>(null);
   const [thumbs, setThumbs] = useState<Map<number, HTMLCanvasElement>>(new Map());
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [leaveConfirm, setLeaveConfirm] = useState(false);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
-  const [modal, setModal] = useState<ModalState>(null);
+  const [pageModal, setPageModal] = useState<PageModalState>(null);
+  // Edits keyed by page number; only set when user has typed something
+  const [editedNotes, setEditedNotes] = useState<Map<number, string>>(new Map());
+  // Media JSON filenames queued for deletion on download
+  const [deletedMedia, setDeletedMedia] = useState<Set<string>>(new Set());
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
+  const pdfBytesRef = useRef<Uint8Array | null>(null);
 
-  // Destroy old PDF on new upload
   useEffect(() => {
     return () => { pdfRef.current?.destroy(); };
   }, []);
@@ -39,24 +47,28 @@ export default function CheckerPage() {
     setReport(null);
     setThumbs(new Map());
     setFilename(null);
+    setEditedNotes(new Map());
+    setDeletedMedia(new Set());
     pdfRef.current?.destroy();
 
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const pdf = await loadPdfData(bytes);
+      pdfBytesRef.current = bytes;
+      // pdf.js transfers the ArrayBuffer to its worker (detaching it), so pass
+      // a copy — the original stored in pdfBytesRef stays intact for download.
+      const pdf = await loadPdfData(bytes.slice());
       pdfRef.current = pdf;
 
       const deck = await inspectAttachments(pdf);
       setReport(deck);
       setFilename(file.name);
 
-      // Render thumbnails progressively
       for (let p = 1; p <= pdf.numPages; p++) {
         renderPage(pdf, p, { targetWidth: 400 })
           .then((canvas) => {
             setThumbs((prev) => new Map(prev).set(p, canvas));
           })
-          .catch(() => { /* ignore individual render failures */ });
+          .catch(() => { /* ignore */ });
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load PDF");
@@ -89,36 +101,123 @@ export default function CheckerPage() {
     e.target.value = "";
   }, [loadFile]);
 
-  function openAttachment(attachment: InspectedAttachment, linkedBinary?: InspectedAttachment) {
-    if (attachment.kind === "media-binary") {
-      // Open binary directly
-      const ext = attachment.filename.split(".").pop()?.toLowerCase() ?? "";
-      const mime = ext === "gif" ? "image/gif" : ext === "mp4" ? "video/mp4" : "video/webm";
-      const blob = new Blob([attachment.content.slice()], { type: mime });
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank", "noopener,noreferrer");
-      setTimeout(() => URL.revokeObjectURL(url), 30_000);
-      return;
-    }
-    setModal({ attachment, linkedBinary });
+  function handleNotesChange(page: number, text: string) {
+    setEditedNotes((prev) => new Map(prev).set(page, text));
   }
 
-  function findLinkedBinary(mediaJson: InspectedAttachment): InspectedAttachment | undefined {
-    const m = mediaJson.parsed as Record<string, unknown> | undefined;
-    if (!m?.filename || !report) return undefined;
-    return report.binaries.get(m.filename as string);
+  function isPageEdited(page: number, originalPreview: string | undefined): boolean {
+    if (!editedNotes.has(page)) return false;
+    return editedNotes.get(page) !== (originalPreview ?? "");
+  }
+
+  function toggleDeleteMedia(jsonFilename: string, binaryFilename: string | undefined) {
+    setDeletedMedia((prev) => {
+      const next = new Set(prev);
+      if (next.has(jsonFilename)) {
+        next.delete(jsonFilename);
+        if (binaryFilename) next.delete(binaryFilename);
+      } else {
+        next.add(jsonFilename);
+        if (binaryFilename) next.add(binaryFilename);
+      }
+      return next;
+    });
+  }
+
+  const hasEdits =
+    report !== null &&
+    (report.pages.some((pr) => isPageEdited(pr.page, pr.notes?.previewText)) ||
+      deletedMedia.size > 0);
+
+  // Block browser tab close / refresh when there are unsaved edits.
+  useEffect(() => {
+    if (!hasEdits) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hasEdits]);
+
+  async function downloadWithEdits() {
+    if (!pdfBytesRef.current || !report) return;
+    setDownloading(true);
+    try {
+      let bytes = pdfBytesRef.current;
+      for (const pr of report.pages) {
+        if (!isPageEdited(pr.page, pr.notes?.previewText)) continue;
+        bytes = await setSlideNotes(bytes, pr.page, editedNotes.get(pr.page) ?? "");
+      }
+      if (deletedMedia.size > 0) {
+        bytes = await removeAttachments(bytes, [...deletedMedia]);
+      }
+      const blob = new Blob([bytes.slice()], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename ?? "presentation.pdf";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Download failed");
+    } finally {
+      setDownloading(false);
+    }
   }
 
   const reset = useCallback(() => {
     pdfRef.current?.destroy();
     pdfRef.current = null;
+    pdfBytesRef.current = null;
     setReport(null);
     setThumbs(new Map());
     setFilename(null);
+    setEditedNotes(new Map());
+    setDeletedMedia(new Set());
     setError("");
   }, []);
 
-  const hasReport = report !== null;
+  const [presenting, setPresenting] = useState(false);
+
+  async function presentPdf() {
+    if (!pdfBytesRef.current || !report || !filename) return;
+    setPresenting(true);
+    try {
+      // Apply pending edits/deletions to get the final bytes.
+      let bytes = pdfBytesRef.current;
+      for (const pr of report.pages) {
+        if (!isPageEdited(pr.page, pr.notes?.previewText)) continue;
+        bytes = await setSlideNotes(bytes, pr.page, editedNotes.get(pr.page) ?? "");
+      }
+      if (deletedMedia.size > 0) {
+        bytes = await removeAttachments(bytes, [...deletedMedia]);
+      }
+
+      const name = filename.replace(/\.pdf$/i, "");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData.session) headers.Authorization = `Bearer ${sessionData.session.access_token}`;
+
+      const res = await fetch("/api/sessions/local", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ filename: name, total_slides: report.pageCount }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `Server error ${res.status} — the database may be unavailable`);
+      }
+      const { id } = await res.json();
+
+      await idbPut({ id, filename: name, totalSlides: report.pageCount, blob: new Blob([bytes.slice()], { type: "application/pdf" }), createdAt: Date.now() });
+      navigate(`/s/${id}/share`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to open presentation");
+      setPresenting(false);
+    }
+  }
+
+  const activePageReport = pageModal && report
+    ? report.pages.find((p) => p.page === pageModal.page) ?? null
+    : null;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -131,18 +230,18 @@ export default function CheckerPage() {
           <span className="text-sm text-muted-foreground">Sidecar checker</span>
         </div>
         <div className="flex items-center gap-1">
-          <Link
-            to="/"
+          <button
             className="text-xs text-muted-foreground hover:text-foreground transition-colors mr-1"
+            onClick={() => hasEdits ? setLeaveConfirm(true) : navigate("/")}
           >
             Back to app
-          </Link>
+          </button>
           <ThemeToggle />
         </div>
       </header>
 
       <main className="flex-1 flex flex-col">
-        {!hasReport ? (
+        {report === null ? (
           /* Upload screen */
           <div className="flex-1 flex flex-col items-center justify-center p-6 gap-6">
             <div className="text-center space-y-1.5 max-w-sm">
@@ -203,13 +302,9 @@ export default function CheckerPage() {
               )}
             </label>
 
-            {error && (
-              <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-            )}
+            {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-            <p className="text-xs text-muted-foreground">
-              The PDF never leaves your browser.
-            </p>
+            <p className="text-xs text-muted-foreground">The PDF never leaves your browser.</p>
           </div>
         ) : (
           /* Overview screen */
@@ -238,28 +333,45 @@ export default function CheckerPage() {
                 {report.summary.total === 0 && (
                   <span className="text-xs text-muted-foreground">No sidecar attachments found</span>
                 )}
+                {hasEdits && (
+                  <button
+                    onClick={downloadWithEdits}
+                    disabled={downloading}
+                    className="flex items-center gap-1.5 rounded bg-foreground text-background px-2.5 py-1 text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                  >
+                    {downloading ? "Saving…" : "↓ Download with edits"}
+                  </button>
+                )}
+                <button
+                  onClick={presentPdf}
+                  disabled={presenting}
+                  className="flex items-center gap-1 rounded border px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
+                >
+                  {presenting ? "Opening…" : "▶ Present"}
+                </button>
               </div>
             </div>
+
+            {error && (
+              <p className="text-sm text-red-600 dark:text-red-400 px-4 pt-2">{error}</p>
+            )}
 
             {/* Page grid */}
             <div className="flex-1 overflow-y-auto p-4">
               <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
                 {report.pages.map((pr) => {
                   const thumb = thumbs.get(pr.page);
-                  const pageValidity =
-                    pr.notes === null && pr.media.length === 0
-                      ? null
-                      : (() => {
-                          const all = [...(pr.notes ? [pr.notes] : []), ...pr.media];
-                          if (all.some((a) => a.validity === "invalid")) return "invalid" as const;
-                          if (all.some((a) => a.validity === "warning")) return "warning" as const;
-                          return "valid" as const;
-                        })();
+                  const notesEdited = isPageEdited(pr.page, pr.notes?.previewText);
+                  const showNotes = pr.notes !== null || notesEdited;
 
                   return (
                     <div key={pr.page} className="flex flex-col gap-2">
-                      {/* Thumbnail */}
-                      <div className="relative rounded-lg overflow-hidden bg-muted border aspect-video flex items-center justify-center">
+                      {/* Thumbnail — click to open page detail */}
+                      <button
+                        className="relative rounded-lg overflow-hidden bg-muted border aspect-video flex items-center justify-center hover:ring-2 hover:ring-ring transition-shadow cursor-pointer group"
+                        onClick={() => setPageModal({ page: pr.page, tab: "notes" })}
+                        title={`Page ${pr.page} — click to inspect`}
+                      >
                         {thumb ? (
                           <img
                             src={thumb.toDataURL()}
@@ -269,40 +381,42 @@ export default function CheckerPage() {
                         ) : (
                           <span className="text-xs text-muted-foreground">…</span>
                         )}
+                        {/* Hover overlay */}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                          <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-white bg-black/60 px-2 py-1 rounded">
+                            Inspect
+                          </span>
+                        </div>
                         <div className="absolute top-1.5 left-1.5 flex items-center gap-1">
                           <span className="text-[10px] bg-black/50 text-white px-1.5 py-0.5 rounded">
                             {pr.page}
                           </span>
                         </div>
-                        {pageValidity && (
-                          <div className="absolute top-1.5 right-1.5">
-                            <ValidityDot validity={pageValidity} />
-                          </div>
-                        )}
-                      </div>
+                      </button>
 
                       {/* Attachment buttons */}
-                      {(pr.notes !== null || pr.media.length > 0) && (
+                      {(showNotes || pr.media.length > 0) && (
                         <div className="flex flex-col gap-1">
-                          {pr.notes && (
+                          {showNotes && (
                             <AttachmentButton
                               label="Notes"
-                              validity={pr.notes.validity}
-                              issues={pr.notes.issues}
-                              onClick={() => openAttachment(pr.notes!)}
+                              validity={pr.notes?.validity ?? "valid"}
+                              issues={pr.notes?.issues ?? []}
+                              isPendingChange={notesEdited}
+                              onClick={() => setPageModal({ page: pr.page, tab: "notes" })}
                             />
                           )}
                           {pr.media.map((mj, i) => {
                             const m = mj.parsed as Record<string, unknown> | undefined;
                             const id = typeof m?.id === "string" ? m.id.slice(0, 20) : `media-${i + 1}`;
-                            const binary = findLinkedBinary(mj);
                             return (
                               <AttachmentButton
                                 key={i}
                                 label={`Media: ${id}`}
                                 validity={mj.validity}
                                 issues={mj.issues}
-                                onClick={() => openAttachment(mj, binary)}
+                                isPendingChange={deletedMedia.has(mj.filename)}
+                                onClick={() => setPageModal({ page: pr.page, tab: "media" })}
                               />
                             );
                           })}
@@ -323,9 +437,23 @@ export default function CheckerPage() {
                       <span className="text-xs font-mono text-muted-foreground truncate">{a.filename}</span>
                       <button
                         className="ml-auto text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground shrink-0"
-                        onClick={() => openAttachment(a)}
+                        onClick={() => {
+                          if (a.kind === "media-binary") {
+                            const ext = a.filename.split(".").pop()?.toLowerCase() ?? "";
+                            const mime = ext === "gif" ? "image/gif" : ext === "mp4" ? "video/mp4" : "video/webm";
+                            const blob = new Blob([a.content.slice()], { type: mime });
+                            const url = URL.createObjectURL(blob);
+                            window.open(url, "_blank", "noopener,noreferrer");
+                            setTimeout(() => URL.revokeObjectURL(url), 30_000);
+                          } else {
+                            const blob = new Blob([a.content.slice()], { type: "application/json" });
+                            const url = URL.createObjectURL(blob);
+                            window.open(url, "_blank", "noopener,noreferrer");
+                            setTimeout(() => URL.revokeObjectURL(url), 30_000);
+                          }
+                        }}
                       >
-                        Inspect
+                        Open
                       </button>
                     </div>
                   ))}
@@ -336,11 +464,52 @@ export default function CheckerPage() {
         )}
       </main>
 
-      {modal && (
-        <AttachmentModal
-          attachment={modal.attachment}
-          linkedBinary={modal.linkedBinary}
-          onClose={() => setModal(null)}
+      {leaveConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) setLeaveConfirm(false); }}
+        >
+          <div className="w-full max-w-sm rounded-xl border bg-background p-6 space-y-4 shadow-xl">
+            <div className="space-y-1">
+              <h2 className="text-sm font-semibold">Unsaved edits</h2>
+              <p className="text-sm text-muted-foreground">
+                You have unsaved note edits. Download the PDF before leaving or your changes will be lost.
+              </p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setLeaveConfirm(false)}
+                className="rounded px-3 py-1.5 text-sm border hover:bg-muted transition-colors"
+              >
+                Stay
+              </button>
+              <button
+                onClick={() => navigate("/")}
+                className="rounded px-3 py-1.5 text-sm bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
+              >
+                Leave anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pageModal && activePageReport && (
+        <PageDetailModal
+          pageReport={activePageReport}
+          thumb={thumbs.get(pageModal.page)}
+          initialNotesValue={
+            editedNotes.has(pageModal.page)
+              ? (editedNotes.get(pageModal.page) ?? "")
+              : (activePageReport.notes?.previewText ?? "")
+          }
+          onNotesChange={handleNotesChange}
+          isNotesEdited={isPageEdited(pageModal.page, activePageReport.notes?.previewText)}
+          deletedMedia={deletedMedia}
+          onToggleDeleteMedia={toggleDeleteMedia}
+          binaries={report?.binaries ?? new Map()}
+          initialTab={pageModal.tab}
+          onClose={() => setPageModal(null)}
         />
       )}
     </div>
@@ -356,13 +525,14 @@ function SummaryChip({
   count: number;
   validity?: "valid" | "warning" | "invalid";
 }) {
-  const color = validity === "valid"
-    ? "text-green-700 dark:text-green-400"
-    : validity === "warning"
-    ? "text-amber-800 dark:text-amber-400"
-    : validity === "invalid"
-    ? "text-red-700 dark:text-red-400"
-    : "text-muted-foreground";
+  const color =
+    validity === "valid"
+      ? "text-green-700 dark:text-green-400"
+      : validity === "warning"
+      ? "text-amber-800 dark:text-amber-400"
+      : validity === "invalid"
+      ? "text-red-700 dark:text-red-400"
+      : "text-muted-foreground";
   return (
     <span className={`text-xs ${color}`}>
       <span className="font-medium">{count}</span> {label}
@@ -374,29 +544,34 @@ function AttachmentButton({
   label,
   validity,
   issues,
+  isPendingChange = false,
   onClick,
 }: {
   label: string;
   validity: "valid" | "warning" | "invalid";
   issues: { level: "error" | "warning"; message: string }[];
+  isPendingChange?: boolean;
   onClick: () => void;
 }) {
   const firstIssue = issues[0];
+  const colorClass = isPendingChange
+    ? "bg-amber-500/15 text-amber-800 dark:text-amber-400 hover:bg-amber-500/25"
+    : validity === "invalid"
+    ? "bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20"
+    : validity === "warning"
+    ? "bg-amber-500/10 text-amber-800 dark:text-amber-400 hover:bg-amber-500/20"
+    : "bg-green-500/10 text-green-700 dark:text-green-400 hover:bg-green-500/20";
   return (
     <button
       onClick={onClick}
       title={firstIssue ? `${firstIssue.level}: ${firstIssue.message}` : undefined}
-      className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs text-left w-full transition-colors hover:bg-muted/80 ${
-        validity === "invalid"
-          ? "bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20"
-          : validity === "warning"
-          ? "bg-amber-500/10 text-amber-800 dark:text-amber-400 hover:bg-amber-500/20"
-          : "bg-green-500/10 text-green-700 dark:text-green-400 hover:bg-green-500/20"
-      }`}
+      className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs text-left w-full transition-colors ${colorClass}`}
     >
-      <ValidityDot validity={validity} />
+      {isPendingChange
+        ? <span className="inline-block size-1.5 rounded-full shrink-0 bg-amber-500" />
+        : <ValidityDot validity={validity} />}
       <span className="truncate">{label}</span>
-      {issues.length > 0 && (
+      {issues.length > 0 && !isPendingChange && (
         <span className="ml-auto shrink-0 opacity-60">{issues.length}</span>
       )}
     </button>

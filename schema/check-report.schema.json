@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://presio.xyz/schema/check-report.json",
+  "title": "Presio /api/check response",
+  "description": "Structured validity report returned by POST /api/check.",
+  "type": "object",
+  "required": ["pageCount", "summary", "pages", "orphans"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string", "format": "uri" },
+    "pageCount": { "type": "integer", "minimum": 1, "description": "Total number of pages in the PDF." },
+    "summary": {
+      "type": "object",
+      "required": ["total", "valid", "warning", "invalid"],
+      "additionalProperties": false,
+      "properties": {
+        "total":   { "type": "integer", "minimum": 0 },
+        "valid":   { "type": "integer", "minimum": 0 },
+        "warning": { "type": "integer", "minimum": 0 },
+        "invalid": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "pages": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pageResult" }
+    },
+    "orphans": {
+      "type": "array",
+      "description": "Attachments not associated with any page (unreferenced binaries, unknown filenames).",
+      "items": { "$ref": "#/$defs/attachmentResult" }
+    }
+  },
+  "$defs": {
+    "validity": { "enum": ["valid", "warning", "invalid"] },
+    "issue": {
+      "type": "object",
+      "required": ["level", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "level":   { "enum": ["error", "warning"] },
+        "message": { "type": "string" }
+      }
+    },
+    "attachmentResult": {
+      "type": "object",
+      "required": ["filename", "kind", "validity", "issues"],
+      "additionalProperties": false,
+      "properties": {
+        "filename": { "type": "string" },
+        "kind":     { "enum": ["notes", "media-json", "media-binary", "unknown"] },
+        "slide":    { "type": "integer", "minimum": 1, "description": "PDF page number parsed from filename." },
+        "validity": { "$ref": "#/$defs/validity" },
+        "issues":   { "type": "array", "items": { "$ref": "#/$defs/issue" } },
+        "text":     { "type": "string", "description": "Rendered notes text (notes attachments only)." },
+        "data":     { "description": "Parsed JSON content (notes and media-json attachments)." }
+      }
+    },
+    "pageResult": {
+      "type": "object",
+      "required": ["page", "notes", "media"],
+      "additionalProperties": false,
+      "properties": {
+        "page":  { "type": "integer", "minimum": 1 },
+        "notes": { "oneOf": [{ "$ref": "#/$defs/attachmentResult" }, { "type": "null" }] },
+        "media": { "type": "array", "items": { "$ref": "#/$defs/attachmentResult" } }
+      }
+    }
+  }
+}

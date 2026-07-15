@@ -25,8 +25,12 @@ export async function resolveOptionalUserId(
 ): Promise<string | null> {
   const token = getBearerToken(req);
   if (!token) return null;
-  const { data } = await supabase.auth.getUser(token);
-  return data.user?.id ?? null;
+  try {
+    const { data } = await supabase.auth.getUser(token);
+    return data.user?.id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Require a valid bearer token, returning the authenticated user or null. */

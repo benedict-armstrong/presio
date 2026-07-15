@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://presio.xyz/schema/notes-sidecar.json",
+  "title": "Presio speaker-notes sidecar",
+  "description": "Embedded-file attachment named notes-slide-{N}.json inside a Presio PDF.",
+  "type": "object",
+  "required": ["notes"],
+  "additionalProperties": false,
+  "properties": {
+    "slide": {
+      "description": "Physical PDF page number as a string (informational — the filename is authoritative).",
+      "type": "string"
+    },
+    "notes": {
+      "description": "Speaker-notes content. Plain string after UI edits; Typst content AST when compiled by the presio Typst package.",
+      "oneOf": [
+        {
+          "title": "Plain text / markdown",
+          "type": "string"
+        },
+        {
+          "title": "Single Typst AST node",
+          "$ref": "#/$defs/typstNode"
+        },
+        {
+          "title": "Array of Typst AST nodes (one per #speaker-notes call on the slide)",
+          "type": "array",
+          "items": { "$ref": "#/$defs/typstNode" },
+          "minItems": 1
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "typstNode": {
+      "description": "A node in the Typst content AST. `func` identifies the node type; remaining fields vary by type.",
+      "type": "object",
+      "required": ["func"],
+      "properties": {
+        "func":     { "type": "string", "examples": ["sequence", "text", "strong", "emph", "link", "heading", "raw", "list", "list.item", "enum", "enum.item", "space", "linebreak", "parbreak"] },
+        "text":     { "type": "string",  "description": "Text content (func=text, func=raw)." },
+        "body":     { "$ref": "#/$defs/typstNode", "description": "Child node (func=strong, emph, link, heading, list.item, enum.item)." },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/typstNode" }, "description": "Child nodes (func=sequence, list, enum)." },
+        "dest":     { "type": "string",  "description": "Link target URL (func=link)." },
+        "level":    { "type": "integer", "minimum": 1, "maximum": 6, "description": "Heading level (func=heading)." },
+        "block":    { "type": "boolean", "description": "True for fenced code blocks (func=raw)." },
+        "lang":     { "type": "string",  "description": "Language hint for code blocks (func=raw)." },
+        "double":   { "type": "boolean", "description": "True for double smart-quote (func=smartquote)." }
+      },
+      "additionalProperties": true
+    }
+  }
+}

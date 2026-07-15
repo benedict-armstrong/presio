@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://presio.xyz/schema/media-sidecar.json",
+  "title": "Presio media sidecar",
+  "description": "Embedded-file attachment named media-slide-{N}-{id}.json inside a Presio PDF. A companion binary attachment media-{id}.{gif|mp4|webm} is also embedded when kind is 'file'.",
+  "type": "object",
+  "required": ["slide", "id", "mime", "x_pt", "y_pt", "w_pt", "h_pt"],
+  "additionalProperties": false,
+  "properties": {
+    "kind":     { "enum": ["file", "url", "youtube", "vimeo"], "description": "Media source type. Inferred as 'url' when `url` is present and `kind` is omitted, otherwise 'file'." },
+    "slide":    { "type": "integer", "minimum": 1, "description": "Physical PDF page number (1-based)." },
+    "id":       { "type": "string",  "description": "Stable identifier derived from the source path or URL (non-alphanumeric chars replaced with _)." },
+    "mime":     { "type": "string",  "examples": ["image/gif", "video/mp4", "video/webm", "text/html"], "description": "MIME type of the media. YouTube/Vimeo use text/html." },
+    "x_pt":    { "type": "number",  "description": "Left edge of the overlay in PDF points, top-left origin." },
+    "y_pt":    { "type": "number",  "description": "Top edge of the overlay in PDF points, top-left origin." },
+    "w_pt":    { "type": "number",  "exclusiveMinimum": 0, "description": "Width of the overlay in PDF points." },
+    "h_pt":    { "type": "number",  "exclusiveMinimum": 0, "description": "Height of the overlay in PDF points." },
+    "autoplay": { "type": "boolean", "default": true,  "description": "Start playing automatically when the slide is shown." },
+    "loop":     { "type": "boolean", "default": true,  "description": "Loop the media continuously." },
+    "filename": { "type": "string",  "pattern": "^media-.+\\.(gif|mp4|webm)$", "description": "Name of the companion binary attachment. Required when kind='file'." },
+    "url":      { "type": "string",  "format": "uri", "description": "Source URL. Required when kind='url', 'youtube', or 'vimeo'." },
+    "video_id": { "type": "string",  "description": "Extracted video ID used for iframe embeds. Present when kind='youtube' or 'vimeo'." }
+  },
+  "if":   { "properties": { "kind": { "const": "file" } }, "required": ["kind"] },
+  "then": { "required": ["filename"] },
+  "else": { "required": ["url"] }
+}

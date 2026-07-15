@@ -10,6 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAllowedOrigins, buildCspDirectives } from "./security.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerNewsletterRoutes } from "./routes/newsletter.js";
+import { registerCheckRoute } from "./routes/check.js";
 import type { SocketState } from "./socket.js";
 
 export interface AppDeps {
@@ -62,6 +63,7 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
 
   registerSessionRoutes(app, { supabase, io, socketState });
   registerNewsletterRoutes(app, supabase);
+  registerCheckRoute(app);
 
   // Unknown API paths must 404 as JSON — falling through to the SPA catch-all
   // returns index.html with a 200, which masks client bugs as parse errors.
@@ -73,6 +75,9 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const clientDist = path.join(__dirname, "../client/dist");
+
+  // JSON schemas for the sidecar format — served at /schema/*.json
+  app.use("/schema", express.static(path.join(__dirname, "../../schema"), { index: false }));
 
   app.use(express.static(clientDist));
   app.get("*path", (_req, res) => {
