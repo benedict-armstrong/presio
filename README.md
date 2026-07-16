@@ -4,15 +4,6 @@ Present PDFs from your browser — try it at **[presio.xyz](https://presio.xyz)*
 
 Upload a PDF presentation, get a short link, and control the slideshow from one browser window while viewers watch in another. Presio is a hosted service; this repository is its source code.
 
-## Use it from an AI agent
-
-Nothing to install — agents talk to the hosted service directly:
-
-- **MCP** — connect to `https://presio.xyz/mcp` (streamable HTTP, no auth). Tools: `present_pdf`, `check_pdf`.
-  - Claude Code: `claude mcp add --transport http presio https://presio.xyz/mcp`
-  - Claude.ai, ChatGPT, Cursor, …: add a custom connector / MCP server with that URL
-- **REST** — `curl -F file=@deck.pdf https://presio.xyz/api/present` returns a link; opening it in a browser starts the presentation.
-- **Agent docs** — [llms.txt](https://presio.xyz/llms.txt) · [AGENTS.md](https://presio.xyz/AGENTS.md) · [api.md](https://presio.xyz/api.md) · [OpenAPI](https://presio.xyz/openapi.json)
 
 ![Demo](https://github.com/benedict-armstrong/presio/releases/download/demo/presio.gif)
 
