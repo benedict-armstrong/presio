@@ -42,3 +42,12 @@ Hello world.
 ```
 
 Presio reads the attached media and notes from the PDF automatically. Notes can also be embedded by hand from plain Typst or LaTeX. See the about page for details.
+
+## Self-hosting
+
+Want to run Presio yourself instead of using the hosted service? For a full
+deployment (accounts, cross-device sync, your own domain) see
+[`deploy/README.md`](deploy/README.md). For a single offline container with no
+accounts and no Supabase — just present PDFs on your own machine or LAN — see
+["Running fully local / offline"](deploy/README.md#running-fully-local--offline)
+in the same doc.

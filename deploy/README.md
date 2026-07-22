@@ -170,3 +170,25 @@ used (Presio runs its own Socket.IO and talks to Kong, not Postgres directly).
 They're kept so the upstream stack boots exactly as shipped; you can disable them
 to save resources, but leave `studio`/`meta` (Kong's health gate depends on
 `studio`).
+
+## Running fully local / offline
+
+If you just want to present PDFs on your own machine or LAN — no public
+domain, no accounts, no analytics — none of the above is needed at all.
+`local.docker-compose.yml` at the repo root runs a **single container**, no
+Supabase and no `.env`:
+
+```bash
+docker compose -f local.docker-compose.yml up --build
+open http://localhost:3001
+```
+
+Set `PRESIO_MODE=local` and the server swaps Supabase for a bundled SQLite
+database and filesystem storage under `/data` (see `server/local/`) instead of
+Postgres/GoTrue/Storage/Kong. Login and cross-device sync-by-account aren't
+available in this mode (there's no auth provider to back them), but everything
+else works: local presentations, handoff links, and controller/viewer sync
+over Socket.IO. To present to viewers on other devices on the same network,
+have them open `http://<this-machine's-LAN-IP>:3001` instead of `localhost` —
+PDF links are relative, so they resolve correctly either way, and CORS accepts
+any origin in this mode since there's no fixed domain to allow ahead of time.
