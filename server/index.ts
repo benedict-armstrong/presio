@@ -5,10 +5,13 @@ import { Server } from "socket.io";
 import { supabase } from "./supabase.js";
 import { createApp } from "./app.js";
 import { getAllowedOrigins } from "./security.js";
+import { isLocalMode } from "./local/mode.js";
 import { registerSocketHandlers, createSocketState, clearSessionState } from "./socket.js";
 
 const allowedOrigins = getAllowedOrigins();
-const io = new Server({ cors: { origin: allowedOrigins.length ? allowedOrigins : false } });
+// See app.ts's corsOrigin: local/LAN use has no fixed origin to allow ahead of
+// time, so accept any unless ALLOWED_ORIGIN was set explicitly.
+const io = new Server({ cors: { origin: allowedOrigins.length ? allowedOrigins : isLocalMode ? true : false } });
 
 const socketState = createSocketState();
 const app = createApp({ supabase, io, socketState });

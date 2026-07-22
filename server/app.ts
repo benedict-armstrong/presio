@@ -10,6 +10,8 @@ import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAllowedOrigins, buildCspDirectives } from "./security.js";
 import { baseUrl } from "./lib/baseUrl.js";
+import { localBlobsDir } from "./local/paths.js";
+import { isLocalMode } from "./local/mode.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerNewsletterRoutes } from "./routes/newsletter.js";
 import { registerCheckRoute } from "./routes/check.js";
@@ -29,15 +31,24 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   // Exactly one reverse-proxy hop (Traefik) sits in front in production, so
   // trust one level of X-Forwarded-For. Without this every request appears to
   // come from the proxy's IP and the rate limiter throttles all users as one;
-  // trusting more hops would let clients spoof their IP via the header.
-  app.set("trust proxy", 1);
+  // trusting more hops would let clients spoof their IP via the header. Local
+  // mode has no proxy in front, so set TRUST_PROXY=false there — otherwise an
+  // unproxied client could spoof its rate-limit IP via the header itself.
+  app.set("trust proxy", process.env.TRUST_PROXY === "false" ? false : 1);
 
   const allowedOrigins = getAllowedOrigins();
-  const corsOrigin: cors.CorsOptions["origin"] = (origin, callback) => {
-    // No Origin header => same-origin / non-browser client (curl, server-to-server).
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-    callback(new Error("Not allowed by CORS"));
-  };
+  // Local/LAN use has no fixed origin to configure ahead of time — a viewer
+  // might reach this server as localhost, a LAN IP, or a hostname, none of
+  // which are known at startup. Accept any origin unless ALLOWED_ORIGIN was
+  // set explicitly (which still takes priority even in local mode).
+  const corsOrigin: cors.CorsOptions["origin"] =
+    !allowedOrigins.length && isLocalMode
+      ? true
+      : (origin, callback) => {
+          // No Origin header => same-origin / non-browser client (curl, server-to-server).
+          if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+          callback(new Error("Not allowed by CORS"));
+        };
 
   // Helmet for sensible security headers. The CSP allows the YouTube/Vimeo embed
   // SDKs and their iframes, the Supabase API/storage, and websocket connections.
@@ -95,6 +106,11 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
 
   // JSON schemas for the sidecar format — served at /schema/*.json
   app.use("/schema", express.static(path.join(__dirname, "../../schema"), { index: false }));
+
+  // Local mode's blob store (server/local/blobStore.ts) writes PDFs here and
+  // hands back relative /files/... URLs. In Supabase mode this directory
+  // never exists, so requests just fall through to the catch-all below.
+  app.use("/files", express.static(localBlobsDir(), { index: false }));
 
   // index: false so "/" falls through to the catch-all below and gets its
   // canonical/og:url tags like every other route.
