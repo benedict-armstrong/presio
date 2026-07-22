@@ -22,7 +22,12 @@ RUN npm run build
 FROM node:20-alpine
 WORKDIR /app/server
 COPY server/package*.json ./
-RUN npm ci
+# better-sqlite3 (local mode's storage backend) needs a native build toolchain
+# as a fallback when no prebuilt binary matches this platform; removed again
+# once npm ci finishes since the compiled .node binary doesn't need it at runtime.
+RUN apk add --no-cache --virtual .build-deps python3 make g++ \
+  && npm ci \
+  && apk del .build-deps
 COPY server/ .
 COPY --from=client-build /app/client/dist /app/client/dist
 EXPOSE 3001
