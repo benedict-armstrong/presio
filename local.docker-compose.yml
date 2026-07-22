@@ -1,0 +1,49 @@
+# Fully local / offline Presio — a single container, no Supabase, no .env.
+#
+# Addresses https://github.com/benedict-armstrong/presio/issues/2: the root
+# docker-compose.yml is the full self-hosted stack (Supabase + Traefik +
+# MinIO + analytics/uptime), which is deployment-only baggage if all you want
+# is to present PDFs on your own machine or LAN. In PRESIO_MODE=local the
+# server swaps Supabase for a bundled SQLite database and filesystem storage
+# (see server/local/), so there's nothing else to run.
+#
+# Login/sync-by-account is unavailable in this mode (there's no auth provider
+# to back it) — everything runs anonymous, which is enough for local
+# presenting, handoff links, and LAN sync between the controller and viewers.
+#
+#   docker compose -f local.docker-compose.yml up --build
+#   open http://localhost:3001
+#
+# For presenting to viewers on other devices on the same network, open
+# http://<this-machine's-LAN-IP>:3001 on those devices instead of localhost —
+# PDF links are relative, so they resolve correctly either way.
+
+name: presio-local
+
+services:
+  presio:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      # Built without Supabase config so the client's login UI talks to
+      # nothing real; PRESIO_MODE=local makes the server side fully anonymous
+      # to match (see client/src/lib/supabaseClient.ts's placeholder fallback).
+      args:
+        VITE_SUPABASE_URL: ""
+        VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY: ""
+        VITE_SENTRY_DSN: ""
+    container_name: presio-local
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      PRESIO_MODE: local
+      LOCAL_DATA_DIR: /data
+      # No reverse proxy in front of this container.
+      TRUST_PROXY: "false"
+    volumes:
+      - presio-local-data:/data
+
+volumes:
+  presio-local-data:
