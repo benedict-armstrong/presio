@@ -19,6 +19,7 @@ export function createLocalClient() {
         update: (payload: Record<string, unknown>) => new LocalQuery(db, table, "update", payload),
         upsert: (payload: Record<string, unknown>, opts?: UpsertOptions) =>
           new LocalQuery(db, table, "upsert", payload, opts),
+        delete: () => new LocalQuery(db, table, "delete"),
       };
     },
 

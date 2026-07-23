@@ -11,7 +11,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@sentry/node": "^10.61.0",
     "@supabase/supabase-js": "^2.99.1",
-    "better-sqlite3": "^13.0.1",
+    "better-sqlite3": "^11.10.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",

@@ -174,14 +174,28 @@ to save resources, but leave `studio`/`meta` (Kong's health gate depends on
 ## Running fully local / offline
 
 If you just want to present PDFs on your own machine or LAN — no public
-domain, no accounts, no analytics — none of the above is needed at all.
-`local.docker-compose.yml` at the repo root runs a **single container**, no
-Supabase and no `.env`:
+domain, no accounts, no analytics — none of the above is needed at all. A
+**single prebuilt container** (`linux/amd64` and `linux/arm64`), no Supabase,
+no `.env`, no checkout:
 
 ```bash
-docker compose -f local.docker-compose.yml up --build
+docker run -d --name presio -p 3001:3001 \
+  -e PRESIO_MODE=local -e LOCAL_DATA_DIR=/data -e TRUST_PROXY=false \
+  -v presio-data:/data \
+  ghcr.io/benedict-armstrong/presio-local:latest
 open http://localhost:3001
 ```
+
+Or with Compose, which sets all of that for you:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/benedict-armstrong/presio/main/local.docker-compose.yml
+docker compose -f local.docker-compose.yml up -d
+```
+
+The image is published by `.github/workflows/publish-local-image.yml` on every
+push to `main` (`:latest`) and every `v*` tag. From a checkout, `docker compose
+-f local.docker-compose.yml build` builds the same image from source instead.
 
 Set `PRESIO_MODE=local` and the server swaps Supabase for a bundled SQLite
 database and filesystem storage under `/data` (see `server/local/`) instead of

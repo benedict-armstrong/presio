@@ -52,14 +52,16 @@ insert into storage.buckets (id, name, public)
 values ('presentations', 'presentations', true)
 on conflict (id) do nothing;
 
--- Allow public read access to the presentations bucket.
--- NOTE: this makes every uploaded PDF readable by anyone who knows (or guesses)
--- its object path. Do not store confidential material in synced presentations.
--- drop-then-create keeps this script idempotent (Postgres has no
--- "create policy if not exists"), so it can be re-applied safely on every boot.
+-- NOTE: the bucket is public, so every uploaded PDF is readable by anyone who
+-- knows (or guesses) its object path. Do not store confidential material in
+-- synced presentations.
+--
+-- Public buckets serve objects via /storage/v1/object/public/..., which does
+-- not consult RLS, so no SELECT policy is needed to read PDFs. A SELECT policy
+-- on storage.objects would only let anon clients list() the bucket and
+-- enumerate every path, so we deliberately do not grant one. Drop the policy
+-- earlier revisions created; the drop is idempotent and safe on every boot.
 drop policy if exists "Public read access" on storage.objects;
-create policy "Public read access" on storage.objects
-  for select using (bucket_id = 'presentations');
 
 -- Writes and deletes are performed exclusively by the server using the service
 -- role key, which bypasses RLS. We deliberately do NOT grant anon/authenticated

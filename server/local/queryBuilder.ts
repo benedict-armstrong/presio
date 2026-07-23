@@ -2,9 +2,10 @@
 // the routes actually call (see server/test/fakeSupabase.ts for the in-memory
 // equivalent used by tests) — .select/.insert/.update/.upsert with
 // .eq/.neq/.gt/.lt/.in filters and an optional .single(), backed by a real
-// better-sqlite3 database instead of an in-memory array. Column names in
-// filters/payloads always come from our own route code (never user input), so
-// building SQL from them with a fixed identifier whitelist per table is safe.
+// better-sqlite3 database instead of an in-memory array. Values are always
+// bound as parameters; table and column names are interpolated, which is only
+// safe because every one of them is a literal in our own route code. Never
+// pass a caller-supplied string as a table or column name.
 import type Database from "better-sqlite3";
 
 type Op = "eq" | "neq" | "gt" | "lt" | "in";
@@ -33,12 +34,27 @@ function fromSqlRow<T extends Record<string, unknown>>(row: T): T {
   return out;
 }
 
+// Postgres unique-violation SQLSTATE. The session-code insert helpers retry on
+// this specific code (routes/sessions.ts, lib/presentHandoff.ts), so a SQLite
+// constraint failure has to surface as the same code or a code collision turns
+// into a 500 instead of a retry with a fresh code.
+const UNIQUE_VIOLATION = "23505";
+
+function toPostgrestError(err: unknown): { message: string; code?: string } {
+  const message = (err as Error).message;
+  const sqliteCode = (err as { code?: string }).code ?? "";
+  if (sqliteCode.startsWith("SQLITE_CONSTRAINT_UNIQUE") || sqliteCode.startsWith("SQLITE_CONSTRAINT_PRIMARYKEY")) {
+    return { message, code: UNIQUE_VIOLATION };
+  }
+  return { message };
+}
+
 export interface UpsertOptions {
   onConflict?: string;
   ignoreDuplicates?: boolean;
 }
 
-type Kind = "select" | "insert" | "update" | "upsert";
+type Kind = "select" | "insert" | "update" | "upsert" | "delete";
 
 export class LocalQuery<T = Record<string, unknown>> implements PromiseLike<{ data: unknown; error: unknown; count?: number }> {
   private filters: Filter[] = [];
@@ -149,6 +165,11 @@ export class LocalQuery<T = Record<string, unknown>> implements PromiseLike<{ da
         return { data: null, error: null };
       }
 
+      if (this.kind === "delete") {
+        this.db.prepare(`DELETE FROM ${this.table} ${where}`).run(...params);
+        return { data: null, error: null };
+      }
+
       // select
       if (this.wantCount) {
         const row = this.db.prepare(`SELECT COUNT(*) as c FROM ${this.table} ${where}`).get(...params) as { c: number };
@@ -163,7 +184,7 @@ export class LocalQuery<T = Record<string, unknown>> implements PromiseLike<{ da
       }
       return { data: rows, error: null };
     } catch (err) {
-      return { data: null, error: { message: (err as Error).message } };
+      return { data: null, error: toPostgrestError(err) };
     }
   }
 

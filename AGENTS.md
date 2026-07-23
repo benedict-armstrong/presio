@@ -34,6 +34,10 @@ cd server && npm run dev   # API (needs env / Supabase)
 cd client && npm run dev   # SPA
 ```
 
+`PRESIO_MODE=local npm run dev` runs the API against a bundled SQLite +
+filesystem backend instead (`server/local/`), needing no env at all — no
+Supabase, no auth. See `deploy/README.md` and `local.docker-compose.yml`.
+
 ## Conventions
 
 - Prefer local presentations (IndexedDB); server upload only for sync/claim/handoff

@@ -1,0 +1,105 @@
+name: Publish local image
+
+# Builds the prebuilt offline-mode image published at
+# ghcr.io/<owner>/presio-local, so self-hosters can run Presio locally without
+# cloning or building anything (see deploy/README.md). The image is the ordinary
+# app image built with no Supabase config baked into the client; PRESIO_MODE=local
+# at runtime is what selects the SQLite/filesystem backend.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/presio-local
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # Build the runner's native arch first and actually boot it. better-sqlite3
+      # is a native module, so "the image built" says nothing about whether it
+      # runs — a bad binary only shows up as a segfault at require() time.
+      - name: Build amd64 image for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: presio-local:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          docker run -d --name smoke -p 3001:3001 \
+            -e PRESIO_MODE=local -e LOCAL_DATA_DIR=/data -e TRUST_PROXY=false \
+            presio-local:smoke
+
+          # Fail loudly on a crash-loop rather than waiting out the timeout.
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3001/healthz >/dev/null 2>&1; then break; fi
+            status=$(docker inspect -f '{{.State.Status}}' smoke)
+            if [ "$status" != "running" ]; then
+              echo "::error::container is '$status' before serving traffic"
+              docker logs smoke || true
+              exit 1
+            fi
+            sleep 2
+          done
+
+          curl -fsS http://localhost:3001/healthz
+          curl -fsS http://localhost:3001/ | grep -q "<title>" || { echo "::error::SPA not served"; exit 1; }
+
+          # Exercise the SQLite + filesystem backend end to end: a session row is
+          # inserted, the PDF is written to /data, read back, then removed.
+          resp=$(curl -fsS -F file=@example/example.pdf http://localhost:3001/api/present)
+          echo "$resp"
+          id=$(echo "$resp" | jq -re .id)
+          token=$(echo "$resp" | jq -re .url | sed 's/.*[?&]t=//')
+
+          curl -fsS -o handoff.pdf "http://localhost:3001/api/sessions/$id/handoff?t=$token"
+          [ -s handoff.pdf ] || { echo "::error::handoff PDF empty"; exit 1; }
+          curl -fsS -X POST -H "x-controller-token: $token" \
+            "http://localhost:3001/api/sessions/$id/handoff/complete" | jq -re .ok
+
+          docker exec smoke test -f /data/presio.db || { echo "::error::SQLite DB not created"; exit 1; }
+          docker rm -f smoke
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

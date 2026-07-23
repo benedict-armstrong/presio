@@ -11,8 +11,14 @@
 # to back it) — everything runs anonymous, which is enough for local
 # presenting, handoff links, and LAN sync between the controller and viewers.
 #
-#   docker compose -f local.docker-compose.yml up --build
+# Nothing to clone — this file is all you need, and it pulls a prebuilt image:
+#
+#   curl -fsSLO https://raw.githubusercontent.com/benedict-armstrong/presio/main/local.docker-compose.yml
+#   docker compose -f local.docker-compose.yml up
 #   open http://localhost:3001
+#
+# Working in a checkout instead? `docker compose -f local.docker-compose.yml
+# build` builds from source rather than using the published image.
 #
 # For presenting to viewers on other devices on the same network, open
 # http://<this-machine's-LAN-IP>:3001 on those devices instead of localhost —
@@ -22,6 +28,16 @@ name: presio-local
 
 services:
   presio:
+    # Published by .github/workflows/publish-local-image.yml (linux/amd64 +
+    # linux/arm64). Compose pulls this when it isn't already present locally and
+    # falls back to `build:` below, so this file works with or without a
+    # checkout. Pin a tag instead of :latest if you'd rather upgrade explicitly.
+    image: ghcr.io/benedict-armstrong/presio-local:latest
+    # Explicit so `up` pulls rather than silently building from source — with
+    # both image: and build: set, Compose's default is version-dependent, and a
+    # copy of this file downloaded on its own has no build context to fall back
+    # on. `docker compose build` still builds regardless.
+    pull_policy: missing
     build:
       context: .
       dockerfile: deploy/Dockerfile
