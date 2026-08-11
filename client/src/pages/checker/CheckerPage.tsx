@@ -256,6 +256,15 @@ export default function CheckerPage() {
                 >
                   Typst package
                 </a>
+                {" · "}
+                <a
+                  href="https://github.com/benedict-armstrong/presio-latex-package"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-4 hover:text-foreground transition-colors"
+                >
+                  LaTeX package
+                </a>
               </p>
             </div>
 

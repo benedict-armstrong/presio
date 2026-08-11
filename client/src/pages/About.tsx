@@ -4,6 +4,9 @@ import { Button } from "@/components/ui/button";
 import { CodeBlock } from "@/components/CodeBlock";
 
 const PACKAGE_URL = "https://github.com/benedict-armstrong/presio-typst-package";
+const LATEX_PACKAGE_URL = "https://github.com/benedict-armstrong/presio-latex-package";
+const LATEX_STY_URL =
+  "https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/presio.sty";
 
 export default function About() {
   return (
@@ -91,7 +94,14 @@ export default function About() {
                   Presio Typst package
                 </a>
                 . It attaches the media and notes to your PDF in a format Presio reads automatically — no manual
-                annotation wiring needed. Import it at the top of your document:
+                annotation wiring needed. Writing LaTeX instead? Skip to{" "}
+                <a
+                  href="#latex"
+                  className="text-foreground underline underline-offset-4 hover:text-muted-foreground"
+                >
+                  the LaTeX package
+                </a>
+                . Import it at the top of your document:
               </p>
               <CodeBlock code={`#import "@preview/presio:0.2.1": media, speaker-notes`} />
 
@@ -135,12 +145,81 @@ Hello world.
               </p>
             </div>
 
+            <div className="space-y-1 pt-2" id="latex">
+              <h2 className="text-base font-medium text-foreground">Videos &amp; speaker notes with LaTeX</h2>
+              <p>
+                The{" "}
+                <a
+                  href={LATEX_PACKAGE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-foreground underline underline-offset-4 hover:text-muted-foreground"
+                >
+                  Presio LaTeX package
+                </a>
+                {" "}does the same job for beamer and friends. It is not on CTAN yet, so drop{" "}
+                <a
+                  href={LATEX_STY_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-foreground underline underline-offset-4 hover:text-muted-foreground"
+                >
+                  <code className="bg-muted px-1 rounded text-xs">presio.sty</code>
+                </a>
+                {" "}next to your <code className="bg-muted px-1 rounded text-xs">.tex</code> file — that is the
+                whole install, and it works on Overleaf too.
+              </p>
+              <CodeBlock lang="latex" code={`\\usepackage{presio}`} />
+
+              <p className="pt-2">Add speaker notes to any slide:</p>
+              <CodeBlock lang="latex" code={`\\begin{frame}{Introduction}
+  Hello world.
+  \\presionote{Remember to mention the demo before moving on.}
+\\end{frame}`} />
+
+              <p className="pt-2">
+                For markdown lists and hard line breaks use the environment form, in a frame marked{" "}
+                <code className="bg-muted px-1 rounded text-xs">[fragile]</code>:
+              </p>
+              <CodeBlock lang="latex" code={`\\begin{frame}[fragile]{Results}
+  \\begin{presionotes}
+- the problem
+- the approach
+- the numbers
+  \\end{presionotes}
+\\end{frame}`} />
+
+              <p className="pt-2">Embed a local video or GIF, a direct video URL, or a YouTube/Vimeo link:</p>
+              <CodeBlock lang="latex" code={`% Local file — the bytes are embedded in the PDF
+\\presiomedia[width=0.6\\linewidth, poster=poster.png]{figures/demo.gif}
+
+% Direct URL
+\\presiomedia[width=0.4\\linewidth, autoplay, loop]{https://example.com/video.mp4}
+
+% YouTube / Vimeo are detected automatically
+\\presiomedia[width=0.6\\linewidth]{https://www.youtube.com/watch?v=dQw4w9WgXcQ}`} />
+              <p className="pt-2">
+                <code className="bg-muted px-1 rounded text-xs">presiomedia</code> also accepts{" "}
+                <code className="bg-muted px-1 rounded text-xs">height</code> and{" "}
+                <code className="bg-muted px-1 rounded text-xs">aspect-ratio</code> (16/9 by default).
+                Supported local types are{" "}
+                <code className="bg-muted px-1 rounded text-xs">.gif</code>,{" "}
+                <code className="bg-muted px-1 rounded text-xs">.mp4</code>, and{" "}
+                <code className="bg-muted px-1 rounded text-xs">.webm</code>.
+              </p>
+              <p className="text-xs">
+                Compile with pdfLaTeX or LuaLaTeX — XeLaTeX cannot embed the files Presio reads. Two passes are
+                needed, which <code className="bg-muted px-1 rounded">latexmk</code> and Overleaf do for you. Under
+                beamer, a note on a frame with overlays is repeated on each resulting page.
+              </p>
+            </div>
+
             <div className="space-y-1 pt-2">
               <h2 className="text-base font-medium text-foreground">Adding notes manually</h2>
               <p>
-                Prefer not to use the package? Speaker notes can also be embedded by hand. Presio reads them from
-                JSON files attached to the PDF (Typst) or from <code className="bg-muted px-1 rounded text-xs">note:</code>{" "}
-                link annotations (LaTeX), and renders them as markdown in the controller's notes panel.
+                Prefer not to use a package? Speaker notes can also be embedded by hand. Presio reads them from
+                JSON files attached to the PDF or from <code className="bg-muted px-1 rounded text-xs">note:</code>{" "}
+                link annotations, and renders them as markdown in the controller's notes panel.
               </p>
 
               <h3 className="text-sm font-medium text-foreground pt-2">Typst</h3>
@@ -171,7 +250,19 @@ Hello world.
               <CodeBlock code={`#speaker-notes("Remember to mention the demo.")`} />
 
               <h3 className="text-sm font-medium text-foreground pt-2">LaTeX (hyperref)</h3>
-              <p>Use the <code className="bg-muted px-1 rounded text-xs">hyperref</code> package to create an invisible link:</p>
+              <p>
+                Notes only, and no markdown line breaks — prefer the{" "}
+                <a
+                  href={LATEX_PACKAGE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-foreground underline underline-offset-4 hover:text-muted-foreground"
+                >
+                  LaTeX package
+                </a>
+                {" "}unless you need a zero-dependency one-liner. Use{" "}
+                <code className="bg-muted px-1 rounded text-xs">hyperref</code> to create an invisible link:
+              </p>
               <CodeBlock lang="latex" code={`\\usepackage{hyperref}
 
 \\newcommand{\\speakernote}[1]{%

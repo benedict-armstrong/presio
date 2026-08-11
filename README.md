@@ -25,7 +25,9 @@ Upload a PDF presentation, get a short link, and control the slideshow from one 
 
 ## Adding videos and speaker notes
 
-The easiest way to attach videos and speaker notes is the [Presio Typst package](https://github.com/benedict-armstrong/presio-typst-package):
+The easiest way to attach videos and speaker notes is with one of the Presio
+packages — [Typst](https://github.com/benedict-armstrong/presio-typst-package)
+or [LaTeX](https://github.com/benedict-armstrong/presio-latex-package).
 
 ```typst
 #import "@preview/presio:0.2.1": media, speaker-notes
@@ -40,6 +42,21 @@ Hello world.
 
 #media("https://www.youtube.com/watch?v=dQw4w9WgXcQ", width: 60%, aspect-ratio: 16/9)
 ```
+
+```latex
+\usepackage{presio}
+
+\begin{frame}{Introduction}
+  Hello world.
+  \presionote{Remember to mention the demo before moving on.}
+  \presiomedia[width=0.6\linewidth]{https://www.youtube.com/watch?v=dQw4w9WgXcQ}
+\end{frame}
+```
+
+The LaTeX package is not on CTAN yet, so drop
+[`presio.sty`](https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/presio.sty)
+next to your `.tex` file — that is the whole install, and it works on Overleaf
+too. Compile with pdfLaTeX or LuaLaTeX.
 
 Presio reads the attached media and notes from the PDF automatically. Notes can also be embedded by hand from plain Typst or LaTeX. See the about page for details.
 
