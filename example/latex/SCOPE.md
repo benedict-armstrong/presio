@@ -11,6 +11,12 @@ contract, and LaTeX can produce it exactly. I built a working spike
 client's own pdf.js stack reads back correctly. The remaining work is package
 engineering and distribution, not app work.
 
+> **Status.** Milestones 1–2 below are done. The package now lives in its own
+> repository at `~/Projects/presio-latex-package` (v0.1.0), with a demo deck, an
+> Overleaf-ready starter project, and notes/media working on pdfLaTeX and
+> LuaLaTeX. The spike in this directory is kept only as the minimal record of
+> what was proven; use the package repo for real work.
+
 ---
 
 ## 1. The contract
@@ -59,9 +65,12 @@ page 4 size pt: 362.83 x 272.13
 Mechanisms confirmed working:
 
 1. **Attachment writing.** `\iow_open`/`\iow_now` writes the JSON to disk, then
-   `embedfile` attaches it. `embedfile` is engine-agnostic (pdftex, luatex,
-   xetex/dvipdfmx, dvips) and actively maintained (v2.13, Oct 2025). Its name
-   tree is read correctly by pdf.js.
+   `embedfile` attaches it (v2.13, Oct 2025). Its name tree is read correctly by
+   pdf.js. **Correction to an earlier draft of this document:** `embedfile` is
+   *not* engine-agnostic — it requires pdfTeX or LuaTeX in PDF mode and errors
+   out under XeLaTeX, which has no dvipdfmx backend for embedded files.
+   Supporting XeLaTeX means moving to `l3pdffile`/`\DocumentMetadata`, which
+   costs support for older TeX Live. See §3.
 2. **Page resolution.** `zref-abspage` gives the true shipout page — `\thepage`
    is wrong under beamer, and wrong in general because notes are captured before
    the output routine fires.
@@ -135,12 +144,16 @@ existing decks get notes with a one-line package load and no rewriting.
 
 ### Engine and backend support
 
-Priority order — pdfLaTeX first (Overleaf's default and the overwhelming
-majority of beamer decks), then LuaLaTeX, then XeLaTeX. `embedfile` and
-`zref-savepos` abstract all three; XeLaTeX routes through xdvipdfmx and is the
-one to test explicitly. dvips→ps2pdf is best-effort. A future migration to
-`l3pdffile`/`\DocumentMetadata` would be cleaner but drops older TeX Live, so
-not for v1.
+pdfLaTeX and LuaLaTeX only, and this is a hard constraint rather than a
+priority order: `embedfile` refuses to run anywhere else, so XeLaTeX and the
+dvips route cannot carry the sidecars at all. Both supported engines were
+tested and produce identical coordinates.
+
+XeLaTeX support would mean re-doing the embedding on top of
+`l3pdffile`/`\DocumentMetadata`, which is backend-independent but requires a
+recent TeX Live and interacts with beamer and hyperref in ways that need their
+own testing. Worth doing only if XeLaTeX users actually turn up; the package
+detects the engine and fails with a clear message meanwhile.
 
 ### Compatibility surface to test
 
@@ -235,10 +248,10 @@ Small, and independent of the package:
 
 | # | Deliverable | Notes |
 |---|---|---|
-| 0 | Overleaf write-then-embed check | Blocking assumption; ten minutes |
-| 1 | Notes only, pdfLaTeX + beamer | Spike is ~80% of this |
-| 2 | Media: URL, YouTube/Vimeo, local file embedding | Placeholder rendering is the fiddly part |
-| 3 | Engine matrix (LuaLaTeX, XeLaTeX) + class matrix | Where surprises live |
+| 0 | Overleaf write-then-embed check | Blocking assumption; ten minutes. **Still open** |
+| 1 | Notes only, pdfLaTeX + beamer | **Done** — v0.1.0 |
+| 2 | Media: URL, YouTube/Vimeo, local file embedding | **Done** — v0.1.0 |
+| 3 | Class matrix (powerdot, plain, overlay tricks) | Where surprises live |
 | 4 | Docs, PDF manual, `.dtx`, LPPL, own repo | Mirrors `presio-typst-package` |
 | 5 | Starter zip + "Open in Overleaf" button + about-page rewrite | Launch |
 | 6 | CTAN upload | Overleaf-native ~spring 2027 |
