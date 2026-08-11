@@ -1,0 +1,238 @@
+%% presio.sty --- SPIKE / proof of concept, not the shipping package.
+%%
+%% Proves the three mechanisms a real LaTeX port of the presio Typst package
+%% needs:
+%%   1. capture speaker notes as JSON and attach them to the PDF as
+%%      `notes-slide-<N>.json` embedded files (identical bytes to Typst's)
+%%   2. resolve the *shipout* page number a note/media landed on (zref-abspage),
+%%      not \thepage
+%%   3. capture a placeholder box's position in PDF points and flip it into
+%%      Presio's top-left origin, emitting `media-slide-<N>-<id>.json`
+%%
+%% Scope of the spike: pdfLaTeX only, URL media only, no binary embedding.
+
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesExplPackage{presio}{2026/08/11}{0.0.1-spike}
+  {Speaker notes and media sidecars for Presio (spike)}
+
+\RequirePackage{zref-abspage}
+\RequirePackage{zref-savepos}
+\RequirePackage{embedfile}
+\RequirePackage{etoolbox}
+\RequirePackage{graphicx}
+
+%% One label per media box carrying all three properties. Writing \zsavepos and
+%% \zref@labelbyprops{...}{abspage} under the *same* label name makes the second
+%% silently clobber the first — add abspage to the savepos list instead.
+\zref@addprops{savepos}{abspage}
+
+%% ---------------------------------------------------------------- JSON escape
+
+%% Catcode-12 building blocks. Everything we write has already been through
+%% \tl_to_str:n, so `#` is category 12 by then and \write will not double it.
+\tl_const:Nx \c__presio_bs_tl    { \char_generate:nn { 92 } { 12 } }
+\tl_const:Nx \c__presio_bsbs_tl  { \char_generate:nn { 92 } { 12 }
+                                   \char_generate:nn { 92 } { 12 } }
+\tl_const:Nx \c__presio_dq_tl    { \char_generate:nn { 34 } { 12 } }
+\tl_const:Nx \c__presio_bsdq_tl  { \char_generate:nn { 92 } { 12 }
+                                   \char_generate:nn { 34 } { 12 } }
+\tl_const:Nx \c__presio_nl_tl    { \char_generate:nn { 92 } { 12 } n }
+\tl_const:Nx \c__presio_mark_tl  { \char_generate:nn { 1 } { 12 } }
+\tl_const:Nx \c__presio_par_tl   { \tl_to_str:n { \par } }
+
+\tl_new:N \l__presio_tmp_tl
+
+%% #1 = tl var holding *stringified* text; escapes it in place for JSON.
+\cs_new_protected:Npn \__presio_escape:N #1
+  {
+    % \par first, while backslashes are still single
+    \exp_args:NNVV \tl_replace_all:Nnn #1 \c__presio_par_tl \c__presio_mark_tl
+    \exp_args:NNVV \tl_replace_all:Nnn #1 \c__presio_bs_tl   \c__presio_bsbs_tl
+    \exp_args:NNVV \tl_replace_all:Nnn #1 \c__presio_dq_tl   \c__presio_bsdq_tl
+    \tl_put_right:Nn \l__presio_tmp_tl { }
+    \exp_args:NNVx \tl_replace_all:Nnn #1 \c__presio_mark_tl
+      { \c__presio_nl_tl \c__presio_nl_tl }
+  }
+
+%% --------------------------------------------------------------------- notes
+
+\int_new:N \g__presio_note_int
+\seq_new:N \g__presio_note_ids_seq
+\prop_new:N \g__presio_note_text_prop   % id -> escaped text
+
+\NewDocumentCommand \presionote { +m }
+  {
+    \int_gincr:N \g__presio_note_int
+    \tl_set:Nx \l__presio_tmp_tl { \tl_to_str:n {#1} }
+    \__presio_escape:N \l__presio_tmp_tl
+    \seq_gput_right:Nx \g__presio_note_ids_seq { \int_use:N \g__presio_note_int }
+    \prop_gput:NxV \g__presio_note_text_prop
+      { \int_use:N \g__presio_note_int } \l__presio_tmp_tl
+    % zero-width label: records the page this note was shipped out on
+    \zref@labelbyprops { presio~note~\int_use:N \g__presio_note_int } { abspage }
+  }
+
+%% --------------------------------------------------------------------- media
+
+\int_new:N \g__presio_media_int
+\seq_new:N \g__presio_media_ids_seq
+\prop_new:N \g__presio_media_url_prop
+\prop_new:N \g__presio_media_kind_prop
+\prop_new:N \g__presio_media_w_prop     % width in pt (design size)
+\prop_new:N \g__presio_media_h_prop
+
+\keys_define:nn { presio / media }
+  {
+    width  .dim_set:N = \l__presio_w_dim,
+    height .dim_set:N = \l__presio_h_dim,
+  }
+
+%% #1 = options, #2 = URL. Draws a placeholder box and records where it landed.
+\NewDocumentCommand \presiomedia { O{} m }
+  {
+    \group_begin:
+      \dim_set:Nn \l__presio_w_dim { 0.6 \linewidth }
+      \dim_zero:N \l__presio_h_dim
+      \keys_set:nn { presio / media } {#1}
+      \dim_compare:nNnT \l__presio_h_dim = { 0pt }
+        { \dim_set:Nn \l__presio_h_dim { 0.5625 \l__presio_w_dim } }
+      \int_gincr:N \g__presio_media_int
+      \tl_set:Nx \l__presio_tmp_tl { \int_use:N \g__presio_media_int }
+      \seq_gput_right:NV \g__presio_media_ids_seq \l__presio_tmp_tl
+      \prop_gput:NVx \g__presio_media_url_prop \l__presio_tmp_tl
+        { \tl_to_str:n {#2} }
+      \prop_gput:NVx \g__presio_media_kind_prop \l__presio_tmp_tl
+        { \__presio_kind:n {#2} }
+      \prop_gput:NVx \g__presio_media_w_prop \l__presio_tmp_tl
+        { \dim_to_decimal_in_unit:nn { \l__presio_w_dim } { 1pt } }
+      \prop_gput:NVx \g__presio_media_h_prop \l__presio_tmp_tl
+        { \dim_to_decimal_in_unit:nn { \l__presio_h_dim } { 1pt } }
+      % The placeholder box. \zsavepos at the *top-left* corner of the box.
+      \mbox
+        {
+          \zsavepos { presio~media~\int_use:N \g__presio_media_int }
+          \raisebox { -\l__presio_h_dim } [0pt] [0pt]
+            {
+              \makebox [\l__presio_w_dim] [c]
+                { \raisebox { 0.5\l__presio_h_dim } { \small $\triangleright$ } }
+            }
+          \rule { 0pt } { 0pt }
+          \hspace* { \l__presio_w_dim }
+        }
+    \group_end:
+  }
+
+\cs_new:Npn \__presio_kind:n #1
+  {
+    \str_case_e:nnF { \str_head:n { \tl_to_str:n {#1} } } { } { url }
+  }
+
+%% --------------------------------------------------------- write + attach
+
+\iow_new:N \g__presio_iow
+
+\cs_new:Npn \__presio_page:n #1
+  { \zref@extractdefault {#1} { abspage } { 0 } }
+
+%% pt height of the current page, for the y-axis flip
+\cs_new:Npn \__presio_pageheight:
+  { \dim_to_decimal_in_unit:nn { \paperheight } { 1pt } }
+
+\cs_new_protected:Npn \__presio_flush:
+  {
+    % ---- notes: group by page, one file per page
+    \prop_clear:N \l__presio_bypage_prop
+    \seq_map_inline:Nn \g__presio_note_ids_seq
+      {
+        \tl_set:Nx \l__presio_page_tl
+          { \__presio_page:n { presio~note~##1 } }
+        \prop_get:NVNTF \l__presio_bypage_prop \l__presio_page_tl \l__presio_acc_tl
+          { \tl_put_right:NV \l__presio_acc_tl \c__presio_nl_tl
+            \tl_put_right:NV \l__presio_acc_tl \c__presio_nl_tl }
+          { \tl_clear:N \l__presio_acc_tl }
+        \prop_get:NnNT \g__presio_note_text_prop {##1} \l__presio_tmp_tl
+          { \tl_put_right:NV \l__presio_acc_tl \l__presio_tmp_tl }
+        \prop_put:NVV \l__presio_bypage_prop \l__presio_page_tl \l__presio_acc_tl
+      }
+    \prop_map_inline:Nn \l__presio_bypage_prop
+      {
+        \tl_set:Nn \l__presio_acc_tl {##2}
+        \int_compare:nNnT {##1} > { 0 }
+          {
+            \iow_open:Nn \g__presio_iow { notes-slide-##1.json }
+            \iow_now:Nx \g__presio_iow
+              {
+                \c_left_brace_str
+                \c__presio_dq_tl slide \c__presio_dq_tl :~##1,~
+                \c__presio_dq_tl notes \c__presio_dq_tl :~
+                \c__presio_dq_tl \exp_not:V \l__presio_acc_tl \c__presio_dq_tl
+                \c_right_brace_str
+              }
+            \iow_close:N \g__presio_iow
+            \embedfile [ mimetype = application/json,
+                         desc = { Presio~speaker~notes } ]
+                       { notes-slide-##1.json }
+          }
+      }
+    % ---- media: one file per placement
+    \seq_map_inline:Nn \g__presio_media_ids_seq
+      {
+        \tl_set:Nx \l__presio_page_tl
+          { \__presio_page:n { presio~media~##1 } }
+        \int_compare:nNnT { \l__presio_page_tl } > { 0 }
+          { \__presio_write_media:nn {##1} { \l__presio_page_tl } }
+      }
+  }
+
+\prop_new:N \l__presio_bypage_prop
+\tl_new:N  \l__presio_page_tl
+\tl_new:N  \l__presio_acc_tl
+
+\cs_new_protected:Npn \__presio_write_media:nn #1#2
+  {
+    \prop_get:NnN \g__presio_media_url_prop  {#1} \l__presio_url_tl
+    \prop_get:NnN \g__presio_media_kind_prop {#1} \l__presio_kind_tl
+    \prop_get:NnN \g__presio_media_w_prop    {#1} \l__presio_mw_tl
+    \prop_get:NnN \g__presio_media_h_prop    {#1} \l__presio_mh_tl
+    % zref-savepos gives sp from the *lower-left* of the paper; Presio wants
+    % pt from the *top-left*, so flip y. The saved point is the box's top edge.
+    \fp_set:Nn \l__presio_x_fp
+      { \zposx { presio~media~#1 } / 65536 }
+    \fp_set:Nn \l__presio_y_fp
+      { \__presio_pageheight: - \zposy { presio~media~#1 } / 65536 }
+    \iow_open:Nn \g__presio_iow { media-slide-#2-m#1.json }
+    \iow_now:Nx \g__presio_iow
+      {
+        \c_left_brace_str
+        \c__presio_dq_tl slide    \c__presio_dq_tl :~#2,~
+        \c__presio_dq_tl id       \c__presio_dq_tl :~\c__presio_dq_tl m#1 \c__presio_dq_tl ,~
+        \c__presio_dq_tl kind     \c__presio_dq_tl :~\c__presio_dq_tl \l__presio_kind_tl \c__presio_dq_tl ,~
+        \c__presio_dq_tl url      \c__presio_dq_tl :~\c__presio_dq_tl \l__presio_url_tl \c__presio_dq_tl ,~
+        \c__presio_dq_tl mime     \c__presio_dq_tl :~\c__presio_dq_tl video/mp4 \c__presio_dq_tl ,~
+        \c__presio_dq_tl x_pt     \c__presio_dq_tl :~\fp_eval:n { round ( \l__presio_x_fp , 2 ) },~
+        \c__presio_dq_tl y_pt     \c__presio_dq_tl :~\fp_eval:n { round ( \l__presio_y_fp , 2 ) },~
+        \c__presio_dq_tl w_pt     \c__presio_dq_tl :~\l__presio_mw_tl ,~
+        \c__presio_dq_tl h_pt     \c__presio_dq_tl :~\l__presio_mh_tl ,~
+        \c__presio_dq_tl autoplay \c__presio_dq_tl :~false,~
+        \c__presio_dq_tl loop     \c__presio_dq_tl :~false
+        \c_right_brace_str
+      }
+    \iow_close:N \g__presio_iow
+    \embedfile [ mimetype = application/json, desc = { Presio~media } ]
+               { media-slide-#2-m#1.json }
+  }
+
+\tl_new:N \l__presio_url_tl
+\tl_new:N \l__presio_kind_tl
+\tl_new:N \l__presio_mw_tl
+\tl_new:N \l__presio_mh_tl
+\fp_new:N \l__presio_x_fp
+\fp_new:N \l__presio_y_fp
+
+%% embedfile registers \embedfilefinish in \AtEndDocument at load time, so an
+%% \AtEndDocument of ours would run *after* the name tree is built. Hook in
+%% front of \embedfilefinish instead.
+\pretocmd \embedfilefinish { \__presio_flush: } { } { }
+
+\ExplSyntaxOff
+\endinput

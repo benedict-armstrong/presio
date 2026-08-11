@@ -1,0 +1,30 @@
+\documentclass{beamer}
+\usepackage{presio}
+
+\title{Presio LaTeX spike}
+
+\begin{document}
+
+\begin{frame}{Slide one}
+  Hello from beamer.
+  \presionote{Remember to mention the demo.
+
+  A second paragraph with \_underscores\_ and a "quoted" phrase.}
+\end{frame}
+
+\begin{frame}{Slide two --- overlays}
+  \begin{itemize}
+    \item<1-> First
+    \item<2-> Second
+  \end{itemize}
+  \presionote{This note is written on the frame, which produces two PDF pages.}
+\end{frame}
+
+\begin{frame}{Slide three --- media}
+  \begin{center}
+    \presiomedia[width=0.6\linewidth]{https://www.youtube.com/watch?v=dQw4w9WgXcQ}
+  \end{center}
+  \presionote{Play the video here.}
+\end{frame}
+
+\end{document}
