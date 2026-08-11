@@ -2,8 +2,9 @@
 
 Proof of concept for a LaTeX equivalent of the
 [Presio Typst package](https://github.com/benedict-armstrong/presio-typst-package).
-**Not the shipping package** — see [`SCOPE.md`](SCOPE.md) for the design this was
-written to de-risk.
+**Not the shipping package** — that is
+[presio-latex-package](https://github.com/benedict-armstrong/presio-latex-package).
+See [`SCOPE.md`](SCOPE.md) for the design this spike was written to de-risk.
 
 What it proves, on TeX Live 2025 / pdfLaTeX / beamer:
 

@@ -11,11 +11,11 @@ contract, and LaTeX can produce it exactly. I built a working spike
 client's own pdf.js stack reads back correctly. The remaining work is package
 engineering and distribution, not app work.
 
-> **Status.** Milestones 1–2 below are done. The package now lives in its own
-> repository at `~/Projects/presio-latex-package` (v0.1.0), with a demo deck, an
-> Overleaf-ready starter project, and notes/media working on pdfLaTeX and
-> LuaLaTeX. The spike in this directory is kept only as the minimal record of
-> what was proven; use the package repo for real work.
+> **Status.** Milestones 1–2 below are done. The package now lives at
+> [presio-latex-package](https://github.com/benedict-armstrong/presio-latex-package)
+> (v0.1.0), with a demo deck, an Overleaf-ready starter project, and notes/media
+> working on pdfLaTeX and LuaLaTeX. The spike in this directory is kept only as
+> the minimal record of what was proven; use the package repo for real work.
 
 ---
 
