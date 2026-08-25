@@ -58,16 +58,23 @@ jobs:
           hostname: presio-ci-${{ github.run_id }}
 
       - name: Deploy
+        id: deploy
         env:
           SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
           SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
           ENV_FILE: ${{ vars.STAGING_ENV_FILE || '/home/administrator/projects/presio/.env' }}
         run: |
+          set -euo pipefail
           # Variables expand locally; the heredoc is the remote script.
           # The delimiter is unquoted so $VARs above expand here, which also
           # means $(...) and backticks run ON THE RUNNER — escape them, and
           # keep backticks out of the comments below.
-          ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" bash -se <<EOF
+          #
+          # The host reports the commit it actually deployed, rather than the
+          # runner assuming its own checkout matches: if someone pushes to
+          # staging between the promote and this step, what is running is the
+          # host's answer, and that is what the verify step must wait for.
+          ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" bash -se <<EOF | tee /tmp/deploy.log
           set -euo pipefail
 
           if [ ! -f "$ENV_FILE" ]; then
@@ -85,24 +92,45 @@ jobs:
           git -C "$REPO_DIR" worktree add --detach "$WORKTREE" remotes/origin/staging
 
           cd "$WORKTREE"
-          echo "deploying \$(git rev-parse --short HEAD)"
-          docker compose --env-file "$ENV_FILE" -f docker-compose.staging.yml up -d --build
+          SHA=\$(git rev-parse --short HEAD)
+          echo "DEPLOYED_VERSION=staging-\$SHA"
+          # Baked into the image so /healthz reports the deployed commit, which
+          # is what the verify step below waits for.
+          APP_VERSION="staging-\$SHA" \
+            docker compose --env-file "$ENV_FILE" -f docker-compose.staging.yml up -d --build
           docker image prune -f >/dev/null
           EOF
+
+          version=$(sed -n 's/^DEPLOYED_VERSION=//p' /tmp/deploy.log | tail -1)
+          if [ -z "$version" ]; then
+            echo "::error::the host did not report a deployed version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Verify
         env:
           HOST: https://staging.presio.xyz
+          SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
+          SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
         run: |
           set -euo pipefail
-          # The container may still be starting when compose returns; give the
-          # healthcheck a window before calling the deploy bad.
-          for i in $(seq 1 30); do
-            if curl -fsS "$HOST/healthz" >/dev/null 2>&1; then
-              echo "staging is up: $(curl -fsS "$HOST/healthz")"
+          # Wait for the *deployed commit* to answer, not merely for something
+          # to answer: a rebuild that failed while the previous container kept
+          # running would otherwise pass this check. Traefik also needs a
+          # moment to pick up the replacement container, so allow five minutes.
+          want="${{ steps.deploy.outputs.version }}"
+          echo "waiting for $want"
+          for i in $(seq 1 60); do
+            got=$(curl -fsS --max-time 5 "$HOST/healthz" 2>/dev/null | jq -r '.version // empty' || true)
+            if [ "$got" = "$want" ]; then
+              echo "staging is serving $got"
               exit 0
             fi
             sleep 5
           done
-          echo "::error::staging did not answer /healthz after the deploy"
+
+          echo "::error::staging is serving '${got:-nothing}', expected '$want'"
+          ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" \
+            'docker logs --tail 40 presio-staging 2>&1' || true
           exit 1

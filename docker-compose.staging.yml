@@ -18,6 +18,10 @@ services:
       args:
         VITE_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
         VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY: ${ANON_KEY}
+        # The deploying commit, so /healthz identifies exactly what is running
+        # here. deploy-staging.yml sets this and then waits for that value to
+        # appear before calling the deploy good.
+        APP_VERSION: ${APP_VERSION:-dev}
     restart: unless-stopped
     networks:
       web:
