@@ -4,6 +4,8 @@ Presio is now deployed self-hosted by third parties. This plan makes upgrades
 safe, gives self-hosters a stable version to pin, and replaces the manual
 staging deploy with a gated pipeline.
 
+Remaining manual steps are collected in [`release-runbook.md`](release-runbook.md).
+
 Status legend: `[ ]` todo · `[x]` done · `[~]` in progress · `[-]` skipped
 
 ## Phase 1 — Make upgrades safe
