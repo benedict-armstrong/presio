@@ -84,6 +84,7 @@ jobs:
         run: deploy/smoke-test.sh presio-local:smoke ${{ env.IMAGE }}:latest
 
       - name: Build and push
+        id: push
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -101,3 +102,15 @@ jobs:
           sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # BuildKit's `provenance:` above attaches an attestation to the image in
+      # the registry; this publishes a Sigstore-signed one to GitHub's own
+      # attestation store as well. They are different mechanisms with different
+      # verification paths, and only this one is discoverable with
+      # `gh attestation verify` — which is the check most people reach for.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: false

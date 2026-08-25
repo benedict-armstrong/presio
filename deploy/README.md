@@ -140,7 +140,14 @@ Every published image carries a signed build provenance attestation and an
 SBOM. Verify a build really came from this repository with:
 
 ```bash
-gh attestation verify --owner benedict-armstrong \
+docker buildx imagetools inspect ghcr.io/benedict-armstrong/presio-local:1 \
+  --format '{{ json .Provenance }}'   # how and from what commit it was built
+docker buildx imagetools inspect ghcr.io/benedict-armstrong/presio-local:1 \
+  --format '{{ json .SBOM }}'         # what is inside it
+
+# Releases from v1.2.0 onward also carry a Sigstore-signed attestation in
+# GitHub's own store, which the CLI checks against this repository:
+gh attestation verify --repo benedict-armstrong/presio \
   oci://ghcr.io/benedict-armstrong/presio-local:1
 ```
 
