@@ -1,9 +1,23 @@
 name: PR preview
 
-# Per-PR preview environments on the staging host. Every open PR gets its own
-# isolated container at https://staging-pr-<n>.presio.xyz — PRESIO_MODE=local,
-# per-PR SQLite data volume, nothing shared with prod (see
-# docker-compose.preview.yml). Pushing updates it; closing the PR tears it down.
+# Opt-in per-PR preview environments on the staging host: an isolated container
+# at https://staging-pr-<n>.presio.xyz — PRESIO_MODE=local, per-PR SQLite data
+# volume, nothing shared with prod (see docker-compose.preview.yml).
+#
+# Previews are opt-in rather than automatic, because every one is a build and a
+# running container on a shared box. Ask for one by commenting on the PR:
+#
+#   /preview        start a preview, and keep it updated on every push
+#   /preview stop   tear it down
+#
+# The comment applies the `preview` label, and that label — not the comment — is
+# the state. So a preview can equally be started or stopped from the PR's label
+# picker, and `synchronize` redeploys only PRs carrying the label. Closing a PR
+# always tears its preview down, labelled or not.
+#
+# Only OWNER / MEMBER / COLLABORATOR comments are honoured: `issue_comment`
+# runs the default branch's workflow with secrets available, so anyone able to
+# trigger it could otherwise deploy to the host.
 #
 # One-time host setup (done on ben-docker-1 as `administrator`):
 #   1. DNS/TLS, Cloudflare-only origin: the host firewall only admits
@@ -32,7 +46,9 @@ name: PR preview
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, closed]
+    types: [opened, reopened, synchronize, closed, labeled, unlabeled]
+  issue_comment:
+    types: [created]
   # Manual redeploy for when a push doesn't reach Actions (a missed
   # `synchronize` event leaves the preview running the previous commit) or a
   # deploy needs repeating after a host-side fix. Always deploys the current
@@ -48,18 +64,126 @@ permissions:
   contents: read
 
 concurrency:
-  group: preview-${{ github.event.pull_request.number || inputs.pr }}
+  group: preview-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
   cancel-in-progress: true
 
 env:
   REPO_DIR: /home/administrator/presio.git # bare clone the workflow fetches PR refs into
   PREVIEW_DIR: /home/administrator/presio-previews # compose file copy + per-PR worktrees
+  PREVIEW_LABEL: preview
 
 jobs:
+  # Single place that decides what should happen, so the deploy and teardown
+  # jobs stay simple `if` checks on its output rather than each re-deriving the
+  # rules from five different event shapes.
+  triage:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write # apply/remove the label
+      issues: write # react to the triggering comment
+    outputs:
+      action: ${{ steps.decide.outputs.action }}
+      pr: ${{ steps.decide.outputs.pr }}
+    steps:
+      - id: decide
+        uses: actions/github-script@v7
+        env:
+          LABEL: ${{ env.PREVIEW_LABEL }}
+          DISPATCH_PR: ${{ inputs.pr }}
+        with:
+          script: |
+            const label = process.env.LABEL;
+            const ev = context.eventName;
+            const payload = context.payload;
+            const set = (action, pr) => {
+              core.setOutput("action", action);
+              core.setOutput("pr", pr ?? "");
+              core.info(`decision: ${action}${pr ? ` for PR #${pr}` : ""}`);
+            };
+
+            if (ev === "workflow_dispatch") return set("deploy", process.env.DISPATCH_PR);
+
+            if (ev === "issue_comment") {
+              // issue_comment fires for issues too, and this workflow only
+              // deals in pull requests.
+              if (!payload.issue.pull_request) return set("none");
+
+              const body = (payload.comment.body || "").trim();
+              const m = /^\/preview(\s+stop)?\s*$/.exec(body);
+              if (!m) return set("none");
+
+              // The default branch's workflow runs with secrets here, so a
+              // comment from anyone else must not be able to reach the host.
+              const trusted = ["OWNER", "MEMBER", "COLLABORATOR"];
+              if (!trusted.includes(payload.comment.author_association)) {
+                core.warning(
+                  `ignoring /preview from ${payload.comment.user.login} ` +
+                    `(${payload.comment.author_association})`,
+                );
+                return set("none");
+              }
+
+              const pr = payload.issue.number;
+              const stopping = Boolean(m[1]);
+
+              await github.rest.reactions.createForIssueComment({
+                ...context.repo,
+                comment_id: payload.comment.id,
+                content: stopping ? "+1" : "rocket",
+              });
+
+              // The label is the state; changing it is what the comment does.
+              // The resulting labeled/unlabeled event is ignored below, so the
+              // deploy happens once, from this run.
+              try {
+                if (stopping) {
+                  await github.rest.issues.removeLabel({
+                    ...context.repo, issue_number: pr, name: label,
+                  });
+                } else {
+                  await github.rest.issues.addLabels({
+                    ...context.repo, issue_number: pr, labels: [label],
+                  });
+                }
+              } catch (e) {
+                // Already in the desired state (404 on remove, or the label
+                // exists) — not a failure, the deploy/teardown still runs.
+                core.info(`label update skipped: ${e.status ?? e.message}`);
+              }
+
+              return set(stopping ? "teardown" : "deploy", pr);
+            }
+
+            // pull_request events
+            const pr = payload.pull_request;
+            const action = payload.action;
+            const labelled = pr.labels.some((l) => l.name === label);
+
+            // Always clean up on close, labelled or not: a preview left behind
+            // by a removed label or a missed event should still go away.
+            if (action === "closed") return set("teardown", pr.number);
+
+            // Deploying a fork PR would run its Dockerfile and compose config
+            // on the host, and fork workflows get no secrets anyway.
+            if (pr.head.repo.fork) return set("none");
+
+            if (action === "labeled") {
+              return payload.label.name === label
+                ? set("deploy", pr.number)
+                : set("none");
+            }
+            if (action === "unlabeled") {
+              return payload.label.name === label
+                ? set("teardown", pr.number)
+                : set("none");
+            }
+
+            // opened / reopened / synchronize: only PRs that asked for one.
+            return labelled ? set("deploy", pr.number) : set("none");
+
   deploy:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.action != 'closed' && !github.event.pull_request.head.repo.fork)
+    needs: triage
+    if: needs.triage.outputs.action == 'deploy'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write # sticky preview-URL comment
@@ -76,7 +200,7 @@ jobs:
         env:
           SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
           SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
-          PR: ${{ github.event.pull_request.number || inputs.pr }}
+          PR: ${{ needs.triage.outputs.pr }}
         run: |
           # Variables expand locally; the heredoc is the remote script.
           ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" bash -se <<EOF
@@ -109,16 +233,19 @@ jobs:
       - name: Comment preview URL
         uses: actions/github-script@v7
         env:
-          # context.issue is empty on a manual dispatch, so the number comes
-          # from the event or the input, same as the deploy step.
-          PR: ${{ github.event.pull_request.number || inputs.pr }}
+          # The PR number always comes from triage: context.issue is empty on
+          # a manual dispatch, and github.event.pull_request is absent when the
+          # trigger was a /preview comment.
+          PR: ${{ needs.triage.outputs.pr }}
         with:
           script: |
             const n = Number(process.env.PR);
             const body =
               `**Preview ready:** https://staging-pr-${n}.presio.xyz\n\n` +
               `Isolated local-mode deployment (SQLite, no shared state — login/sync flows live on staging). ` +
-              `Redeploys on every push; torn down when this PR closes.`;
+              `Redeploys on every push while the \`preview\` label is on this PR. ` +
+              `Comment \`/preview stop\` (or remove the label) to tear it down; ` +
+              `closing the PR also tears it down.`;
             const { data: comments } = await github.rest.issues.listComments({
               ...context.repo, issue_number: n,
             });
@@ -136,8 +263,11 @@ jobs:
             }
 
   teardown:
-    if: github.event.action == 'closed'
+    needs: triage
+    if: needs.triage.outputs.action == 'teardown'
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write # update the sticky comment
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/host-ssh
@@ -151,7 +281,7 @@ jobs:
         env:
           SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
           SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
-          PR: ${{ github.event.pull_request.number }}
+          PR: ${{ needs.triage.outputs.pr }}
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" bash -se <<EOF
           set -euo pipefail
@@ -167,3 +297,27 @@ jobs:
           git -C "$REPO_DIR" worktree prune
           docker image prune -f >/dev/null
           EOF
+
+      # Only worth saying while the PR is still open — on close the preview
+      # going away is implied, and the note would just be noise.
+      - name: Note the teardown
+        if: github.event.action != 'closed'
+        uses: actions/github-script@v7
+        env:
+          PR: ${{ needs.triage.outputs.pr }}
+        with:
+          script: |
+            const n = Number(process.env.PR);
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo, issue_number: n,
+            });
+            const existing = comments.find(
+              (c) => c.user.type === "Bot" && c.body.includes(`staging-pr-${n}.presio.xyz`),
+            );
+            const body =
+              `**Preview torn down.** Comment \`/preview\` to start a new one.`;
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo, comment_id: existing.id, body,
+              });
+            }
