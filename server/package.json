@@ -20,7 +20,7 @@
     "helmet": "^8.3.0",
     "multer": "^2.1.1",
     "nanoid": "^6.0.1",
-    "pdfjs-dist": "^5.5.207",
+    "pdfjs-dist": "^6.2.108",
     "socket.io": "^4.8.3",
     "zod": "^4.4.3"
   },
