@@ -86,7 +86,7 @@ jobs:
       pr: ${{ steps.decide.outputs.pr }}
     steps:
       - id: decide
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           LABEL: ${{ env.PREVIEW_LABEL }}
           DISPATCH_PR: ${{ inputs.pr }}
@@ -188,7 +188,7 @@ jobs:
     permissions:
       pull-requests: write # sticky preview-URL comment
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/host-ssh
         with:
           tailscale-authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
@@ -231,7 +231,7 @@ jobs:
           EOF
 
       - name: Comment preview URL
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           # The PR number always comes from triage: context.issue is empty on
           # a manual dispatch, and github.event.pull_request is absent when the
@@ -269,7 +269,7 @@ jobs:
     permissions:
       pull-requests: write # update the sticky comment
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/host-ssh
         with:
           tailscale-authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
@@ -302,7 +302,7 @@ jobs:
       # going away is implied, and the note would just be noise.
       - name: Note the teardown
         if: github.event.action != 'closed'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           PR: ${{ needs.triage.outputs.pr }}
         with:
