@@ -49,7 +49,7 @@ jobs:
       name: staging
       url: https://staging.presio.xyz
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/host-ssh
         with:
           tailscale-authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
