@@ -95,3 +95,17 @@ The repo is public, so rulesets are free.
   real release must exist before `:latest` is redefined to mean "release".
 - 8 before 21 (the issue template asks for the version endpoint's output).
 - 14 before 15 (the workflow triggers on pushes to the branch).
+
+## Operational prerequisites
+
+Set outside the repository, once:
+
+- [ ] **`RELEASE_PLEASE_TOKEN`** repository secret — a fine-grained PAT with
+  `contents: write` and `pull-requests: write`. The default `GITHUB_TOKEN`
+  cannot be used: tags it pushes do not trigger other workflows, so a release
+  tag would land and no image would ever be built for it.
+- [ ] **`STAGING_ENV_FILE`** repository variable — path on the deploy host to
+  the stack `.env` that `docker-compose.staging.yml` reads. Defaults to
+  `/home/administrator/presio/.env`.
+- [ ] Conventional commit messages on `main` from here on; release-please
+  derives the version bump and changelog from them.

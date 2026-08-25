@@ -1,0 +1,8 @@
+{
+  "name": "staging",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["refs/heads/staging"], "exclude": [] } },
+  "bypass_actors": [],
+  "rules": [{ "type": "deletion" }]
+}
