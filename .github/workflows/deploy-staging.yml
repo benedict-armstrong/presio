@@ -113,24 +113,49 @@ jobs:
           HOST: https://staging.presio.xyz
           SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
           SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
+          WANT: ${{ steps.deploy.outputs.version }}
         run: |
           set -euo pipefail
-          # Wait for the *deployed commit* to answer, not merely for something
-          # to answer: a rebuild that failed while the previous container kept
-          # running would otherwise pass this check. Traefik also needs a
-          # moment to pick up the replacement container, so allow five minutes.
-          want="${{ steps.deploy.outputs.version }}"
-          echo "waiting for $want"
+          # Checked on the host rather than over the public URL. The runner
+          # cannot reach https://staging.presio.xyz — the origin admits only
+          # Cloudflare, and something between the runner and the edge (bot
+          # filtering on datacenter IPs is the likely candidate) eats the
+          # request, while the same URL answers fine from a laptop and from the
+          # host. The container's own answer is what "did the deploy work"
+          # actually means, so ask it directly.
+          #
+          # Waits for the deployed commit specifically, not merely for a
+          # response: a rebuild that failed while the previous container kept
+          # running would otherwise pass.
+          echo "waiting for $WANT"
           for i in $(seq 1 60); do
-            got=$(curl -fsS --max-time 5 "$HOST/healthz" 2>/dev/null | jq -r '.version // empty' || true)
-            if [ "$got" = "$want" ]; then
+            got=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" \
+              'docker exec presio-staging wget -qO- http://127.0.0.1:3001/healthz 2>/dev/null' \
+              2>/dev/null | jq -r '.version // empty' 2>/dev/null || true)
+            if [ "$got" = "$WANT" ]; then
               echo "staging is serving $got"
-              exit 0
+              break
+            fi
+            if [ "$i" = "60" ]; then
+              echo "::error::staging is serving '${got:-nothing}', expected '$WANT'"
+              ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" \
+                'docker logs --tail 40 presio-staging 2>&1' || true
+              exit 1
             fi
             sleep 5
           done
 
-          echo "::error::staging is serving '${got:-nothing}', expected '$want'"
-          ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" \
-            'docker logs --tail 40 presio-staging 2>&1' || true
-          exit 1
+      # Separate from the gate above: this exercises Traefik and the Cloudflare
+      # edge, which the deploy does not control and the runner may not be able
+      # to reach at all. Worth reporting, never worth failing the deploy on.
+      - name: Probe the public URL
+        continue-on-error: true
+        env:
+          HOST: https://staging.presio.xyz
+        run: |
+          code=$(curl -s -o /tmp/probe -w '%{http_code}' --max-time 15 "$HOST/healthz" || echo "curl-failed")
+          echo "HTTP $code"
+          head -c 300 /tmp/probe 2>/dev/null || true
+          if [ "$code" != "200" ]; then
+            echo "::warning::public probe returned '$code' — staging itself verified healthy on the host"
+          fi
