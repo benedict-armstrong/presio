@@ -11,3 +11,30 @@ permissions:
 jobs:
   tests:
     uses: ./.github/workflows/tests.yml
+
+  # Only when the image could actually have changed. Building it on every PR
+  # would add minutes to changes that cannot affect it; skipping it entirely
+  # meant base image and native-dependency bumps were merged on the strength of
+  # unit tests alone, and first built after landing on main.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            image:
+              - 'deploy/Dockerfile'
+              - 'deploy/smoke-test.sh'
+              - 'server/package*.json'
+              - 'client/package*.json'
+              - '.github/workflows/image.yml'
+              - '.github/workflows/ci.yml'
+
+  image:
+    needs: changes
+    if: needs.changes.outputs.image == 'true'
+    uses: ./.github/workflows/image.yml

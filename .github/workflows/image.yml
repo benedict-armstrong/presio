@@ -1,0 +1,43 @@
+# Builds the app image and proves it works, without publishing anything.
+# Called by ci.yml on pull requests that touch the image, so a base image or
+# native-dependency change is validated before it is merged rather than after.
+#
+# Only the runner's own architecture is built: this is a "does it work" gate,
+# and emulating arm64 under QEMU to run the same assertions would roughly
+# triple the time for no extra signal. The release build in
+# publish-local-image.yml is the one that produces both architectures.
+name: Image
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: presio-local:pr
+          build-args: |
+            APP_VERSION=pr-${{ github.event.pull_request.number || github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The upgrade leg pulls the current release from a public package, which
+      # needs no credentials — so this works on Dependabot PRs too, which get
+      # no repository secrets.
+      - name: Smoke test
+        run: |
+          deploy/smoke-test.sh presio-local:pr \
+            ghcr.io/${{ github.repository_owner }}/presio-local:latest
