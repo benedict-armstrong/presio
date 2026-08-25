@@ -16,6 +16,13 @@ updates:
     directory: /deploy
     schedule:
       interval: monthly
+    ignore:
+      # The Node major is the runtime companies self-host. Moving it changes
+      # the libc, the OpenSSL, and the better-sqlite3 prebuild ABI all at once,
+      # so it is a deliberate, tested upgrade — not a PR that appears one
+      # morning. Patch and minor bumps (security fixes) still come through.
+      - dependency-name: node
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: npm
     directory: /client
@@ -34,6 +41,15 @@ updates:
     groups:
       server-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # Same reasoning as the base image: these two decide whether existing
+      # deployments keep working. better-sqlite3 owns the local-mode database
+      # (and its native ABI), pdfjs-dist owns rendering. Major bumps here are
+      # planned work with the upgrade smoke test as the gate.
+      - dependency-name: better-sqlite3
+        update-types: [version-update:semver-major]
+      - dependency-name: pdfjs-dist
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: npm
     directory: /
