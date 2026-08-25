@@ -15,8 +15,14 @@ name: Deploy staging
 # Host setup is the same as the PR previews (bare clone at ~/presio.git, deploy
 # key, tailnet) — see the notes at the top of preview.yml. The one addition is
 # the stack .env: docker-compose.staging.yml reuses the production Supabase
-# stack, so it needs the same env file the production compose is run with. Its
-# path comes from the STAGING_ENV_FILE repository variable.
+# stack, so it needs the same env file the production compose is run with — the
+# one beside the production compose at ~/projects/presio. Override it with the
+# STAGING_ENV_FILE repository variable if that ever moves.
+#
+# Staging used to be run by hand from a checkout at ~/projects/presio-staging-src.
+# docker-compose.staging.yml pins `name: presio-staging`, so deploying from this
+# workflow's own worktree manages those same containers; that directory can be
+# removed once this has deployed successfully.
 
 on:
   push:
@@ -55,7 +61,7 @@ jobs:
         env:
           SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
           SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
-          ENV_FILE: ${{ vars.STAGING_ENV_FILE || '/home/administrator/presio/.env' }}
+          ENV_FILE: ${{ vars.STAGING_ENV_FILE || '/home/administrator/projects/presio/.env' }}
         run: |
           # Variables expand locally; the heredoc is the remote script.
           ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" bash -se <<EOF

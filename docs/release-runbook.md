@@ -20,7 +20,9 @@ git push origin main:refs/heads/staging
 #    The default GITHUB_TOKEN will not do — tags it pushes do not trigger
 #    other workflows, so a release tag would land and no image would build.
 gh secret set RELEASE_PLEASE_TOKEN
-gh variable set STAGING_ENV_FILE --body /path/on/host/to/.env
+# STAGING_ENV_FILE is optional: deploy-staging.yml defaults to
+#   /home/administrator/projects/presio/.env
+# which is where the production stack lives. Only set it if that moves.
 
 # 4. Cut the first release. The docs already tell people to pin `:1`, so this
 #    should not wait — that tag does not exist until this runs.
