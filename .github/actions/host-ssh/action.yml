@@ -1,0 +1,53 @@
+name: Host SSH
+description: >-
+  Join the tailnet and configure SSH for the deployment host. Shared by the PR
+  preview and staging deploy workflows, which reach the same box the same way.
+
+inputs:
+  tailscale-authkey:
+    description: Ephemeral, reusable Tailscale auth key so the runner can join the tailnet.
+    required: true
+  ssh-key:
+    description: Private deploy key for the host.
+    required: true
+  ssh-host:
+    description: The host's tailnet IP.
+    required: true
+  hostname:
+    description: Name this runner registers on the tailnet under.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Check inputs
+      shell: bash
+      env:
+        TS_KEY: ${{ inputs.tailscale-authkey }}
+        SSH_KEY: ${{ inputs.ssh-key }}
+        SSH_HOST: ${{ inputs.ssh-host }}
+      run: |
+        missing=()
+        [ -z "$TS_KEY" ] && missing+=(TAILSCALE_AUTHKEY)
+        [ -z "$SSH_KEY" ] && missing+=(PREVIEW_SSH_KEY)
+        [ -z "$SSH_HOST" ] && missing+=(PREVIEW_SSH_HOST)
+        if [ ${#missing[@]} -gt 0 ]; then
+          echo "::error::Missing secrets: ${missing[*]} — see the setup notes in .github/workflows/preview.yml"
+          exit 1
+        fi
+
+    - uses: tailscale/github-action@v3
+      with:
+        authkey: ${{ inputs.tailscale-authkey }}
+        hostname: ${{ inputs.hostname }}
+
+    - name: Configure SSH
+      shell: bash
+      env:
+        SSH_KEY: ${{ inputs.ssh-key }}
+        SSH_HOST: ${{ inputs.ssh-host }}
+      run: |
+        mkdir -p ~/.ssh
+        printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts

@@ -1,0 +1,51 @@
+name: Promote to staging
+
+# Every commit that lands on main and passes the suite becomes the staging
+# deployment. The promotion is a fast-forward of the `staging` branch, so what
+# is deployed is always answerable from git, and rolling back is a push rather
+# than an SSH session (see deploy-staging.yml).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-staging
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  promote:
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fast-forward staging to main
+        run: |
+          set -euo pipefail
+          # No --force: a plain push is fast-forward-only, and creates the
+          # branch if it does not exist yet. So if staging has been rolled back
+          # or pushed to directly, this fails loudly instead of silently
+          # discarding that state.
+          git push origin "${{ github.sha }}:refs/heads/staging" || {
+            echo "::error::staging is not a fast-forward of main — it was rolled back or pushed to directly. If that state is finished with, reset it deliberately: git push -f origin main:staging"
+            exit 1
+          }
+
+  deploy:
+    # A push made with GITHUB_TOKEN does not trigger deploy-staging.yml's own
+    # `push` trigger, so the deploy is called explicitly here. Manual rollback
+    # pushes, made with a human token, do fire that trigger.
+    needs: promote
+    uses: ./.github/workflows/deploy-staging.yml
+    secrets: inherit

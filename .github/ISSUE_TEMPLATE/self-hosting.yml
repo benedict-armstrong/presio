@@ -1,0 +1,65 @@
+name: Self-hosting problem
+description: Something is wrong with a Presio deployment you run yourself
+labels: [self-hosting]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For problems with the hosted service at presio.xyz, use a blank issue
+        instead — this form asks for deployment details you won't have.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: >-
+        The `version` field from `curl -s http://<your-host>/healthz`. If it
+        says `dev`, the image was built outside the release workflow — tell us
+        how instead.
+      placeholder: "1.2.3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Deployment
+      options:
+        - Local mode (PRESIO_MODE=local, single container, SQLite)
+        - Full stack (docker-compose.yml, Supabase + Traefik)
+        - Something else
+    validations:
+      required: true
+
+  - type: input
+    id: image
+    attributes:
+      label: Image tag
+      placeholder: "ghcr.io/benedict-armstrong/presio-local:1"
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, what happened instead, and how to reproduce it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Container logs
+      description: >-
+        `docker logs <container>`. For local mode, please include any `[local]`
+        lines — they record schema migrations and are usually the first place an
+        upgrade problem shows up.
+      render: shell
+
+  - type: checkboxes
+    id: upgrade
+    attributes:
+      label: Did this start after an upgrade?
+      options:
+        - label: Yes — and I still have the pre-upgrade `presio.db.bak-v*` file
+        - label: Yes, but the backup file is gone
+        - label: "No"

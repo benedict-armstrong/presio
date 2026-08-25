@@ -1,0 +1,39 @@
+name: Release
+
+# Maintains a standing "chore(main): release X.Y.Z" pull request from the
+# conventional-commit messages on main. Merging it bumps the version in all
+# three package.json files, writes CHANGELOG.md, and pushes the `vX.Y.Z` tag —
+# which is what `publish-local-image.yml` builds `:latest`, `:X`, `:X.Y` and
+# `:X.Y.Z` from. Releasing is therefore one merge.
+#
+# RELEASE_PLEASE_TOKEN must be a fine-grained PAT with contents:write and
+# pull-requests:write on this repository. The default GITHUB_TOKEN cannot be
+# used: tags it pushes do not trigger other workflows, so the release tag would
+# land and no image would ever be built for it.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check token
+        env:
+          TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::RELEASE_PLEASE_TOKEN is not set — see the notes in .github/workflows/release-please.yml"
+            exit 1
+          fi
+
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

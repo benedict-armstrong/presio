@@ -44,6 +44,9 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 concurrency:
   group: preview-${{ github.event.pull_request.number || inputs.pr }}
   cancel-in-progress: true
@@ -61,41 +64,20 @@ jobs:
     permissions:
       pull-requests: write # sticky preview-URL comment
     steps:
-      - name: Check secrets
-        env:
-          SSH_KEY: ${{ secrets.PREVIEW_SSH_KEY }}
-          SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
-          SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
-          TS_KEY: ${{ secrets.TAILSCALE_AUTHKEY }}
-        run: |
-          missing=()
-          [ -z "$SSH_KEY" ] && missing+=(PREVIEW_SSH_KEY)
-          [ -z "$SSH_HOST" ] && missing+=(PREVIEW_SSH_HOST)
-          [ -z "$SSH_USER" ] && missing+=(PREVIEW_SSH_USER)
-          [ -z "$TS_KEY" ] && missing+=(TAILSCALE_AUTHKEY)
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "::error::Missing secrets: ${missing[*]} — see the setup notes in .github/workflows/preview.yml"
-            exit 1
-          fi
-
-      - name: Join tailnet
-        uses: tailscale/github-action@v3
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/host-ssh
         with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          tailscale-authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          ssh-key: ${{ secrets.PREVIEW_SSH_KEY }}
+          ssh-host: ${{ secrets.PREVIEW_SSH_HOST }}
           hostname: presio-ci-${{ github.run_id }}
 
       - name: Deploy preview
         env:
-          SSH_KEY: ${{ secrets.PREVIEW_SSH_KEY }}
           SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
           SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
           PR: ${{ github.event.pull_request.number || inputs.pr }}
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
-
           # Variables expand locally; the heredoc is the remote script.
           ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" bash -se <<EOF
           set -euo pipefail
@@ -157,24 +139,20 @@ jobs:
     if: github.event.action == 'closed'
     runs-on: ubuntu-latest
     steps:
-      - name: Join tailnet
-        uses: tailscale/github-action@v3
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/host-ssh
         with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          tailscale-authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          ssh-key: ${{ secrets.PREVIEW_SSH_KEY }}
+          ssh-host: ${{ secrets.PREVIEW_SSH_HOST }}
           hostname: presio-ci-${{ github.run_id }}
 
       - name: Tear down preview
         env:
-          SSH_KEY: ${{ secrets.PREVIEW_SSH_KEY }}
           SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
           SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
-
           ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" bash -se <<EOF
           set -euo pipefail
           if [ -f "$PREVIEW_DIR/docker-compose.preview.yml" ]; then

@@ -6,21 +6,42 @@ name: Publish local image
 # app image built with no Supabase config baked into the client; PRESIO_MODE=local
 # at runtime is what selects the SQLite/filesystem backend.
 
+#
+# Tag channels:
+#   :latest          the newest *release* — what self-hosters should track
+#   :1, :1.2, :1.2.3 pinned-but-patched channels from `v*` tags
+#   :main            tip of main, unstable; no upgrade guarantees
+#   :sha-<short>     immutable, for pinning an exact build
+#
+# `latest` deliberately does NOT follow main: companies self-host this image,
+# and a floating tag that moves with every merge is not something anyone can
+# run in production.
+
 on:
   push:
     branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/presio-local
 
 jobs:
+  # Publishing used to race CI off the same push, so an image could ship from a
+  # commit whose tests had already failed. Now the suite is a prerequisite.
+  tests:
+    uses: ./.github/workflows/tests.yml
+
   publish:
+    needs: tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      id-token: write # keyless signing / provenance attestations
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
@@ -36,10 +57,12 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=ref,event=branch
+            type=sha,prefix=sha-
 
       # Build the runner's native arch first and actually boot it. better-sqlite3
       # is a native module, so "the image built" says nothing about whether it
@@ -52,6 +75,8 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: presio-local:smoke
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -74,7 +99,7 @@ jobs:
             sleep 2
           done
 
-          curl -fsS http://localhost:3001/healthz
+          curl -fsS http://localhost:3001/healthz | jq -re .version
           curl -fsS http://localhost:3001/ | grep -q "<title>" || { echo "::error::SPA not served"; exit 1; }
 
           # Exercise the SQLite + filesystem backend end to end: a session row is
@@ -92,6 +117,58 @@ jobs:
           docker exec smoke test -f /data/presio.db || { echo "::error::SQLite DB not created"; exit 1; }
           docker rm -f smoke
 
+      # The smoke test above only ever exercises a brand-new database. What
+      # actually breaks self-hosters is an *upgrade*: a released image is
+      # already running against a /data volume, and the new one has to adopt it
+      # without losing sessions (see the migration sequence in
+      # server/local/db.ts). So boot the current release, leave data behind,
+      # then boot this build on the same volume and read that data back.
+      - name: Upgrade smoke test
+        run: |
+          set -euo pipefail
+          PREV=${{ env.IMAGE }}:latest
+          if ! docker pull -q "$PREV"; then
+            echo "::notice::no published $PREV yet — skipping the upgrade test"
+            exit 0
+          fi
+
+          docker volume create presio-upgrade >/dev/null
+          run_on_volume() {
+            docker run -d --name "$1" -p 3002:3001 -v presio-upgrade:/data \
+              -e PRESIO_MODE=local -e LOCAL_DATA_DIR=/data -e TRUST_PROXY=false "$2"
+            for i in $(seq 1 60); do
+              if curl -fsS http://localhost:3002/healthz >/dev/null 2>&1; then return 0; fi
+              status=$(docker inspect -f '{{.State.Status}}' "$1")
+              if [ "$status" != "running" ]; then
+                echo "::error::$1 is '$status' before serving traffic"
+                docker logs "$1" || true
+                exit 1
+              fi
+              sleep 2
+            done
+            echo "::error::$1 never became healthy"
+            docker logs "$1" || true
+            exit 1
+          }
+
+          # Write a session with the released image.
+          run_on_volume old "$PREV"
+          resp=$(curl -fsS -F file=@example/example.pdf http://localhost:3002/api/present)
+          id=$(echo "$resp" | jq -re .id)
+          token=$(echo "$resp" | jq -re .url | sed 's/.*[?&]t=//')
+          docker rm -f old >/dev/null
+
+          # Read it back with this build, after whatever migrations it applies.
+          run_on_volume new presio-local:smoke
+          docker logs new 2>&1 | grep -i "local\]" || true
+
+          curl -fsS -o upgraded.pdf "http://localhost:3002/api/sessions/$id/handoff?t=$token"
+          [ -s upgraded.pdf ] || { echo "::error::session did not survive the upgrade"; exit 1; }
+          echo "session $id survived the upgrade"
+
+          docker rm -f new >/dev/null
+          docker volume rm presio-upgrade >/dev/null
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -99,7 +176,14 @@ jobs:
           file: deploy/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Ship a signed build record and an SBOM with the image, so anyone
+          # self-hosting it can verify it was built from this repo by this
+          # workflow and see what is inside it before deploying.
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max

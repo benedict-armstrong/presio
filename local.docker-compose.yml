@@ -31,8 +31,13 @@ services:
     # Published by .github/workflows/publish-local-image.yml (linux/amd64 +
     # linux/arm64). Compose pulls this when it isn't already present locally and
     # falls back to `build:` below, so this file works with or without a
-    # checkout. Pin a tag instead of :latest if you'd rather upgrade explicitly.
-    image: ghcr.io/benedict-armstrong/presio-local:latest
+    # checkout.
+    #
+    # Pinned to a major line: you get bug fixes and new features on `docker
+    # compose pull`, but never an unreviewed breaking change. Other channels —
+    # `:1.2.3` to pin exactly, `:latest` for the newest release whatever its
+    # major, `:main` for the unstable tip of the default branch.
+    image: ghcr.io/benedict-armstrong/presio-local:1
     # Explicit so `up` pulls rather than silently building from source — with
     # both image: and build: set, Compose's default is version-dependent, and a
     # copy of this file downloaded on its own has no build context to fall back

@@ -18,6 +18,7 @@ import { registerCheckRoute } from "./routes/check.js";
 import { registerAgentDocRoutes } from "./routes/agentDocs.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
 import type { SocketState } from "./socket.js";
+import { APP_VERSION } from "./version.js";
 
 export interface AppDeps {
   supabase: SupabaseClient;
@@ -110,7 +111,10 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   // Liveness probe for uptime monitoring (Uptime Kuma). Outside /api so it's
   // not rate-limited, and intentionally cheap — it doesn't touch the DB.
   app.get("/healthz", (_req, res) => {
-    res.json({ status: "ok", uptime: process.uptime() });
+    // `version` is here rather than on its own route so that the one URL
+    // people already curl when a self-hosted deployment misbehaves also
+    // answers "which build is this?".
+    res.json({ status: "ok", uptime: process.uptime(), version: APP_VERSION });
   });
 
   // Live agent discovery docs (host-aware). Before static/SPA so they aren't

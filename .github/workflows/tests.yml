@@ -1,0 +1,71 @@
+# The actual test suite, callable from other workflows. `ci.yml` runs it on
+# pushes and PRs; `publish-local-image.yml` runs it as a prerequisite so an
+# image can never be published from a commit whose tests failed.
+name: Tests
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  client:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      - run: npx tsc -b --noEmit
+      # Lint is enforced per-changed-file by the prek pre-commit hook, not as a
+      # full-repo CI gate (the existing codebase has pre-existing lint findings).
+      - run: npm test
+
+  server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      # The gitignored client/.env isn't available in CI; without a Supabase
+      # URL the login UI is compiled out entirely (see lib/authMode.ts). A
+      # placeholder enables the UI for e2e without talking to a real backend
+      # — rendering makes no network requests with it. Set at job level
+      # because Playwright's webServer command rebuilds the client itself.
+      VITE_SUPABASE_URL: https://e2e-placeholder.supabase.co
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: |
+          npm ci
+          (cd client && npm ci)
+          (cd server && npm ci)
+      - name: Build client
+        run: cd client && npm run build
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run E2E tests
+        run: npm run test:e2e

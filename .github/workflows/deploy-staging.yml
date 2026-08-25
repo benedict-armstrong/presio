@@ -1,0 +1,99 @@
+name: Deploy staging
+
+# Deploys the `staging` branch to https://staging.presio.xyz, replacing the
+# manual `docker compose -f docker-compose.staging.yml up -d --build` that used
+# to be run on the host by hand.
+#
+# `staging` is a pointer at a known-good commit, not a place to develop:
+# `promote-staging.yml` fast-forwards it to `main` after the test suite passes,
+# and calls this workflow. Rolling back is therefore a git operation —
+#
+#   git push -f origin <older-sha>:staging
+#
+# — which lands here through the `push` trigger below and redeploys that commit.
+#
+# Host setup is the same as the PR previews (bare clone at ~/presio.git, deploy
+# key, tailnet) — see the notes at the top of preview.yml. The one addition is
+# the stack .env: docker-compose.staging.yml reuses the production Supabase
+# stack, so it needs the same env file the production compose is run with. Its
+# path comes from the STAGING_ENV_FILE repository variable.
+
+on:
+  push:
+    branches: [staging]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never let two deploys touch the same worktree at once; the newest wins.
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  REPO_DIR: /home/administrator/presio.git
+  WORKTREE: /home/administrator/presio-staging
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.presio.xyz
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/host-ssh
+        with:
+          tailscale-authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          ssh-key: ${{ secrets.PREVIEW_SSH_KEY }}
+          ssh-host: ${{ secrets.PREVIEW_SSH_HOST }}
+          hostname: presio-ci-${{ github.run_id }}
+
+      - name: Deploy
+        env:
+          SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
+          SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
+          ENV_FILE: ${{ vars.STAGING_ENV_FILE || '/home/administrator/presio/.env' }}
+        run: |
+          # Variables expand locally; the heredoc is the remote script.
+          ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" bash -se <<EOF
+          set -euo pipefail
+
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "::error::stack env file not found at $ENV_FILE — set the STAGING_ENV_FILE repository variable to its real path"
+            exit 1
+          fi
+
+          git -C "$REPO_DIR" fetch --force origin 'refs/heads/staging:refs/remotes/origin/staging'
+
+          # Recreate the worktree each time rather than pulling into it: a
+          # rollback moves `staging` backwards, and a detached re-add lands on
+          # the right commit whichever direction the branch moved.
+          git -C "$REPO_DIR" worktree remove --force "$WORKTREE" 2>/dev/null || true
+          git -C "$REPO_DIR" worktree prune
+          git -C "$REPO_DIR" worktree add --detach "$WORKTREE" remotes/origin/staging
+
+          cd "$WORKTREE"
+          echo "deploying \$(git rev-parse --short HEAD)"
+          docker compose --env-file "$ENV_FILE" -f docker-compose.staging.yml up -d --build
+          docker image prune -f >/dev/null
+          EOF
+
+      - name: Verify
+        env:
+          HOST: https://staging.presio.xyz
+        run: |
+          set -euo pipefail
+          # The container may still be starting when compose returns; give the
+          # healthcheck a window before calling the deploy bad.
+          for i in $(seq 1 30); do
+            if curl -fsS "$HOST/healthz" >/dev/null 2>&1; then
+              echo "staging is up: $(curl -fsS "$HOST/healthz")"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::staging did not answer /healthz after the deploy"
+          exit 1

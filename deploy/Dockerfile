@@ -8,7 +8,9 @@
 # Pinned to the build host's own architecture: the output is just JS/CSS, so
 # there is nothing arch-specific to emulate. Without this, the arm64 leg of the
 # multi-arch release build runs Vite under QEMU for no benefit.
-FROM --platform=$BUILDPLATFORM node:20-alpine AS client-build
+# Digest-pinned so a rebuild of an old release reproduces it; Dependabot
+# (.github/dependabot.yml) proposes the bumps.
+FROM --platform=$BUILDPLATFORM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS client-build
 WORKDIR /app/client
 COPY client/package*.json ./
 RUN npm ci
@@ -23,7 +25,7 @@ RUN npm run build
 
 # Stage 2 runs the server, which serves the API, the websocket, and the built
 # client from ../client/dist (see server/index.ts).
-FROM node:20-alpine
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
 WORKDIR /app/server
 COPY server/package*.json ./
 # better-sqlite3 (local mode's storage backend) is a native module with no
@@ -35,5 +37,19 @@ RUN apk add --no-cache --virtual .build-deps python3 make g++ \
   && apk del .build-deps
 COPY server/ .
 COPY --from=client-build /app/client/dist /app/client/dist
+
+# Baked in so a running container can say which build it is (served on
+# /healthz). Defaults to "dev" for images built outside the release workflow.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 EXPOSE 3001
+
+# Lets `restart:` policies and orchestrators react to a wedged process rather
+# than only to one that has exited. Uses busybox wget (already in the base
+# image) against the cheap liveness probe in server/app.ts; start-period covers
+# first boot, where local mode creates and migrates the SQLite database.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:${PORT:-3001}/healthz || exit 1
+
 CMD ["npm", "start"]

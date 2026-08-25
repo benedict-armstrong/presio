@@ -55,8 +55,11 @@ PDFs on your own machine or LAN — nothing needs building:
 ```bash
 docker run -d -p 3001:3001 -e PRESIO_MODE=local -e LOCAL_DATA_DIR=/data \
   -e TRUST_PROXY=false -v presio-data:/data \
-  ghcr.io/benedict-armstrong/presio-local:latest
+  ghcr.io/benedict-armstrong/presio-local:1
 ```
+
+The `:1` tag tracks the current major release line — fixes and features, no
+breaking changes. See [Versions and upgrading](deploy/README.md#versions-and-upgrading).
 
 See ["Running fully local / offline"](deploy/README.md#running-fully-local--offline)
 for what this mode does and doesn't include.

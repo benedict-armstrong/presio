@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,24 @@ import { CodeBlock } from "@/components/CodeBlock";
 const PACKAGE_URL = "https://github.com/benedict-armstrong/presio-typst-package";
 
 export default function About() {
+  // Which build is serving this page. Matters mostly for self-hosted
+  // deployments, where a bug report is not actionable without it — so it is
+  // shown to the user rather than only being available on /healthz. Left
+  // hidden if the probe fails or reports an unversioned build.
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/healthz")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d?.version && d.version !== "dev") setVersion(d.version);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
       <Card className="w-full max-w-3xl">
@@ -26,6 +45,10 @@ export default function About() {
               GitHub
             </a>
           </div>
+
+          {version && (
+            <p className="text-xs text-muted-foreground text-right">v{version}</p>
+          )}
 
           <div className="rounded-md border border-amber-500/10 bg-amber-500/20 px-3 py-2 text-sm text-amber-900 dark:text-amber-500">
             🚧 Presio is under active development

@@ -122,6 +122,68 @@ resolves, Traefik fetches certificates and serves:
 
 Watch certificate issuance / routing with `docker compose -p proxy logs -f traefik`.
 
+## Versions and upgrading
+
+Releases are `v*` git tags, published as container tags on
+`ghcr.io/benedict-armstrong/presio-local`:
+
+| Tag | Moves when | Use it for |
+| --- | --- | --- |
+| `:1` | any 1.x release | **Production.** Fixes and features, no breaking changes. |
+| `:1.2` | any 1.2.x patch | Production, if you'd rather adopt minor releases deliberately. |
+| `:1.2.3` | never | Reproducible deploys; you upgrade by editing the tag. |
+| `:latest` | any release | Trying it out; the newest release regardless of major. |
+| `:main` | every merge to `main` | Testing unreleased work. **Not for production** — no upgrade guarantees. |
+| `:sha-<short>` | never | Pinning one exact build. |
+
+Every published image carries a signed build provenance attestation and an
+SBOM. Verify a build really came from this repository with:
+
+```bash
+gh attestation verify --owner benedict-armstrong \
+  oci://ghcr.io/benedict-armstrong/presio-local:1
+```
+
+### Upgrading
+
+Data migrates **forward only**. Local mode's SQLite schema is versioned
+(`PRAGMA user_version`, see `server/local/db.ts`) and the container applies any
+outstanding migrations on start, copying the database to
+`presio.db.bak-v<n>` in the data directory first. Starting an **older** image
+against a newer data directory is refused rather than attempted, so roll
+forward, don't roll back.
+
+```bash
+docker compose -f local.docker-compose.yml pull
+docker compose -f local.docker-compose.yml up -d
+docker compose -f local.docker-compose.yml logs presio | grep '\[local\]'
+curl -fsS http://localhost:3001/healthz     # {"status":"ok", ..., "version":"1.2.3"}
+```
+
+Each release is tested for exactly this: CI boots the current release against a
+data volume, writes a session, then boots the new build on the same volume and
+reads it back.
+
+### Backups
+
+Everything local mode owns lives under `LOCAL_DATA_DIR` — the SQLite database
+and the uploaded PDFs. One volume is the whole backup:
+
+```bash
+docker run --rm -v presio-data:/data -v "$PWD:/backup" alpine \
+  tar czf /backup/presio-data.tgz -C /data .
+```
+
+Restore by stopping the container and untarring back into the volume. For the
+full self-hosted stack, the equivalent state is Postgres (`docker compose exec
+db pg_dump`) plus the MinIO volume — the `presio` container itself is
+stateless.
+
+### Reporting a problem
+
+Include the output of `/healthz` (it reports the running version) and, for
+local mode, the `[local]` lines from the container log.
+
 ## Adding more apps to the same host
 
 You do **not** add a second proxy. Give the new app's container a route on the
@@ -187,7 +249,7 @@ no `.env`, no checkout:
 docker run -d --name presio -p 3001:3001 \
   -e PRESIO_MODE=local -e LOCAL_DATA_DIR=/data -e TRUST_PROXY=false \
   -v presio-data:/data \
-  ghcr.io/benedict-armstrong/presio-local:latest
+  ghcr.io/benedict-armstrong/presio-local:1
 open http://localhost:3001
 ```
 
@@ -198,9 +260,10 @@ curl -fsSLO https://raw.githubusercontent.com/benedict-armstrong/presio/main/loc
 docker compose -f local.docker-compose.yml up -d
 ```
 
-The image is published by `.github/workflows/publish-local-image.yml` on every
-push to `main` (`:latest`) and every `v*` tag. From a checkout, `docker compose
--f local.docker-compose.yml build` builds the same image from source instead.
+The image is published by `.github/workflows/publish-local-image.yml`; see
+[Versions and upgrading](#versions-and-upgrading) for which tag to run. From a
+checkout, `docker compose -f local.docker-compose.yml build` builds the same
+image from source instead.
 
 Set `PRESIO_MODE=local` and the server swaps Supabase for a bundled SQLite
 database and filesystem storage under `/data` (see `server/local/`) instead of

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "include-component-in-tag": false,
+  "packages": {
+    ".": {
+      "package-name": "presio",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        { "type": "json", "path": "client/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "server/package.json", "jsonpath": "$.version" }
+      ]
+    }
+  },
+  "bootstrap-sha": "75740d10901b3b6636a3481e85c54b5d9202517e"
+}
