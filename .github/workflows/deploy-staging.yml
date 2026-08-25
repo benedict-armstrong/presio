@@ -64,6 +64,9 @@ jobs:
           ENV_FILE: ${{ vars.STAGING_ENV_FILE || '/home/administrator/projects/presio/.env' }}
         run: |
           # Variables expand locally; the heredoc is the remote script.
+          # The delimiter is unquoted so $VARs above expand here, which also
+          # means $(...) and backticks run ON THE RUNNER — escape them, and
+          # keep backticks out of the comments below.
           ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SSH_HOST" bash -se <<EOF
           set -euo pipefail
 
@@ -75,8 +78,8 @@ jobs:
           git -C "$REPO_DIR" fetch --force origin 'refs/heads/staging:refs/remotes/origin/staging'
 
           # Recreate the worktree each time rather than pulling into it: a
-          # rollback moves `staging` backwards, and a detached re-add lands on
-          # the right commit whichever direction the branch moved.
+          # rollback moves the staging branch backwards, and a detached
+          # re-add lands on the right commit whichever direction it moved.
           git -C "$REPO_DIR" worktree remove --force "$WORKTREE" 2>/dev/null || true
           git -C "$REPO_DIR" worktree prune
           git -C "$REPO_DIR" worktree add --detach "$WORKTREE" remotes/origin/staging
