@@ -3,7 +3,6 @@ import fs from "fs";
 import * as Sentry from "@sentry/node";
 import cors from "cors";
 import helmet from "helmet";
-import rateLimit from "express-rate-limit";
 import path from "path";
 import { fileURLToPath } from "url";
 import type { Server } from "socket.io";
@@ -30,11 +29,12 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   const app = express();
 
   // Exactly one reverse-proxy hop (Traefik) sits in front in production, so
-  // trust one level of X-Forwarded-For. Without this every request appears to
-  // come from the proxy's IP and the rate limiter throttles all users as one;
-  // trusting more hops would let clients spoof their IP via the header. Local
-  // mode has no proxy in front, so set TRUST_PROXY=false there — otherwise an
-  // unproxied client could spoof its rate-limit IP via the header itself.
+  // trust one level of X-Forwarded-*. This is what makes `req.protocol` report
+  // the scheme the *browser* used rather than the plain HTTP of the last hop —
+  // baseUrl() builds handoff links and canonical tags from it, so without this
+  // every generated link would come out `http://`. Trusting more hops would let
+  // a client dictate those headers itself. Local mode has no proxy in front, so
+  // set TRUST_PROXY=false there.
   app.set("trust proxy", process.env.TRUST_PROXY === "false" ? false : 1);
 
   const allowedOrigins = getAllowedOrigins();
@@ -67,22 +67,23 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   );
   app.use(cors({ origin: corsOrigin }));
 
-  // Throttle the JSON API to blunt brute-force (passphrase auth) and abuse.
-  // Generous enough not to interfere with normal presenter/viewer flows — note
-  // that live presenting (slide changes, laser, drawing) runs over Socket.IO,
-  // not HTTP, so none of it is counted here; see socket.ts for that side.
+  // There is deliberately no HTTP rate limiter here. Rate limiting belongs at
+  // the edge: the app used to key one on `req.ip`, but with Cloudflare and then
+  // Traefik in front, that address is the Cloudflare edge — so every visitor
+  // behind a given edge shared one budget and a single busy user could throttle
+  // strangers. The real client address only ever arrives in `Cf-Connecting-Ip`,
+  // which is an ordinary spoofable header, so trusting it here would only be
+  // sound because the origin refuses non-Cloudflare traffic — i.e. the edge is
+  // already the enforcement point. Limiting there instead of here is both
+  // correct per-visitor and one moving part fewer.
   //
-  // Mounted above the body parsers on purpose: /mcp accepts a 70mb body, and
-  // parsing before throttling would buffer all of it into memory for a request
-  // that is about to be rejected anyway.
-  //
-  // Separate instances, so /api and /mcp get separate budgets. A single shared
-  // instance meant a presenter's ordinary API traffic could exhaust the quota
-  // for that IP's agent calls (and vice versa) — one busy path locked out the
-  // other even though neither was close to abusive on its own.
-  const limiterOpts = { windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false } as const;
-  app.use("/api", rateLimit({ ...limiterOpts }));
-  app.use("/mcp", rateLimit({ ...limiterOpts }));
+  // Deployments that do NOT sit behind Cloudflare (self-hosted per
+  // deploy/README.md, or PRESIO_MODE=local) therefore have no HTTP rate
+  // limiting of their own — put it on whatever proxy or CDN fronts them.
+  // Note this is not brute-force protection either way: the shared-control
+  // passphrase is 8 characters over a 32-symbol alphabet (~2^40), and live
+  // presenting (slide changes, laser, drawing) runs over Socket.IO rather than
+  // HTTP, so it never passed through the limiter at all — see socket.ts.
 
   // The MCP tools (present_pdf / check_pdf) take the PDF base64-encoded inside
   // the JSON-RPC body, so /mcp needs a body limit in the same league as the
@@ -108,8 +109,9 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
     res.status(status).json({ error: message });
   });
 
-  // Liveness probe for uptime monitoring (Uptime Kuma). Outside /api so it's
-  // not rate-limited, and intentionally cheap — it doesn't touch the DB.
+  // Liveness probe for uptime monitoring (Uptime Kuma). Outside /api so a probe
+  // never counts against anything the edge meters, and intentionally cheap — it
+  // doesn't touch the DB.
   app.get("/healthz", (_req, res) => {
     // `version` is here rather than on its own route so that the one URL
     // people already curl when a self-hosted deployment misbehaves also

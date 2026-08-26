@@ -122,6 +122,22 @@ resolves, Traefik fetches certificates and serves:
 
 Watch certificate issuance / routing with `docker compose -p proxy logs -f traefik`.
 
+## Rate limiting
+
+The app does **no HTTP rate limiting of its own** — that belongs on whatever
+proxy or CDN fronts it, which is the only layer that can see the real client
+address. Behind two hops (a CDN, then Traefik) the address the app observes is
+the CDN's edge, so a limiter here would put every visitor behind a given edge
+into one shared bucket; the real address arrives only in a vendor header such
+as `Cf-Connecting-Ip`, which is forgeable by anyone able to reach the origin
+directly. presio.xyz limits at the Cloudflare edge and refuses non-Cloudflare
+traffic at the origin. If you self-host without a CDN in front, add a limit on
+your own proxy — Traefik's own `ratelimit` middleware is enough.
+
+Independent of this, `join_session` over Socket.IO is throttled per connection
+in `server/socket.ts`, because its reply reveals whether a 6-character join code
+exists. That throttle is part of the app and needs no configuration.
+
 ## Versions and upgrading
 
 Releases are `v*` git tags, published as container tags on
