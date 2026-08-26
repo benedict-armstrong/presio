@@ -102,6 +102,10 @@ jobs:
           # re-add lands on the right commit whichever direction it moved.
           git -C "$REPO_DIR" worktree remove --force "$WORKTREE" 2>/dev/null || true
           git -C "$REPO_DIR" worktree prune
+          # Belt-and-braces: a directory left behind by a crashed or
+          # overlapping run (not a registered worktree, so the remove above
+          # is a no-op) would otherwise make `add` fail with "already exists".
+          rm -rf "$WORKTREE"
           git -C "$REPO_DIR" worktree add --detach "$WORKTREE" remotes/origin/staging
 
           cd "$WORKTREE"

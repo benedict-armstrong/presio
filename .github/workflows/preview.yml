@@ -226,6 +226,10 @@ jobs:
 
           git -C "$REPO_DIR" worktree remove --force "$PREVIEW_DIR/pr-$PR" 2>/dev/null || true
           git -C "$REPO_DIR" worktree prune
+          # Belt-and-braces: a directory left behind by a crashed or
+          # overlapping run (not a registered worktree, so the remove above
+          # is a no-op) would otherwise make `add` fail with "already exists".
+          rm -rf "$PREVIEW_DIR/pr-$PR"
           git -C "$REPO_DIR" worktree add --detach "$PREVIEW_DIR/pr-$PR" "remotes/origin/pr-$PR"
 
           # Always take the compose file from main, never from the PR: the PR

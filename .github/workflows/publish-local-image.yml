@@ -42,6 +42,7 @@ jobs:
       contents: read
       packages: write
       id-token: write # keyless signing / provenance attestations
+      attestations: write # persist the provenance attestation to GitHub's store
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
