@@ -26,9 +26,12 @@ name: PR preview
 #      SSL doesn't cover two-level names; an orange-clouded wildcard A record
 #      *.presio.xyz → the host routes them, and the proxy serves a Cloudflare
 #      Origin CA default certificate (*.presio.xyz) back to the edge — no ACME.
-#   2. Bare clone + previews dir + deploy keypair (all under $HOME, no sudo):
-#        git clone --bare https://github.com/benedict-armstrong/presio.git ~/presio.git
-#        mkdir -p ~/presio-previews
+#   2. Bare clone + previews dir + deploy keypair. REPO_DIR / PREVIEW_DIR
+#      have no default — set them as repo variables (Settings → Secrets and
+#      variables → Actions → Variables) or the workflow fails loudly before
+#      it touches the host:
+#        git clone --bare https://github.com/benedict-armstrong/presio.git "$REPO_DIR"
+#        mkdir -p "$PREVIEW_DIR"
 #        ssh-keygen -t ed25519 -f ~/presio-preview-key -N '' -C presio-previews
 #      authorized_keys entry is restricted to tailnet source IPs:
 #        from="100.64.0.0/10,fd7a:115c:a1e0::/48",no-agent-forwarding,...
@@ -42,7 +45,7 @@ name: PR preview
 #
 # If a `closed` event is ever missed (workflow disabled, Actions outage), the
 # leftover preview can be dropped by hand:
-#   docker compose -p presio-pr-<n> -f ~/presio-previews/docker-compose.preview.yml down -v
+#   docker compose -p presio-pr-<n> -f "$PREVIEW_DIR/docker-compose.preview.yml" down -v
 
 on:
   pull_request:
@@ -68,8 +71,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  REPO_DIR: /home/administrator/presio.git # bare clone the workflow fetches PR refs into
-  PREVIEW_DIR: /home/administrator/presio-previews # compose file copy + per-PR worktrees
+  # Repo variables (Settings → Secrets and variables → Actions → Variables),
+  # no default: a host-side path change is a variable edit, not a code
+  # change, and an unset variable must fail loudly rather than silently
+  # resolve to an empty string.
+  REPO_DIR: ${{ vars.REPO_DIR }} # bare clone the workflow fetches PR refs into
+  PREVIEW_DIR: ${{ vars.PREVIEW_DIR }} # compose file copy + per-PR worktrees
   PREVIEW_LABEL: preview
 
 jobs:
@@ -188,6 +195,15 @@ jobs:
     permissions:
       pull-requests: write # sticky preview-URL comment
     steps:
+      - name: Check required repo variables
+        run: |
+          missing=()
+          [ -z "$REPO_DIR" ] && missing+=(REPO_DIR)
+          [ -z "$PREVIEW_DIR" ] && missing+=(PREVIEW_DIR)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing repo variables: ${missing[*]} — set them under Settings → Secrets and variables → Actions → Variables"
+            exit 1
+          fi
       - uses: actions/checkout@v7
       - uses: ./.github/actions/host-ssh
         with:
@@ -269,6 +285,15 @@ jobs:
     permissions:
       pull-requests: write # update the sticky comment
     steps:
+      - name: Check required repo variables
+        run: |
+          missing=()
+          [ -z "$REPO_DIR" ] && missing+=(REPO_DIR)
+          [ -z "$PREVIEW_DIR" ] && missing+=(PREVIEW_DIR)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing repo variables: ${missing[*]} — set them under Settings → Secrets and variables → Actions → Variables"
+            exit 1
+          fi
       - uses: actions/checkout@v7
       - uses: ./.github/actions/host-ssh
         with:

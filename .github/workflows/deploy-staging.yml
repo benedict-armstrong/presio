@@ -12,12 +12,13 @@ name: Deploy staging
 #
 # — which lands here through the `push` trigger below and redeploys that commit.
 #
-# Host setup is the same as the PR previews (bare clone at ~/presio.git, deploy
-# key, tailnet) — see the notes at the top of preview.yml. The one addition is
-# the stack .env: docker-compose.staging.yml reuses the production Supabase
-# stack, so it needs the same env file the production compose is run with — the
-# one beside the production compose at ~/projects/presio. Override it with the
-# STAGING_ENV_FILE repository variable if that ever moves.
+# Host setup is the same as the PR previews (bare clone, deploy key, tailnet)
+# — see the notes at the top of preview.yml. REPO_DIR and WORKTREE below are
+# overridable via repo variables, same as preview.yml's REPO_DIR/PREVIEW_DIR.
+# The one addition is the stack .env: docker-compose.staging.yml reuses the
+# production Supabase stack, so it needs the same env file the production
+# compose is run with. Override it with the STAGING_ENV_FILE repository
+# variable if that ever moves.
 #
 # Staging used to be run by hand from a checkout at ~/projects/presio-staging-src.
 # docker-compose.staging.yml pins `name: presio-staging`, so deploying from this
@@ -39,8 +40,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  REPO_DIR: /home/administrator/presio.git
-  WORKTREE: /home/administrator/presio-staging
+  # No default: an unset repo variable must fail the run loudly rather than
+  # silently resolve to an empty string. Set REPO_DIR / STAGING_WORKTREE
+  # under Settings → Secrets and variables → Actions → Variables.
+  REPO_DIR: ${{ vars.REPO_DIR }}
+  WORKTREE: ${{ vars.STAGING_WORKTREE }}
 
 jobs:
   deploy:
@@ -49,6 +53,15 @@ jobs:
       name: staging
       url: https://staging.presio.xyz
     steps:
+      - name: Check required repo variables
+        run: |
+          missing=()
+          [ -z "$REPO_DIR" ] && missing+=(REPO_DIR)
+          [ -z "$WORKTREE" ] && missing+=(STAGING_WORKTREE)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing repo variables: ${missing[*]} — set them under Settings → Secrets and variables → Actions → Variables"
+            exit 1
+          fi
       - uses: actions/checkout@v7
       - uses: ./.github/actions/host-ssh
         with:
