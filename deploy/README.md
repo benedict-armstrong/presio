@@ -122,6 +122,29 @@ resolves, Traefik fetches certificates and serves:
 
 Watch certificate issuance / routing with `docker compose -p proxy logs -f traefik`.
 
+## What sits in front of the app (production)
+
+Two hops, and the count matters — it is what `trust proxy` is set to:
+
+```
+visitor ──▶ Cloudflare edge ──▶ Traefik ──▶ presio:3001
+                                └── app.set("trust proxy", 1) counts from here
+```
+
+Traefik runs without `forwardedHeaders.trustedIPs`, so it **overwrites**
+`X-Forwarded-For` with its own peer rather than appending to Cloudflare's. The
+app therefore sees the Cloudflare edge as `req.ip`, and raising the hop count
+would not change that — the visitor's real address survives only in
+`Cf-Connecting-Ip`. `trust proxy` is kept for `req.protocol`, which `baseUrl()`
+needs so generated links come out `https://`.
+
+Both Traefik entrypoints refuse any source outside Cloudflare's published
+ranges (`proxy/certs/dynamic/cfonly.yml`, applied as an entrypoint-default
+middleware so every router is covered), and the host firewall is configured to
+the same effect. That is what makes `Cf-Connecting-Ip` trustworthy at the edge:
+it is an ordinary header, so it is only meaningful while the edge is
+unavoidable.
+
 ## Rate limiting
 
 The app does **no HTTP rate limiting of its own** — that belongs on whatever
