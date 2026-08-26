@@ -114,7 +114,7 @@ jobs:
           # Baked into the image so /healthz reports the deployed commit, which
           # is what the verify step below waits for.
           APP_VERSION="staging-\$SHA" \
-            docker compose --env-file "$ENV_FILE" -f docker-compose.staging.yml up -d --build
+            docker compose --env-file "$ENV_FILE" -f docker-compose.staging.yml up -d --build --remove-orphans
           docker image prune -f >/dev/null
           EOF
 

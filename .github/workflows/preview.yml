@@ -45,7 +45,7 @@ name: PR preview
 #
 # If a `closed` event is ever missed (workflow disabled, Actions outage), the
 # leftover preview can be dropped by hand:
-#   docker compose -p presio-pr-<n> -f "$PREVIEW_DIR/docker-compose.preview.yml" down -v
+#   docker compose -p presio-pr-<n> -f "$PREVIEW_DIR/docker-compose.preview.yml" down -v --rmi local
 
 on:
   pull_request:
@@ -246,7 +246,7 @@ jobs:
 
           cd "$PREVIEW_DIR"
           BUILD_CONTEXT="$PREVIEW_DIR/pr-$PR" PR_NUMBER="$PR" \
-            docker compose -p "presio-pr-$PR" -f docker-compose.preview.yml up -d --build
+            docker compose -p "presio-pr-$PR" -f docker-compose.preview.yml up -d --build --remove-orphans
           docker image prune -f >/dev/null
           EOF
 
@@ -316,11 +316,15 @@ jobs:
           set -euo pipefail
           if [ -f "$PREVIEW_DIR/docker-compose.preview.yml" ]; then
             cd "$PREVIEW_DIR"
+            # --rmi local drops the image compose built for this PR too —
+            # without it, every closed PR leaves a several-hundred-MB image
+            # behind forever (down only touches containers/networks/volumes).
             PR_NUMBER="$PR" docker compose -p "presio-pr-$PR" \
-              -f docker-compose.preview.yml down -v --remove-orphans || true
+              -f docker-compose.preview.yml down -v --remove-orphans --rmi local || true
           else
             docker rm -f "presio-pr-$PR-preview-1" 2>/dev/null || true
             docker volume rm "presio-pr-${PR}_data" 2>/dev/null || true
+            docker rmi "presio-pr-$PR-preview" 2>/dev/null || true
           fi
           git -C "$REPO_DIR" worktree remove --force "$PREVIEW_DIR/pr-$PR" 2>/dev/null || true
           git -C "$REPO_DIR" worktree prune
