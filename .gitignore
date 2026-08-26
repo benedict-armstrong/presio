@@ -1,4 +1,5 @@
 .env
+.env.staging
 node_modules/
 
 # Supabase Studio saves ad-hoc SQL queries into its mounted volume; they're

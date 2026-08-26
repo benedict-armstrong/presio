@@ -1,0 +1,421 @@
+# A second, fully separate self-hosted Supabase stack dedicated to staging.
+#
+# Why this exists: docker-compose.staging.yml (the app-only staging compose)
+# used to point at *production's* Supabase/Postgres, so "staging" isolated
+# the app binary but not the database. A bad dbschema.sql change had nowhere
+# to fail except live prod data. This file gives staging its own Postgres,
+# Auth, Storage, Kong, etc. — trimmed to what deploy/README.md's "Trimming
+# unused services" section says Presio actually needs (drops realtime,
+# functions/edge, and the supavisor pooler).
+#
+# Deploy-staging.yml brings this up (own -p, see below) BEFORE building the
+# app, and checks presio-db-init's exit code: a broken migration fails here,
+# against throwaway staging data, and the deploy stops before the app step
+# and long before prod ever sees it.
+#
+#   docker compose -p presio-staging-db --env-file <env> \
+#     -f docker-compose.staging-supabase.yml up -d --wait
+#
+# -p is mandatory, not cosmetic — see the note on the equivalent line in
+# docker-compose.staging.yml (outage 2026-08-26): never invoke this file with
+# an --env-file that might carry a COMPOSE_PROJECT_NAME without also pinning
+# -p explicitly.
+#
+# Data (Postgres, MinIO) lives in named volumes, not bind mounts: the
+# `presio-staging` worktree this normally runs from is deleted and recreated
+# on every deploy (see deploy-staging.yml), so a bind mount under it would be
+# wiped on the next push. Named volumes are keyed by the compose project name
+# instead, so they survive that churn. The read-only *config* bind mounts
+# (vendored Supabase init SQL, kong.yml, dbschema.sql itself) stay as bind
+# mounts on purpose — re-checking those out fresh each deploy is exactly what
+# lets this stack rehearse the schema of the commit being promoted.
+#
+# Container names are prefixed staging-* because container names are global
+# on the host and prod already owns the unprefixed ones.
+
+name: presio-staging-db
+
+services:
+
+  staging-studio:
+    container_name: staging-supabase-studio
+    image: supabase/studio:2026.06.03-sha-0bca601
+    restart: unless-stopped
+    # kong.yml (vendored, shared with prod, not templated) hardcodes its
+    # upstreams as the bare service names below — safe to alias here since
+    # each compose project gets its own private network.
+    networks:
+      default:
+        aliases:
+          - studio
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://localhost:3000/api/platform/profile').then((r) => {if (r.status !== 200) throw new Error(r.status)})\""
+        ]
+      timeout: 10s
+      interval: 5s
+      retries: 3
+      start_period: 20s
+    environment:
+      HOSTNAME: "0.0.0.0"
+      STUDIO_PG_META_URL: http://staging-meta:8080
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER_READ_WRITE: postgres
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
+      PGRST_DB_MAX_ROWS: ${PGRST_DB_MAX_ROWS:-1000}
+      PGRST_DB_EXTRA_SEARCH_PATH: ${PGRST_DB_EXTRA_SEARCH_PATH:-public}
+      DEFAULT_ORGANIZATION_NAME: ${STUDIO_DEFAULT_ORGANIZATION}
+      DEFAULT_PROJECT_NAME: ${STUDIO_DEFAULT_PROJECT}
+      SUPABASE_URL: http://staging-kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      ENABLED_FEATURES_LOGS_ALL: "false"
+      SNIPPETS_MANAGEMENT_FOLDER: /app/snippets
+      EDGE_FUNCTIONS_MANAGEMENT_FOLDER: /app/edge-functions
+    volumes:
+      - ./deploy/volumes/snippets:/app/snippets:z
+      - ./deploy/volumes/functions:/app/edge-functions:ro,z
+
+  staging-kong:
+    container_name: staging-supabase-kong
+    image: kong/kong:3.9.1
+    restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - api-gw
+      web:
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      staging-studio:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.staging-supabase.rule=Host(`${SUPABASE_HOST}`)"
+      - "traefik.http.routers.staging-supabase.entrypoints=websecure"
+      - "traefik.http.routers.staging-supabase.tls=true"
+      - "traefik.http.services.staging-supabase.loadbalancer.server.port=8000"
+    volumes:
+      - ./deploy/volumes/api/kong.yml:/home/kong/temp.yml:ro,z
+      - ./deploy/volumes/api/kong-entrypoint.sh:/home/kong/kong-entrypoint.sh:ro,z
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_DNS_NOT_FOUND_TTL: 1
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth,request-termination,ip-restriction,post-function
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      KONG_PROXY_ACCESS_LOG: /dev/stdout combined
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+    entrypoint: ["/bin/sh", "/home/kong/kong-entrypoint.sh"]
+
+  staging-auth:
+    container_name: staging-supabase-auth
+    image: supabase/gotrue:v2.189.0
+    restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - auth
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9999/health"
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    depends_on:
+      staging-db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP}
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL}/auth/v1
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP}
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS}
+      GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-}
+      GOTRUE_SMTP_USER: ${SMTP_USER:-}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS:-}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-}
+      GOTRUE_MAILER_OTP_LENGTH: ${MAILER_OTP_LENGTH:-6}
+      GOTRUE_MAILER_URLPATHS_INVITE: ${MAILER_URLPATHS_INVITE}
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION}
+      GOTRUE_MAILER_URLPATHS_RECOVERY: ${MAILER_URLPATHS_RECOVERY}
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE}
+      GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP}
+      GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM}
+      # Staging deliberately does not register a second GitHub OAuth App
+      # (that's a manual, credential-bearing step) — email/password login
+      # (autoconfirmed, see ENABLE_EMAIL_AUTOCONFIRM above) covers testing.
+      GOTRUE_EXTERNAL_GITHUB_ENABLED: ${GITHUB_ENABLED:-false}
+      GOTRUE_EXTERNAL_GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GOTRUE_EXTERNAL_GITHUB_SECRET: ${GITHUB_SECRET:-}
+      GOTRUE_EXTERNAL_GITHUB_REDIRECT_URI: ${API_EXTERNAL_URL}/auth/v1/callback
+
+  staging-rest:
+    container_name: staging-supabase-rest
+    image: postgrest/postgrest:v14.12
+    restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - rest
+    depends_on:
+      staging-db:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "postgrest", "--ready" ]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
+      PGRST_DB_MAX_ROWS: ${PGRST_DB_MAX_ROWS:-1000}
+      PGRST_DB_EXTRA_SEARCH_PATH: ${PGRST_DB_EXTRA_SEARCH_PATH:-public}
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_ADMIN_SERVER_PORT: 3001
+      PGRST_ADMIN_SERVER_HOST: localhost
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
+    command: ["postgrest"]
+
+  staging-storage:
+    container_name: staging-supabase-storage
+    image: supabase/storage-api:v1.60.4
+    restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - storage
+    depends_on:
+      staging-db:
+        condition: service_healthy
+      staging-rest:
+        condition: service_started
+      staging-imgproxy:
+        condition: service_started
+      staging-minio:
+        condition: service_healthy
+      staging-minio-createbucket:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://staging-storage:5000/status"
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+      start_period: 10s
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://staging-rest:3000
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      STORAGE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: s3
+      GLOBAL_S3_BUCKET: ${GLOBAL_S3_BUCKET}
+      GLOBAL_S3_ENDPOINT: http://staging-minio:9000
+      GLOBAL_S3_PROTOCOL: http
+      GLOBAL_S3_FORCE_PATH_STYLE: "true"
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: ${STORAGE_TENANT_ID}
+      REGION: ${REGION}
+      ENABLE_IMAGE_TRANSFORMATION: "true"
+      IMGPROXY_URL: http://staging-imgproxy:5001
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET}
+    volumes:
+      - staging-storage-data:/var/lib/storage
+
+  staging-imgproxy:
+    container_name: staging-supabase-imgproxy
+    image: darthsim/imgproxy:v3.30.1
+    restart: unless-stopped
+    volumes:
+      - staging-storage-data:/var/lib/storage
+    healthcheck:
+      test: [ "CMD", "imgproxy", "health" ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    environment:
+      IMGPROXY_BIND: ":5001"
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: /
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_AUTO_WEBP: ${IMGPROXY_AUTO_WEBP:-true}
+      IMGPROXY_MAX_SRC_RESOLUTION: 16.8
+
+  staging-meta:
+    container_name: staging-supabase-meta
+    image: supabase/postgres-meta:v0.96.6
+    restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - meta
+    depends_on:
+      staging-db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: ${POSTGRES_HOST}
+      PG_META_DB_PORT: ${POSTGRES_PORT}
+      PG_META_DB_NAME: ${POSTGRES_DB}
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      CRYPTO_KEY: ${PG_META_CRYPTO_KEY}
+
+  staging-db:
+    container_name: staging-supabase-db
+    image: supabase/postgres:17.6.1.136
+    restart: unless-stopped
+    volumes:
+      - ./deploy/volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
+      - ./deploy/volumes/db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:Z
+      - ./deploy/volumes/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:Z
+      - ./deploy/volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:Z
+      - staging-db-data:/var/lib/postgresql/data
+      - ./deploy/volumes/db/_supabase.sql:/docker-entrypoint-initdb.d/migrations/97-_supabase.sql:Z
+      - ./deploy/volumes/db/logs.sql:/docker-entrypoint-initdb.d/migrations/99-logs.sql:Z
+      - ./deploy/volumes/db/pooler.sql:/docker-entrypoint-initdb.d/migrations/99-pooler.sql:Z
+      - staging-db-config:/etc/postgresql-custom
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "postgres", "-h", "localhost" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: ${POSTGRES_PORT}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      POSTGRES_DB: ${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: ${JWT_EXPIRY}
+    command:
+      [
+        "postgres",
+        "-c",
+        "config_file=/etc/postgresql/postgresql.conf",
+        "-c",
+        "log_min_messages=fatal"
+      ]
+
+  staging-minio:
+    container_name: staging-presio-minio
+    image: cgr.dev/chainguard/minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server --console-address ":9001" /data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - staging-minio-data:/data
+
+  staging-minio-createbucket:
+    container_name: staging-presio-minio-createbucket
+    image: cgr.dev/chainguard/minio-client:latest-dev
+    depends_on:
+      staging-minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -ec "
+      mc alias set supa-minio http://staging-minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing supa-minio/${GLOBAL_S3_BUCKET}
+      "
+
+  # One-shot: applies the repo's dbschema.sql to the staging DB. This is the
+  # whole point of this file — deploy-staging.yml checks this container's
+  # exit code before ever deploying the app, so a broken migration fails here
+  # against throwaway data instead of against prod.
+  staging-presio-db-init:
+    container_name: staging-presio-db-init
+    image: postgres:17-alpine
+    restart: "no"
+    depends_on:
+      staging-db:
+        condition: service_healthy
+      staging-auth:
+        condition: service_healthy
+      staging-storage:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./dbschema.sql:/schema.sql:ro
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        echo "Applying Presio schema to ${POSTGRES_DB} on staging-db:${POSTGRES_PORT} ..."
+        psql -h staging-db -p "${POSTGRES_PORT}" -U postgres -d "${POSTGRES_DB}" -v ON_ERROR_STOP=1 -f /schema.sql
+        echo "Presio schema applied."
+
+networks:
+  default:
+  web:
+    external: true
+
+volumes:
+  staging-db-data:
+  staging-db-config:
+  staging-storage-data:
+  staging-minio-data:

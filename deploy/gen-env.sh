@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
-# Generate a root .env from deploy/.env.example with fresh secrets.
-# Edit the four required values below, then run:  ./deploy/gen-env.sh
+# Generate an env file from deploy/.env.example with fresh secrets.
+# Edit the values below (or override via env vars), then run:
+#   ./deploy/gen-env.sh                       # writes ../.env
+#   ./deploy/gen-env.sh ../.env.staging \      # writes a second stack's env,
+#     APP_DOMAIN=https://staging.presio.xyz \  # e.g. for the isolated
+#     SUPABASE_DOMAIN=https://supabase-staging.presio.xyz
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# ---- set these ----
-APP_DOMAIN="https://presio.xyz"
-SUPABASE_DOMAIN="https://supabase.presio.xyz"
-ANALYTICS_DOMAIN="https://analytics.presio.xyz"
-GITHUB_CLIENT_ID="REPLACE_ME"
-GITHUB_SECRET="REPLACE_ME"
+# $1, if given, is the output path (default: ../.env, i.e. the repo root).
+OUT="${1:-../.env}"
+
+# ---- set these (or override as OUT=... NAME=value ./deploy/gen-env.sh) ----
+: "${APP_DOMAIN:=https://presio.xyz}"
+: "${SUPABASE_DOMAIN:=https://supabase.presio.xyz}"
+: "${ANALYTICS_DOMAIN:=https://analytics.presio.xyz}"
+: "${GITHUB_CLIENT_ID:=REPLACE_ME}"
+: "${GITHUB_SECRET:=REPLACE_ME}"
+: "${GITHUB_ENABLED:=true}"
+: "${ENABLE_EMAIL_AUTOCONFIRM:=false}"
 
 # ---- helpers ----
 rand()    { openssl rand -hex "${1:-32}"; }
@@ -45,11 +54,15 @@ override() {  # echo a replacement value for $1, or return 1 if no override
     SUPABASE_HOST)            hostonly "$SUPABASE_DOMAIN" ;;
     SUPABASE_PUBLIC_URL|API_EXTERNAL_URL) echo "$SUPABASE_DOMAIN" ;;
     SITE_URL)                 echo "$APP_DOMAIN" ;;
-    ADDITIONAL_REDIRECT_URLS) echo "$APP_DOMAIN,http://localhost:5173" ;;
+    # /** wildcard suffix required: GoTrue falls back to SITE_URL for any
+    # redirect URL not matching an allow-list entry exactly.
+    ADDITIONAL_REDIRECT_URLS) echo "$APP_DOMAIN/**,http://localhost:5173/**" ;;
     # Browsers send Origin even on same-origin fetch/WebSocket, so set this to
     # the app URL so the server's CORS check allows it.
     ALLOWED_ORIGIN)           echo "$APP_DOMAIN" ;;
     ANALYTICS_URL)            echo "$ANALYTICS_DOMAIN" ;;
+    GITHUB_ENABLED)           echo "$GITHUB_ENABLED" ;;
+    ENABLE_EMAIL_AUTOCONFIRM) echo "$ENABLE_EMAIL_AUTOCONFIRM" ;;
     JWT_SECRET)               echo "$JWT_SECRET" ;;
     ANON_KEY)                 echo "$ANON_KEY" ;;
     SERVICE_ROLE_KEY)         echo "$SERVICE_ROLE_KEY" ;;
@@ -70,9 +83,7 @@ override() {  # echo a replacement value for $1, or return 1 if no override
   esac
 }
 
-# Write to the repo root .env (one level up from deploy/).
-OUT="../.env"
-[ -e "$OUT" ] && { echo ".env already exists — refusing to overwrite." >&2; exit 1; }
+[ -e "$OUT" ] && { echo "$OUT already exists — refusing to overwrite." >&2; exit 1; }
 
 while IFS= read -r line; do
   if printf '%s' "$line" | grep -qE '^[A-Z_][A-Z0-9_]*=' && key=${line%%=*} && v=$(override "$key"); then
@@ -82,4 +93,4 @@ while IFS= read -r line; do
   fi
 done < .env.example > "$OUT"
 chmod 600 "$OUT"
-echo "Wrote .env (chmod 600). Set GITHUB_* in .env if you left them as REPLACE_ME."
+echo "Wrote $OUT (chmod 600). Set GITHUB_* in it if you left them as REPLACE_ME."

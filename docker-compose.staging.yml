@@ -1,11 +1,13 @@
 # Staging deployment — a second Presio app container built from the working
-# tree, routed by the shared Traefik proxy at ${STAGING_HOST}. It reuses the
-# production Supabase stack (same .env), so no extra services are needed:
+# tree, routed by the shared Traefik proxy at ${STAGING_HOST}. It talks to its
+# OWN Supabase/Postgres (docker-compose.staging-supabase.yml), not prod's — an
+# --env-file pointed at that stack's env (SUPABASE_PUBLIC_URL/ANON_KEY/
+# SERVICE_ROLE_KEY etc.) is all this file needs to reach it:
 #
-#   docker compose -f docker-compose.staging.yml up -d --build
+#   docker compose --env-file .env.staging -f docker-compose.staging.yml up -d --build
 #
-# Sessions created here land in the shared DB but expire after 24h. Sentry is
-# intentionally not configured so staging errors don't pollute prod tracking.
+# Sentry is intentionally not configured so staging errors don't pollute prod
+# tracking.
 
 name: presio-staging
 

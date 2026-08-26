@@ -15,10 +15,12 @@ name: Deploy staging
 # Host setup is the same as the PR previews (bare clone, deploy key, tailnet)
 # — see the notes at the top of preview.yml. REPO_DIR and WORKTREE below are
 # overridable via repo variables, same as preview.yml's REPO_DIR/PREVIEW_DIR.
-# The one addition is the stack .env: docker-compose.staging.yml reuses the
-# production Supabase stack, so it needs the same env file the production
-# compose is run with. Override it with the STAGING_ENV_FILE repository
-# variable if that ever moves.
+# The one addition is the stack env: staging has its OWN Supabase/Postgres
+# (docker-compose.staging-supabase.yml, brought up below before the app),
+# isolated from prod's so a broken migration can't touch prod data. Both that
+# stack and the app (docker-compose.staging.yml) read the same env file,
+# pointed at by the STAGING_ENV_FILE repository variable — override it if
+# that file ever moves.
 #
 # Staging used to be run by hand from a checkout at ~/projects/presio-staging-src.
 # docker-compose.staging.yml pins `name: presio-staging`, so deploying from this
@@ -75,7 +77,7 @@ jobs:
         env:
           SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
           SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
-          ENV_FILE: ${{ vars.STAGING_ENV_FILE || '/home/administrator/projects/presio/.env' }}
+          ENV_FILE: ${{ vars.STAGING_ENV_FILE || '/home/administrator/projects/presio/presio-production/.env.staging' }}
         run: |
           set -euo pipefail
           # Variables expand locally; the heredoc is the remote script.
@@ -111,6 +113,21 @@ jobs:
           cd "$WORKTREE"
           SHA=\$(git rev-parse --short HEAD)
           echo "DEPLOYED_VERSION=staging-\$SHA"
+
+          # Staging's own Supabase/Postgres, separate from prod's, brought up
+          # from this same checkout so it rehearses the schema of the exact
+          # commit being promoted. A broken dbschema.sql fails here against
+          # throwaway data, not against prod. Idempotent: on a steady-state
+          # deploy this just re-applies dbschema.sql and leaves the running
+          # containers alone.
+          docker compose -p presio-staging-db --env-file "$ENV_FILE" -f docker-compose.staging-supabase.yml up -d --remove-orphans --wait
+          code=\$(docker inspect -f '{{.State.ExitCode}}' staging-presio-db-init)
+          if [ "\$code" != "0" ]; then
+            echo "::error::dbschema.sql failed against staging (exit \$code) -- see: docker logs staging-presio-db-init"
+            docker logs --tail 40 staging-presio-db-init || true
+            exit 1
+          fi
+
           # Baked into the image so /healthz reports the deployed commit, which
           # is what the verify step below waits for.
           # -p is mandatory, not cosmetic: it outranks any COMPOSE_PROJECT_NAME
