@@ -25,7 +25,12 @@ Upload a PDF presentation, get a short link, and control the slideshow from one 
 
 ## Adding videos and speaker notes
 
-The easiest way to attach videos and speaker notes is the [Presio Typst package](https://github.com/benedict-armstrong/presio-typst-package):
+Presio is agnostic to the typesetting engine used — any PDF works, and notes can also be embedded by hand from plain Typst or LaTeX (see the about page for details). Official packages are available for the two most common ones:
+
+- **Typst** — [presio-typst-package](https://github.com/benedict-armstrong/presio-typst-package)
+- **LaTeX** — [presio-latex-package](https://github.com/benedict-armstrong/presio-latex-package)
+
+### Typst
 
 ```typst
 #import "@preview/presio:0.2.1": media, speaker-notes
@@ -41,7 +46,29 @@ Hello world.
 #media("https://www.youtube.com/watch?v=dQw4w9WgXcQ", width: 60%, aspect-ratio: 16/9)
 ```
 
-Presio reads the attached media and notes from the PDF automatically. Notes can also be embedded by hand from plain Typst or LaTeX. See the about page for details.
+### LaTeX
+
+[![Open in Overleaf](https://img.shields.io/badge/Open%20in%20Overleaf-1F2A37?logo=overleaf&logoColor=white)](https://www.overleaf.com/docs?snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/main.tex&snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/presio.sty&snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/clip.gif&snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/poster.png&snip_name[]=main.tex&snip_name[]=presio.sty&snip_name[]=clip.gif&snip_name[]=poster.png&engine=pdflatex)
+
+```latex
+\documentclass{beamer}
+\usepackage{presio}
+
+\begin{document}
+
+\begin{frame}{Introduction}
+  Hello world.
+  \presionote{Remember to mention the demo before moving on.}
+\end{frame}
+
+\begin{frame}{The demo}
+  \presiomedia[width=0.7\linewidth]{https://www.youtube.com/watch?v=dQw4w9WgXcQ}
+\end{frame}
+
+\end{document}
+```
+
+For LaTeX, copy `presio.sty` from the package repository next to your `.tex` file — that's the whole install.
 
 ## Self-hosting
 
