@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import { QRCodeSVG } from "qrcode.react";
 import { SessionQRCode } from "@/components/SessionQRCode";
+import { joinUrl } from "@/lib/joinUrl";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { MediaOverlay, type MediaState, type MediaTimeSync } from "@/components/MediaOverlay";
 import { AnnotationOverlay } from "@/components/AnnotationOverlay";
@@ -164,7 +165,7 @@ export function ViewerView({
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6 bg-black/95">
           <p className="text-white/70 text-lg select-none">Scan to join this presentation</p>
           <div className="rounded-lg bg-white p-4">
-            <QRCodeSVG value={`${window.location.origin}/s/${id}?role=viewer`} size={260} />
+            <QRCodeSVG value={joinUrl(id, "viewer")} size={260} />
           </div>
           <div className="text-center space-y-1">
             <p className="text-white/50 text-sm select-none">Session code</p>
