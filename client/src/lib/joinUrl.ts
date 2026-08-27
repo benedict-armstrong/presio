@@ -118,6 +118,21 @@ export async function fetchLanOrigin(signal?: AbortSignal): Promise<string | nul
   }
 }
 
+let detection: Promise<string | null> | undefined;
+
+/** The detection request, shared by every surface on the page. A controller can
+ *  have the share dialog, its QR and the viewer overlay mounted at once; the
+ *  answer is a property of the machine, not of the component asking. */
+export function ensureLanOrigin(): Promise<string | null> {
+  detection ??= fetchLanOrigin();
+  return detection;
+}
+
+/** Test seam: drop the shared answer so the next caller asks again. */
+export function resetLanOriginCache() {
+  detection = undefined;
+}
+
 /**
  * Whether something is actually listening on `origin`.
  *
@@ -143,6 +158,22 @@ export async function probeOrigin(origin: string, timeoutMs = PROBE_TIMEOUT_MS):
       signal: AbortSignal.timeout(timeoutMs),
     });
     return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether an origin is worth handing to anyone else.
+ *
+ * A loopback origin is not: every join link and QR built from it sends the
+ * scanning device back to itself. That's the state a local deployment starts
+ * in, and it's the reason the share surfaces hide their links rather than
+ * render a QR code that cannot work.
+ */
+export function isShareableOrigin(origin: string): boolean {
+  try {
+    return !isLoopbackHostname(new URL(origin).hostname);
   } catch {
     return false;
   }
@@ -183,6 +214,8 @@ export function resolveStatus({
 
 interface JoinOrigin {
   origin: string;
+  /** False while the best origin we have is loopback — nothing to share yet. */
+  shareable: boolean;
   status: LanStatus;
   /** Present only when the page is loopback, i.e. when the field is relevant. */
   address: string;
@@ -210,14 +243,12 @@ export function useLanOrigin(): JoinOrigin {
 
   useEffect(() => {
     if (!override) return;
-    const controller = new AbortController();
     let cancelled = false;
-    fetchLanOrigin(controller.signal).then((origin) => {
+    ensureLanOrigin().then((origin) => {
       if (!cancelled) setDetected(origin);
     });
     return () => {
       cancelled = true;
-      controller.abort();
     };
   }, [override]);
 
@@ -243,11 +274,14 @@ export function useLanOrigin(): JoinOrigin {
 
   const status = resolveStatus({ override, typed, detected, candidate, probe });
 
+  const origin = candidate ?? window.location.origin;
+
   return {
     // An unverified candidate is still the best guess available, so it's used
     // while probing and even when the probe failed — the presenter may know
     // something the probe can't see. The status is what drives the warning.
-    origin: candidate ?? window.location.origin,
+    origin,
+    shareable: isShareableOrigin(origin),
     status,
     address,
     setAddress,
@@ -266,7 +300,9 @@ export function useJoinUrls(id: string) {
   };
 }
 
-/** A single join URL, for surfaces that show a QR without the field. */
-export function useJoinUrl(id: string, role: "viewer" | "controller"): string {
-  return `${useLanOrigin().origin}/s/${id}?role=${role}`;
+/** A single join URL, for surfaces that show a QR without the field. Comes with
+ *  the verdict on whether it's worth showing at all. */
+export function useJoinUrl(id: string, role: "viewer" | "controller") {
+  const { origin, shareable } = useLanOrigin();
+  return { url: `${origin}/s/${id}?role=${role}`, shareable };
 }

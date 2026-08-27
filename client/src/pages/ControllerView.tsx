@@ -338,6 +338,7 @@ export function ControllerView({
     setAddress: setLanAddress,
     status: lanStatus,
     origin: lanOrigin,
+    shareable: lanShareable,
     controllerUrl,
     viewerUrl: shareViewerUrl,
   } = useJoinUrls(id);
@@ -574,6 +575,7 @@ export function ControllerView({
           onLanAddressChange={setLanAddress}
           lanStatus={lanStatus}
           lanOrigin={lanOrigin}
+          lanShareable={lanShareable}
           local={local}
           loggedIn={loggedIn}
           syncing={syncing}

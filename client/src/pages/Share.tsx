@@ -30,6 +30,7 @@ export default function Share() {
     setAddress: setLanAddress,
     status: lanStatus,
     origin: lanOrigin,
+    shareable: lanShareable,
     viewerUrl,
     controllerUrl,
   } = useJoinUrls(id!);
@@ -111,13 +112,20 @@ export default function Share() {
 
           {!local && (
             <div className="space-y-3">
-              <CopyRow label="Controller link" url={controllerUrl} />
-              <CopyRow label="Viewer link" url={viewerUrl} />
+              {/* Loopback links are useless to whoever they're handed to, so
+                  they wait until an address other devices can reach is known. */}
+              {lanShareable && (
+                <>
+                  <CopyRow label="Controller link" url={controllerUrl} />
+                  <CopyRow label="Viewer link" url={viewerUrl} />
+                </>
+              )}
               <LanAddressField
                 value={lanAddress}
                 onChange={setLanAddress}
                 status={lanStatus}
                 origin={lanOrigin}
+                shareable={lanShareable}
               />
             </div>
           )}

@@ -4,6 +4,7 @@ import {
   composeOrigin,
   fetchLanOrigin,
   isLoopbackHostname,
+  isShareableOrigin,
   lanOrigin,
   probeOrigin,
   resolveStatus,
@@ -69,6 +70,25 @@ describe("composeOrigin", () => {
   it("returns null when the server had no answer", () => {
     expect(composeOrigin({ host: null, origin: null, reason: "containerized" }, loc)).toBeNull();
     expect(composeOrigin(null, loc)).toBeNull();
+  });
+});
+
+describe("isShareableOrigin", () => {
+  it("rejects loopback origins, which is what the share screen hides on", () => {
+    // Handing these to another device sends it back to itself.
+    for (const origin of ["http://localhost:3001", "http://127.0.0.1:3001", "http://[::1]:3001"]) {
+      expect(isShareableOrigin(origin)).toBe(false);
+    }
+  });
+
+  it("accepts anything another device could reach", () => {
+    expect(isShareableOrigin("http://192.168.1.20:3001")).toBe(true);
+    expect(isShareableOrigin("https://presio.xyz")).toBe(true);
+    expect(isShareableOrigin("http://mybox.local:3001")).toBe(true);
+  });
+
+  it("treats an unparseable origin as not shareable", () => {
+    expect(isShareableOrigin("not a url")).toBe(false);
   });
 });
 
