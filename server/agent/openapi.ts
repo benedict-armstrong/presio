@@ -12,9 +12,9 @@ export function buildOpenApi(base: string) {
     paths: {
       "/api/present": {
         post: {
-          summary: "Start a local presentation from a PDF",
+          summary: "Start a local presentation from a PDF (or replace an existing one)",
           description:
-            "Stages the PDF and returns a url. Opening the url copies the PDF into the browser (local session), deletes the server copy, and skips the share screen. The url works until a browser claims it; unclaimed handoffs expire after 24 hours (7 days when authenticated).",
+            "Stages the PDF and returns a url. Opening the url copies the PDF into the browser (local session), deletes the server copy, and skips the share screen. The url works until a browser claims it; unclaimed handoffs expire after 24 hours (7 days when authenticated). Pass session_id plus controller_token (the t= parameter of a previously returned url) to instead replace that presentation's deck in place — the response keeps the same id and url, and no additional concurrent-presentation slot is used.",
           operationId: "present",
           requestBody: {
             required: true,
@@ -25,6 +25,16 @@ export function buildOpenApi(base: string) {
                   required: ["file"],
                   properties: {
                     file: { type: "string", format: "binary", description: "PDF file" },
+                    session_id: {
+                      type: "string",
+                      description:
+                        "Id of an existing presentation to update in place (from an earlier present response) instead of creating a new one.",
+                    },
+                    controller_token: {
+                      type: "string",
+                      description:
+                        "Controller token for that presentation — the t= query parameter of the url returned when it was created. Required whenever session_id is given; may be sent as the x-controller-token header instead.",
+                    },
                   },
                 },
               },
@@ -44,7 +54,7 @@ export function buildOpenApi(base: string) {
                         type: "string",
                         format: "uri",
                         description:
-                          "Handoff link: valid until a browser claims the deck, or 24h (7 days authenticated) if unclaimed. Fetching without completing handoff does not consume it.",
+                          "Handoff link: valid until a browser claims the deck, or 24h (7 days authenticated) if unclaimed. Fetching without completing handoff does not consume it. Unchanged from the original response when updating.",
                       },
                       filename: {
                         type: "string",
@@ -52,11 +62,18 @@ export function buildOpenApi(base: string) {
                       },
                       totalSlides: { type: "integer" },
                       next: { type: "string" },
+                      updated: {
+                        type: "boolean",
+                        description: "True when this call replaced an existing presentation instead of creating one.",
+                      },
                     },
                   },
                 },
               },
             },
+            "401": { description: "session_id given without a controller token" },
+            "403": { description: "Wrong controller token for the referenced presentation" },
+            "404": { description: "Unknown or expired session_id" },
           },
         },
       },

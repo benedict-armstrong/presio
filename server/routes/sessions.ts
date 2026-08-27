@@ -9,7 +9,7 @@ import { getBearerToken, resolveOptionalUserId, safeEqual } from "../auth.js";
 import { isLocalMode } from "../local/mode.js";
 import { clearSessionState, type SocketState } from "../socket.js";
 import { baseUrl } from "../lib/baseUrl.js";
-import { createPresentHandoff, handoffTokenFrom } from "../lib/presentHandoff.js";
+import { createPresentHandoff, handoffTokenFrom, updatePresentDeck } from "../lib/presentHandoff.js";
 import { generatePassphrase, insertSession, ownedExpiry } from "../lib/sessionRows.js";
 
 export interface RouteDeps {
@@ -56,6 +56,11 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
    *
    *   curl -s -F file=@deck.pdf https://presio.xyz/api/present
    *   # open the returned url
+   *
+   * Update mode: pass `session_id` (multipart field) plus its controller token
+   * (`controller_token` field or `x-controller-token` header) to replace an
+   * existing presentation's deck instead of creating one — the response keeps
+   * the same id/link and no extra concurrent slot is used.
    */
   app.post("/api/present", uploadField("file"), async (req, res) => {
     try {
@@ -66,6 +71,37 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       }
       if (file.mimetype !== "application/pdf" && !file.originalname.toLowerCase().endsWith(".pdf")) {
         res.status(400).json({ error: "File must be a PDF" });
+        return;
+      }
+
+      const sessionId = typeof req.body.session_id === "string" ? req.body.session_id.trim() : "";
+      if (sessionId) {
+        const token =
+          (typeof req.body.controller_token === "string" && req.body.controller_token) ||
+          req.get("x-controller-token") ||
+          "";
+        if (!token) {
+          // Reject rather than falling back to create: silently minting a new
+          // presentation would hand the agent a fresh link and consume a slot.
+          res.status(401).json({
+            error: 'A controller token is required to update an existing presentation ("controller_token" field or "x-controller-token" header)',
+          });
+          return;
+        }
+        const result = await updatePresentDeck(supabase, {
+          sessionId,
+          token,
+          buffer: file.buffer,
+          originalName: file.originalname,
+          baseUrl: baseUrl(req),
+          io,
+          socketState,
+        });
+        if (!result.ok) {
+          res.status(result.status).json({ error: result.error });
+          return;
+        }
+        res.json({ ...result, updated: true });
         return;
       }
 

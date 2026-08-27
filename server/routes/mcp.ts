@@ -4,7 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import * as z from "zod/v4";
 import { baseUrl } from "../lib/baseUrl.js";
-import { createPresentHandoff } from "../lib/presentHandoff.js";
+import { createPresentHandoff, updatePresentDeck } from "../lib/presentHandoff.js";
 import { buildCheckReport } from "./check.js";
 import { resolveOptionalUserId } from "../auth.js";
 
@@ -19,7 +19,7 @@ function createPresioMcp(supabase: SupabaseClient, origin: string, req: express.
     {
       title: "Present a PDF",
       description:
-        "Upload a PDF to start a local Presio presentation. Returns a url — open it in a browser to finish handoff (skips share). Same as POST /api/present.",
+        "Upload a PDF to start a local Presio presentation. Returns a url — open it in a browser to finish handoff (skips share). To replace an existing presentation's deck instead of creating one, pass its session_id plus controller_token (the t= parameter of the url from the original create call) and the same link keeps working. Same as POST /api/present.",
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -29,10 +29,39 @@ function createPresioMcp(supabase: SupabaseClient, origin: string, req: express.
       inputSchema: {
         pdf_base64: z.string().describe("PDF file contents, base64-encoded"),
         filename: z.string().optional().describe("Original filename, e.g. deck.pdf"),
+        session_id: z
+          .string()
+          .optional()
+          .describe("Id of an existing presentation to update in place (from an earlier present response) instead of creating a new one"),
+        controller_token: z
+          .string()
+          .optional()
+          .describe("Controller token for that presentation — the t= query parameter of the url returned when it was created. Required whenever session_id is given."),
       },
     },
-    async ({ pdf_base64, filename }) => {
+    async ({ pdf_base64, filename, session_id, controller_token }) => {
       const buffer = Buffer.from(pdf_base64, "base64");
+      if (session_id) {
+        if (!controller_token) {
+          return {
+            content: [
+              { type: "text" as const, text: "controller_token is required when updating an existing presentation (session_id)." },
+            ],
+            isError: true,
+          };
+        }
+        const result = await updatePresentDeck(supabase, {
+          sessionId: session_id,
+          token: controller_token,
+          buffer,
+          originalName: filename || "",
+          baseUrl: origin,
+        });
+        if (!result.ok) {
+          return { content: [{ type: "text" as const, text: result.error }], isError: true };
+        }
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ...result, updated: true }, null, 2) }] };
+      }
       const userId = await resolveOptionalUserId(supabase, req);
       const result = await createPresentHandoff(supabase, {
         buffer,
