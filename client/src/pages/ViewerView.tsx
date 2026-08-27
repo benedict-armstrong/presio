@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import { QRCodeSVG } from "qrcode.react";
 import { SessionQRCode } from "@/components/SessionQRCode";
-import { joinUrl } from "@/lib/joinUrl";
+import { useJoinUrl } from "@/lib/joinUrl";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { MediaOverlay, type MediaState, type MediaTimeSync } from "@/components/MediaOverlay";
 import { AnnotationOverlay } from "@/components/AnnotationOverlay";
@@ -52,6 +52,9 @@ export function ViewerView({
 }) {
   const { totalSlides } = deck;
   const mediaPlacements = deck.mediaBySlide.get(currentSlide) ?? [];
+  // The big "scan to join" overlay is often on a projector driven from the
+  // presenter's own machine over localhost, so it needs the LAN address too.
+  const scanToJoinUrl = useJoinUrl(id, "viewer");
   const navigate = useNavigate();
   const [cursorVisible, setCursorVisible] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -165,7 +168,7 @@ export function ViewerView({
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6 bg-black/95">
           <p className="text-white/70 text-lg select-none">Scan to join this presentation</p>
           <div className="rounded-lg bg-white p-4">
-            <QRCodeSVG value={joinUrl(id, "viewer")} size={260} />
+            <QRCodeSVG value={scanToJoinUrl} size={260} />
           </div>
           <div className="text-center space-y-1">
             <p className="text-white/50 text-sm select-none">Session code</p>

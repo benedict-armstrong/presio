@@ -3,6 +3,7 @@ import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import { SessionQRCode } from "@/components/SessionQRCode";
 import { CopyField } from "@/components/CopyField";
 import { LanAddressField } from "@/components/LanAddressField";
+import type { LanStatus } from "@/lib/joinUrl";
 import { SyncShareOverlay } from "@/components/SyncShareOverlay";
 import { authEnabled } from "@/lib/authMode";
 
@@ -15,6 +16,8 @@ export function ShareDialog({
   controllerUrl,
   lanAddress,
   onLanAddressChange,
+  lanStatus,
+  lanOrigin,
   local,
   loggedIn,
   syncing,
@@ -29,6 +32,8 @@ export function ShareDialog({
   controllerUrl: string;
   lanAddress: string;
   onLanAddressChange: (address: string) => void;
+  lanStatus: LanStatus;
+  lanOrigin: string;
   local: boolean;
   loggedIn: boolean;
   syncing: boolean;
@@ -66,7 +71,12 @@ export function ShareDialog({
             <CopyField label="Viewer link" value={viewerUrl} />
             <CopyField label="Controller link" value={controllerUrl} />
           </div>
-          <LanAddressField value={lanAddress} onChange={onLanAddressChange} />
+          <LanAddressField
+            value={lanAddress}
+            onChange={onLanAddressChange}
+            status={lanStatus}
+            origin={lanOrigin}
+          />
         </>
       )}
       <br />

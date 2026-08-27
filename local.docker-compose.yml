@@ -20,9 +20,19 @@
 # Working in a checkout instead? `docker compose -f local.docker-compose.yml
 # build` builds from source rather than using the published image.
 #
-# For presenting to viewers on other devices on the same network, open
-# http://<this-machine's-LAN-IP>:3001 on those devices instead of localhost —
-# PDF links are relative, so they resolve correctly either way.
+# Viewers on other devices join by scanning the QR code on the share screen.
+# Presio works out this machine's address for them, but it can only do that when
+# it can see the host's network — and by default this container has its own. Set
+# PRESIO_PUBLIC_HOST so it knows what to point at:
+#
+#   PRESIO_PUBLIC_HOST=$(hostname -I | awk '{print $1}'):3001 \
+#     docker compose -f local.docker-compose.yml up
+#
+# Alternatively add `network_mode: host` (Linux only — on Docker Desktop the
+# "host" is a Linux VM, not your machine), and detection works with no config at
+# all. Without either, the share screen asks for the address once and remembers
+# it. Opening http://<this-machine's-LAN-IP>:3001 directly also works: PDF links
+# are relative, so they resolve either way.
 
 name: presio-local
 
@@ -63,6 +73,11 @@ services:
       LOCAL_DATA_DIR: /data
       # No reverse proxy in front of this container.
       TRUST_PROXY: "false"
+      # The address other devices reach this machine on, e.g. 192.168.1.20:3001.
+      # A container on the default bridge network can't discover it — every
+      # address it can see belongs to the container — so share links fall back
+      # to asking the presenter unless this is set. See the header above.
+      PRESIO_PUBLIC_HOST: ${PRESIO_PUBLIC_HOST:-}
     volumes:
       - presio-local-data:/data
 

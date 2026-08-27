@@ -14,6 +14,7 @@ import { isLocalMode } from "./local/mode.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerNewsletterRoutes } from "./routes/newsletter.js";
 import { registerCheckRoute } from "./routes/check.js";
+import { registerLanAddressRoute } from "./routes/lanAddress.js";
 import { registerAgentDocRoutes } from "./routes/agentDocs.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
 import type { SocketState } from "./socket.js";
@@ -126,6 +127,9 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   registerSessionRoutes(app, { supabase, io, socketState });
   registerNewsletterRoutes(app, supabase);
   registerCheckRoute(app);
+  // Local/dev only: lets share surfaces resolve this machine's LAN address
+  // instead of asking the presenter to type it (see lib/lanAddress.ts).
+  registerLanAddressRoute(app, { enabled: devOrLocal });
   registerMcpRoutes(app, supabase);
 
   // Unknown API paths must 404 as JSON — falling through to the SPA catch-all

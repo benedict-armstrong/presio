@@ -1,23 +1,54 @@
 import { useState } from "react";
-import { needsLanOverride } from "@/lib/joinUrl";
+import { needsLanOverride, type LanStatus } from "@/lib/joinUrl";
 
-// Editable field for this machine's LAN address, shown on share surfaces only
-// when Presio is being viewed over localhost/loopback (see lib/joinUrl.ts).
-// Every change rewrites the join links and QR codes on screen immediately; the
-// value persists across sessions. Renders nothing when the page was opened by
-// a host other devices can already reach — hosted deploys are untouched.
+// The manual escape hatch for the address other devices join at.
+//
+// It is deliberately not the primary path: the server resolves the address on
+// its own (see lib/joinUrl.ts), so in the ordinary local deployment this
+// collapses to a single line confirming where people will join, and the input
+// only opens if the presenter asks for it. It presents itself when the resolved
+// address failed its reachability check, or when no address could be resolved
+// at all — the bridged-container case, where nothing inside the container can
+// see the host's network.
+//
+// Renders nothing when the page was opened on a host other devices can already
+// reach, so hosted deploys never show it.
 
 export function LanAddressField({
   value,
   onChange,
+  status,
+  origin,
 }: {
   value: string;
   onChange: (address: string) => void;
+  status: LanStatus;
+  origin: string;
 }) {
-  // Mounted once per share surface; deciding at mount is enough because
-  // window.location.hostname can't change without a navigation.
+  // Deciding at mount is enough because window.location.hostname can't change
+  // without a navigation.
   const [visible] = useState(() => needsLanOverride());
+  const [expanded, setExpanded] = useState(false);
   if (!visible) return null;
+
+  // Don't flash a warning during the round-trip that would resolve it.
+  if (status === "checking" && !expanded) return null;
+
+  if (status === "ok" && !expanded) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Other devices join at <span className="font-mono">{origin}</span>{" "}
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="underline underline-offset-2 hover:text-foreground"
+        >
+          Change
+        </button>
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-1">
       <label htmlFor="presio-lan-address" className="text-xs font-medium text-muted-foreground">
@@ -35,6 +66,19 @@ export function LanAddressField({
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
+      {status === "unreachable" && (
+        <p className="text-xs text-amber-600 dark:text-amber-500">
+          Nothing answered at <span className="font-mono">{origin}</span> from this machine. Check
+          the address, or whether a firewall is blocking the port.
+        </p>
+      )}
+      {status === "unavailable" && (
+        <p className="text-xs text-muted-foreground">
+          Presio couldn&apos;t work out this machine&apos;s address — it&apos;s running in a
+          container with its own network. Enter the address here, or set{" "}
+          <span className="font-mono">PRESIO_PUBLIC_HOST</span> on the container.
+        </p>
+      )}
     </div>
   );
 }

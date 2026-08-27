@@ -333,8 +333,14 @@ export function ControllerView({
   // origin — it always works locally. The share dialog's QR/links honor the
   // presenter-entered LAN address instead (lib/joinUrl.ts), so phones can scan.
   const viewerUrl = `${window.location.origin}/s/${id}?role=viewer`;
-  const { address: lanAddress, setAddress: setLanAddress, controllerUrl, viewerUrl: shareViewerUrl } =
-    useJoinUrls(id);
+  const {
+    address: lanAddress,
+    setAddress: setLanAddress,
+    status: lanStatus,
+    origin: lanOrigin,
+    controllerUrl,
+    viewerUrl: shareViewerUrl,
+  } = useJoinUrls(id);
   const { passphrase = "" } = getSessionAuth(id);
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
@@ -566,6 +572,8 @@ export function ControllerView({
           controllerUrl={controllerUrl}
           lanAddress={lanAddress}
           onLanAddressChange={setLanAddress}
+          lanStatus={lanStatus}
+          lanOrigin={lanOrigin}
           local={local}
           loggedIn={loggedIn}
           syncing={syncing}

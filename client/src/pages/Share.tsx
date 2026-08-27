@@ -25,8 +25,14 @@ export default function Share() {
   // Share URLs honor a presenter-entered LAN address (lib/joinUrl.ts) so QR
   // codes scanned from other devices resolve when Presio is opened over
   // localhost in a local deployment.
-  const { address: lanAddress, setAddress: setLanAddress, viewerUrl, controllerUrl } =
-    useJoinUrls(id!);
+  const {
+    address: lanAddress,
+    setAddress: setLanAddress,
+    status: lanStatus,
+    origin: lanOrigin,
+    viewerUrl,
+    controllerUrl,
+  } = useJoinUrls(id!);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,7 +113,12 @@ export default function Share() {
             <div className="space-y-3">
               <CopyRow label="Controller link" url={controllerUrl} />
               <CopyRow label="Viewer link" url={viewerUrl} />
-              <LanAddressField value={lanAddress} onChange={setLanAddress} />
+              <LanAddressField
+                value={lanAddress}
+                onChange={setLanAddress}
+                status={lanStatus}
+                origin={lanOrigin}
+              />
             </div>
           )}
 

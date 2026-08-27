@@ -1,5 +1,5 @@
 import { QRCodeSVG } from "qrcode.react";
-import { joinUrl } from "@/lib/joinUrl";
+import { useJoinUrl } from "@/lib/joinUrl";
 
 export function SessionQRCode({
   sessionId,
@@ -8,7 +8,7 @@ export function SessionQRCode({
   sessionId: string;
   size?: number;
 }) {
-  const viewerUrl = joinUrl(sessionId, "viewer");
+  const viewerUrl = useJoinUrl(sessionId, "viewer");
   return (
     <div className="text-center space-y-3">
       <p className="text-xs text-muted-foreground">Scan to join as viewer</p>
