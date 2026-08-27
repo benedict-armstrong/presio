@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CodeBlock } from "@/components/CodeBlock";
+import { OPEN_IN_OVERLEAF_URL } from "@/lib/overleaf";
 
 const PACKAGE_URL = "https://github.com/benedict-armstrong/presio-typst-package";
 
@@ -205,6 +206,20 @@ Hello world.
 \\speakernote{Remember to mention the demo.}
 `} />
             </div>
+          </div>
+
+          <div className="rounded-md border px-3 py-2.5 text-sm text-muted-foreground space-y-2">
+            <p className="text-foreground font-medium">LaTeX without installing TeX</p>
+            <p>
+              Open a ready-made Presio deck in Overleaf — <code className="bg-muted px-1 rounded text-xs">main.tex</code>{" "}
+              and <code className="bg-muted px-1 rounded text-xs">presio.sty</code> preloaded, with speaker notes and
+              media already wired up to compile on the first pass.
+            </p>
+            <Button variant="outline" size="sm" asChild>
+              <a href={OPEN_IN_OVERLEAF_URL} target="_blank" rel="noopener noreferrer">
+                Open a Presio project in Overleaf
+              </a>
+            </Button>
           </div>
 
           <div className="rounded-md border px-3 py-2.5 text-sm text-muted-foreground">

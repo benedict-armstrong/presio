@@ -15,12 +15,11 @@ import { lsRemove, annotationsKey } from "@/lib/storage";
 import { track, sha256Hex } from "@/lib/analytics";
 import { loadExternalPdfMeta, createExternalSession } from "@/lib/externalSession";
 import { supabase } from "@/lib/supabaseClient";
+import { OPEN_IN_OVERLEAF_URL } from "@/lib/overleaf";
 import "@/lib/pdf"; // ensure pdf.js worker is configured
 
 const TYPST_PACKAGE_URL = "https://github.com/benedict-armstrong/presio-typst-package";
 const LATEX_PACKAGE_URL = "https://github.com/benedict-armstrong/presio-latex-package";
-const OVERLEAF_EXAMPLE_URL =
-  "https://www.overleaf.com/docs?snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/main.tex&snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/presio.sty&snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/clip.gif&snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/poster.png&snip_name[]=main.tex&snip_name[]=presio.sty&snip_name[]=clip.gif&snip_name[]=poster.png&engine=pdflatex";
 
 const TYPST_EXAMPLE_PDF_URL =
   "https://raw.githubusercontent.com/benedict-armstrong/presio-typst-package/main/examples/plain/example.pdf";
@@ -946,8 +945,8 @@ Hello world.
               />
               <div className="mt-auto flex flex-wrap gap-2 pt-4">
                 <Button variant="outline" asChild>
-                  <a href={OVERLEAF_EXAMPLE_URL} target="_blank" rel="noopener noreferrer">
-                    Open example in Overleaf
+                  <a href={OPEN_IN_OVERLEAF_URL} target="_blank" rel="noopener noreferrer">
+                    Open a Presio project in Overleaf
                   </a>
                 </Button>
                 <Button variant="outline" disabled={exampleBusy !== null} onClick={() => openExample("latex")}>
