@@ -12,7 +12,7 @@ import { ConfirmReplaceDialog } from "@/components/controller/ConfirmReplaceDial
 import { ConfirmEndDialog } from "@/components/controller/ConfirmEndDialog";
 import { idbPut, idbList, idbDelete } from "@/lib/localStore";
 import { getSessionAuth, setSessionAuth, endSession } from "@/lib/utils";
-import { lsRemove, annotationsKey } from "@/lib/storage";
+import { lsRemove, annotationsKey, sessionKey } from "@/lib/storage";
 import { track, sha256Hex } from "@/lib/analytics";
 import { loadExternalPdfMeta, createExternalSession } from "@/lib/externalSession";
 import { supabase } from "@/lib/supabaseClient";
@@ -360,8 +360,13 @@ export default function Home() {
           }))
         )
         .catch(() => [] as RecentDeck[]);
-      const controlled = await listControlledSynced();
-      const account = await listAccountSynced();
+      // Independent lookups: the credential scan hits /api/sessions/:id per
+      // stored token, the account list is a single call. Running them together
+      // keeps the slower one off the critical path.
+      const [controlled, account] = await Promise.all([
+        listControlledSynced(),
+        listAccountSynced(),
+      ]);
       if (cancelled) return;
       // Locals first (they carry a creation date), then synced decks this
       // browser holds credentials for, then the account's remaining synced
@@ -392,7 +397,9 @@ export default function Home() {
   const openRecent = useCallback(
     (r: RecentDeck) => {
       if (r.kind === "account" && r.controllerToken) {
-        setSessionAuth(r.id, { controllerToken: r.controllerToken });
+        // Spread what's already stored: setSessionAuth writes the whole record,
+        // so assigning a bare { controllerToken } would drop a passphrase.
+        setSessionAuth(r.id, { ...getSessionAuth(r.id), controllerToken: r.controllerToken });
       }
       navigate(`/s/${r.id}?role=controller`);
     },
@@ -412,6 +419,16 @@ export default function Home() {
     try {
       if (closeTarget.kind === "local") {
         await idbDelete(closeTarget.id);
+        // A local session is presented from two windows in the same browser;
+        // the viewer has no server to hear from, so tell it directly on the
+        // channel Presentation listens on. Same message endPresentation sends.
+        try {
+          const channel = new BroadcastChannel(`presio-${closeTarget.id}`);
+          channel.postMessage({ type: "session_ended" });
+          channel.close();
+        } catch {
+          // No BroadcastChannel (or it's blocked): the deck is gone either way.
+        }
       } else {
         const res = await endSession(closeTarget.id, closeTarget.controllerToken);
         if (!res.ok) {
@@ -420,11 +437,14 @@ export default function Home() {
         }
       }
       // The stored controller credential is dead weight either way.
-      lsRemove(`session_${closeTarget.id}`);
+      lsRemove(sessionKey(closeTarget.id));
       setRecents((rs) => rs.filter((r) => r.id !== closeTarget.id));
       setCloseTarget(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to close the presentation");
+      // Dismiss the dialog too: the error renders on the page behind it, so
+      // leaving it up looks like the button simply did nothing.
+      setCloseTarget(null);
     } finally {
       setClosing(false);
     }
@@ -468,7 +488,9 @@ export default function Home() {
         if (!controllerToken) {
           throw new Error("This browser isn't the controller for this presentation");
         }
-        if (!stored.controllerToken) setSessionAuth(replaceTarget.id, { controllerToken });
+        if (!stored.controllerToken) {
+          setSessionAuth(replaceTarget.id, { ...stored, controllerToken });
+        }
         const headers: Record<string, string> = { "x-controller-token": controllerToken };
         const { data: sessionData } = await supabase.auth.getSession();
         if (sessionData.session) {
@@ -839,21 +861,20 @@ export default function Home() {
                   </div>
                   <ul className="space-y-1.5">
                     {recents.map((r) => (
+                      // The open action is its own button rather than a
+                      // clickable row: nesting Replace/Close inside a
+                      // `role="button"` row is invalid ARIA, and Enter/Space on
+                      // an inner button would activate both it and the row.
                       <li
                         key={r.id}
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`Open ${r.filename}`}
-                        onClick={() => openRecent(r)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            openRecent(r);
-                          }
-                        }}
-                        className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 transition-colors hover:border-muted-foreground/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--home2-accent)]"
+                        className="flex items-center gap-2 rounded-md border px-3 py-2 transition-colors focus-within:border-muted-foreground/50 hover:border-muted-foreground/50"
                       >
-                        <div className="min-w-0 flex-1">
+                        <button
+                          type="button"
+                          aria-label={`Open ${r.filename}`}
+                          onClick={() => openRecent(r)}
+                          className="min-w-0 flex-1 cursor-pointer rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--home2-accent)]"
+                        >
                           <p className="truncate text-sm font-medium">{r.filename}</p>
                           <p className="text-xs text-muted-foreground">
                             {r.totalSlides} {r.totalSlides === 1 ? "slide" : "slides"}
@@ -865,16 +886,13 @@ export default function Home() {
                             </span>
                             {r.createdAt !== null && ` · ${formatRecentDate(r.createdAt)}`}
                           </p>
-                        </div>
+                        </button>
                         <Button
                           size="sm"
                           variant="ghost"
                           title="Swap in a recompiled PDF — keeps this presentation's code"
                           disabled={replacing}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            pickReplace(r);
-                          }}
+                          onClick={() => pickReplace(r)}
                         >
                           <RefreshCw size={14} />
                           Replace
@@ -882,12 +900,13 @@ export default function Home() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          title="End this presentation for everyone — cannot be undone"
+                          title={
+                            r.kind === "local"
+                              ? "Delete this presentation from this browser — cannot be undone"
+                              : "End this presentation for everyone — cannot be undone"
+                          }
                           disabled={closing}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setCloseTarget(r);
-                          }}
+                          onClick={() => setCloseTarget(r)}
                         >
                           <X size={14} />
                           Close

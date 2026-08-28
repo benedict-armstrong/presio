@@ -434,3 +434,75 @@ describe("POST /api/present (update in place)", () => {
     expect(res.body.next).not.toMatch(/hand off/i);
   });
 });
+
+describe("GET /api/sessions/mine (account list)", () => {
+  const owned = (over: Partial<SessionRow>): SessionRow =>
+    baseRow({ user_id: "user-1", created_at: "2026-08-01T00:00:00.000Z", ...over });
+
+  it("401s without a bearer token", async () => {
+    const app = appWith(new FakeSupabase([owned({})]));
+    const res = await request(app).get("/api/sessions/mine");
+    expect(res.status).toBe(401);
+  });
+
+  it("401s on an unrecognised bearer token", async () => {
+    const app = appWith(new FakeSupabase([owned({})]).addToken("good", "user-1"));
+    const res = await request(app)
+      .get("/api/sessions/mine")
+      .set("Authorization", "Bearer nope");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns only the caller's rows, never another account's", async () => {
+    const fake = new FakeSupabase([
+      owned({ id: "MINE01" }),
+      owned({ id: "THEIR1", user_id: "user-2" }),
+    ]).addToken("tok", "user-1");
+    const res = await request(appWith(fake))
+      .get("/api/sessions/mine")
+      .set("Authorization", "Bearer tok");
+    expect(res.status).toBe(200);
+    expect(res.body.map((r: { id: string }) => r.id)).toEqual(["MINE01"]);
+  });
+
+  it("excludes local, expired and past-expiry rows", async () => {
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    const fake = new FakeSupabase([
+      owned({ id: "LIVE01" }),
+      owned({ id: "LOCAL1", local: true }),
+      owned({ id: "ENDED1", status: "expired" }),
+      owned({ id: "STALE1", expires_at: past }),
+    ]).addToken("tok", "user-1");
+    const res = await request(appWith(fake))
+      .get("/api/sessions/mine")
+      .set("Authorization", "Bearer tok");
+    expect(res.status).toBe(200);
+    expect(res.body.map((r: { id: string }) => r.id)).toEqual(["LIVE01"]);
+  });
+
+  it("orders newest first", async () => {
+    const fake = new FakeSupabase([
+      owned({ id: "OLD001", created_at: "2026-01-01T00:00:00.000Z" }),
+      owned({ id: "NEW001", created_at: "2026-08-20T00:00:00.000Z" }),
+      owned({ id: "MID001", created_at: "2026-05-05T00:00:00.000Z" }),
+    ]).addToken("tok", "user-1");
+    const res = await request(appWith(fake))
+      .get("/api/sessions/mine")
+      .set("Authorization", "Bearer tok");
+    expect(res.body.map((r: { id: string }) => r.id)).toEqual(["NEW001", "MID001", "OLD001"]);
+  });
+
+  it("returns the whitelisted fields — the controller token, and no passphrase", async () => {
+    const fake = new FakeSupabase([owned({})]).addToken("tok", "user-1");
+    const res = await request(appWith(fake))
+      .get("/api/sessions/mine")
+      .set("Authorization", "Bearer tok");
+    expect(res.body).toHaveLength(1);
+    // The owner is entitled to the controller token: it's what lets a device
+    // they've just signed in on open the presentation as its controller.
+    expect(res.body[0].controllerToken).toBe("secret-token");
+    expect(Object.keys(res.body[0]).sort()).toEqual(
+      ["controllerToken", "created_at", "expires_at", "filename", "id", "total_slides"]
+    );
+  });
+});
