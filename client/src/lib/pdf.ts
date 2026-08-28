@@ -39,6 +39,18 @@ export async function loadPdfData(data: Uint8Array): Promise<PDFDocumentProxy> {
   return getDocument({ data }).promise;
 }
 
+/**
+ * A URL that fetches a synced deck's *current* bytes.
+ *
+ * A replace rewrites the stored object in place, so the deck's URL never
+ * changes — and a browser (or the CDN in front of it) that already has the old
+ * copy will happily serve it again. Every load that must not get the previous
+ * deck goes through here, keyed by something that changes when the bytes do.
+ */
+export function freshPdfUrl(url: string, version: string | number): string {
+  return `${url}${url.includes("?") ? "&" : "?"}v=${version}`;
+}
+
 // Cap the rendered canvas width (device pixels). Beyond ~4K wide there's no
 // visible gain and we risk hitting browser canvas-size limits / memory.
 const MAX_CANVAS_WIDTH = 4096;

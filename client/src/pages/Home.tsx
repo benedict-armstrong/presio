@@ -554,7 +554,11 @@ export default function Home() {
         slides: totalSlides,
         mode: target.kind === "local" ? "local" : "server",
       });
-      navigate(`/s/${target.id}?role=controller`);
+      // A synced replace rewrites the stored object at the same URL, so tell
+      // the controller page to fetch past any copy this browser already has —
+      // it's the one most likely to be holding the pre-replace deck. Viewers
+      // in the room get there by their own route (the deck_updated broadcast).
+      navigate(`/s/${target.id}?role=controller`, { state: { deckReplaced: Date.now() } });
     },
     [navigate]
   );

@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { useParams, useSearchParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useSearchParams, useNavigate, useLocation, Link } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { getDocument } from "pdfjs-dist";
-import { loadPdf, loadPdfData, renderPage, clearCache } from "@/lib/pdf";
+import { loadPdf, loadPdfData, freshPdfUrl, renderPage, clearCache } from "@/lib/pdf";
 import { loadDeckInfo, type Deck, type DeckInfo } from "@/lib/deck";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
@@ -24,6 +24,10 @@ export default function Presentation() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  // Set by Home when it navigates here right after replacing this deck's PDF
+  // (see the initial load below). A timestamp, not a flag, so the cache-busted
+  // URL is stable across reloads of this page.
+  const replacedAt = (useLocation().state as { deckReplaced?: number } | null)?.deckReplaced;
   const requestedRole = searchParams.get("role") || "viewer";
   const [role, setRole] = useState(requestedRole);
   // The role once the session actually settles it — null while the request is
@@ -159,9 +163,7 @@ export default function Presentation() {
             // The stored object path doesn't change on replace, so bust any
             // cached copy along the way before re-fetching.
             clearCache();
-            const base = pdfUrlRef.current;
-            const busted = `${base}${base.includes("?") ? "&" : "?"}v=${Date.now()}`;
-            const doc = await loadPdf(busted);
+            const doc = await loadPdf(freshPdfUrl(pdfUrlRef.current, Date.now()));
             setPdf(doc);
           }
         } catch {
@@ -206,8 +208,18 @@ export default function Presentation() {
         }
         if (cancelled) return;
         setLocal(false);
-        const doc = await loadPdf(session.pdfUrl);
+        // Arriving straight from a replace (Home's recents/re-upload flow) the
+        // stored object has new bytes at the same URL, and this browser is the
+        // one most likely to have the old copy cached — it had the deck open
+        // before. Viewers already in the room don't hit this: they get
+        // deck_updated and reload through applyDeckUpdate, which busts too.
+        // Keyed by the replace's own timestamp, so a reload of this page reuses
+        // the fetch rather than starting another one.
+        const doc = await loadPdf(
+          replacedAt ? freshPdfUrl(session.pdfUrl, replacedAt) : session.pdfUrl
+        );
         if (cancelled) return;
+        // Store the canonical URL: later reloads append their own version.
         setPdfUrl(session.pdfUrl);
         setPdf(doc);
         setFilename(session.filename);
@@ -224,7 +236,10 @@ export default function Presentation() {
       clearCache();
       if (localUrlRef.current) URL.revokeObjectURL(localUrlRef.current);
     };
-  }, [id]);
+    // replacedAt belongs here: replacing the same deck again from Home routes
+    // back to this already-mounted page with a new timestamp, and that has to
+    // reload the document rather than leave the previous one on screen.
+  }, [id, replacedAt]);
 
   // The loaded document decides the page count: URL-backed decks re-fetch
   // their PDF on every load, so a republished file can change the page count
