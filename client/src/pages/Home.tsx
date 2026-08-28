@@ -11,10 +11,11 @@ import { CodeBlock } from "@/components/CodeBlock";
 import { ConfirmReplaceDialog } from "@/components/controller/ConfirmReplaceDialog";
 import { ConfirmReuploadDialog } from "@/components/controller/ConfirmReuploadDialog";
 import { ConfirmEndDialog } from "@/components/controller/ConfirmEndDialog";
-import { idbPut, idbGet, idbList, idbDelete } from "@/lib/localStore";
+import { idbPut, idbList, idbDelete } from "@/lib/localStore";
 import { getSessionAuth, setSessionAuth, endSession } from "@/lib/utils";
 import { lsRemove, annotationsKey, sessionKey } from "@/lib/storage";
 import { track, sha256Hex } from "@/lib/analytics";
+import { matchReupload } from "@/lib/reupload";
 import { loadExternalPdfMeta, createExternalSession } from "@/lib/externalSession";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/useAuth";
@@ -254,12 +255,13 @@ interface RecentDeck {
 const SESSION_KEY_RE = /^session_([A-Z0-9]{6})$/;
 
 // A dropped file that matched a known presentation and is waiting on the
-// update-vs-create prompt. The already-decoded bytes are kept so "Create
-// separate" doesn't re-read or re-parse the file.
+// update-vs-create prompt. The decoded blob is kept so "Create separate"
+// doesn't re-read or re-parse the file. (The ArrayBuffer it came from is not:
+// getDocument() has already transferred it to the pdf.js worker by this point,
+// leaving it detached.)
 interface ReuploadPrompt {
   target: RecentDeck;
   file: File;
-  buf: ArrayBuffer;
   blob: Blob;
   sha256?: string;
   filename: string;
@@ -338,44 +340,6 @@ async function listAccountSynced(): Promise<RecentDeck[]> {
   }
 }
 
-// Find a recent presentation a dropped PDF could be a re-upload of, before
-// anything is created. The comparison is purely local — the recents list is
-// already in memory and no network round-trip happens. Local rows compare
-// content hashes (backfilling the stored hash from the blob on demand for
-// records created before fingerprinting existed); synced and account rows
-// carry no local bytes, so they match on filename and slide count alone and
-// never claim the content is identical. A missing crypto.subtle (plain-http
-// origins) degrades every match to name-only.
-async function matchReupload(
-  filename: string,
-  totalSlides: number,
-  fileHash: string | undefined,
-  recents: RecentDeck[]
-): Promise<{ target: RecentDeck; identical: boolean } | undefined> {
-  const target = recents.find(
-    (r) => r.filename.toLowerCase() === filename.toLowerCase()
-  );
-  if (!target) return undefined;
-  if (target.kind !== "local") {
-    return target.totalSlides === totalSlides
-      ? { target, identical: false }
-      : undefined;
-  }
-  if (!fileHash) return { target, identical: false };
-  let storedHash = target.sha256;
-  if (!storedHash) {
-    try {
-      const rec = await idbGet(target.id);
-      if (!rec) return undefined;
-      storedHash = await sha256Hex(await rec.blob.arrayBuffer());
-      // Remember the backfilled hash so the next drop needs no blob read.
-      await idbPut({ ...rec, sha256: storedHash });
-    } catch {
-      return { target, identical: false };
-    }
-  }
-  return { target, identical: storedHash === fileHash };
-}
 
 export default function Home() {
   const navigate = useNavigate();
@@ -620,7 +584,6 @@ export default function Home() {
   const createDeck = useCallback(
     async (p: {
       file: File;
-      buf: ArrayBuffer;
       blob: Blob;
       sha256?: string;
       filename: string;
@@ -696,7 +659,7 @@ export default function Home() {
         // Fork on a re-upload before anything is created: the recents list is
         // already in memory, so the comparison costs no network round-trip and
         // a no-match drop adds no prompt or delay.
-        const match = await matchReupload(filename, totalSlides, sha256, recents);
+        const match = await matchReupload(filename, sha256, recents);
         if (match?.identical) {
           // Byte-identical re-drop — the person most likely lost their link
           // rather than changed their deck. Reopen the existing presentation
@@ -711,16 +674,15 @@ export default function Home() {
           setReuploadPrompt({
             target: match.target,
             file,
-            buf,
             blob,
             sha256,
             filename,
             totalSlides,
-            compared: match.target.kind === "local" && !!sha256,
+            compared: match.compared,
           });
           return;
         }
-        await createDeck({ file, buf, blob, sha256, filename, totalSlides });
+        await createDeck({ file, blob, sha256, filename, totalSlides });
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Upload failed");
       } finally {

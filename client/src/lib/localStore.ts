@@ -22,7 +22,7 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
+  const attempt = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -30,10 +30,36 @@ function openDb(): Promise<IDBDatabase> {
         db.createObjectStore(STORE, { keyPath: "id" });
       }
     };
-    req.onsuccess = () => resolve(req.result);
+    // A presentation runs as two windows in this browser (controller + viewer),
+    // so on the deploy that raises DB_VERSION one of them will still hold a
+    // connection at the old version and block the upgrade. Without these two
+    // handlers `open` neither succeeds nor errors and every caller hangs
+    // forever: `onblocked` turns the deadlock into a message the UI can show,
+    // and `onversionchange` makes *this* connection step aside when some other
+    // window is the one upgrading.
+    req.onblocked = () =>
+      reject(
+        new Error(
+          "Presio was updated. Please close this presentation's other windows/tabs and reload."
+        )
+      );
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => {
+        db.close();
+        dbPromise = null; // force a reopen (at the new version) on next use
+      };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
   });
-  return dbPromise;
+  // Never cache a failed open: whatever blocked it (another window still on
+  // the old version) normally clears, and the next call should try again.
+  attempt.catch(() => {
+    if (dbPromise === attempt) dbPromise = null;
+  });
+  dbPromise = attempt;
+  return attempt;
 }
 
 function tx<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
