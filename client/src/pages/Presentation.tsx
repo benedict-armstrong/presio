@@ -14,6 +14,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { authEnabled } from "@/lib/authMode";
 import { getSessionAuth, endSession } from "@/lib/utils";
 import { idbGet, idbPut, idbDelete } from "@/lib/localStore";
+import { DeckWatcher, isDeckWatchSupported, type DeckWatchStatus } from "@/lib/deckWatcher";
 import { track, sha256Hex } from "@/lib/analytics";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -113,6 +114,48 @@ export default function Presentation() {
   // effect when it changes (a deck replace rewrites it on local sessions).
   const pdfUrlRef = useRef("");
   pdfUrlRef.current = pdfUrl;
+
+  // Deck file watching (File System Access API, Chromium only). When the
+  // IndexedDB record carries a handle to the deck's file on disk, the
+  // controller polls it and offers a recompile through the header pill —
+  // nothing swaps until the presenter clicks. Viewers don't watch: the
+  // controller applies the update on everyone's behalf.
+  const [deckWatchStatus, setDeckWatchStatus] = useState<DeckWatchStatus | null>(null);
+  const watcherRef = useRef<DeckWatcher | null>(null);
+  const watchUpdateRef = useRef<File | null>(null);
+
+  useEffect(() => {
+    if (!local || requestedRole !== "controller") return;
+    if (!isDeckWatchSupported()) return;
+    let cancelled = false;
+    idbGet(id!)
+      .then((rec) => {
+        if (cancelled || !rec?.handle) return;
+        const watcher = new DeckWatcher(rec.handle, {
+          onStatus: (status) => {
+            if (!cancelled) setDeckWatchStatus(status);
+          },
+          onUpdate: (file) => {
+            if (cancelled) return;
+            watchUpdateRef.current = file;
+            setDeckWatchStatus("updated");
+          },
+        });
+        watcherRef.current = watcher;
+        void watcher.begin().catch(() => {
+          // Unexpected permission-check failure: offer the explicit resume.
+          if (!cancelled) setDeckWatchStatus("needs-permission");
+        });
+      })
+      .catch(() => { /* no record, no watcher */ });
+    return () => {
+      cancelled = true;
+      watcherRef.current?.stop();
+      watcherRef.current = null;
+      watchUpdateRef.current = null;
+      setDeckWatchStatus(null);
+    };
+  }, [local, id, requestedRole]);
 
   // Persist the controller's drawings across reloads.
   useEffect(() => {
@@ -694,7 +737,7 @@ export default function Presentation() {
   // synced ones re-upload to their stored object and let the server's
   // deck_updated broadcast drive the document swap on every client.
   const replacePdf = useCallback(
-    async (file: File) => {
+    async (file: File, handle?: FileSystemFileHandle) => {
       if (local === null) return;
       const buf = await file.arrayBuffer();
       // Snapshot before pdf.js transfers the buffer away (see Home.upload).
@@ -713,7 +756,10 @@ export default function Presentation() {
       if (local) {
         const rec = await idbGet(id!);
         if (!rec) throw new Error("This presentation is no longer in this browser");
-        await idbPut({ ...rec, blob, filename, totalSlides, sha256 });
+        // A handle passed along (picked via showOpenFilePicker or read from
+        // the watched file itself) replaces the stored one, so watching
+        // follows the new file; without one the existing handle stays.
+        await idbPut({ ...rec, blob, filename, totalSlides, sha256, ...(handle ? { handle } : {}) });
         channelRef.current?.postMessage({
           type: "deck_update",
           payload: { filename, totalSlides },
@@ -742,9 +788,34 @@ export default function Presentation() {
         slides: totalSlides,
         mode: local ? "local" : "server",
       });
+      // The swap rewrote the deck file; adopt its new metadata as the watcher
+      // baseline so the just-applied version isn't re-detected as an update.
+      watcherRef.current?.resetBaseline();
     },
     [local, id, applyDeckUpdate, pdfWriteAuth]
   );
+
+  // Pill click: swap the detected recompile in for controller and viewers via
+  // the ordinary replace path (one presenter-side decision for everyone).
+  const applyDeckWatchUpdate = useCallback(async () => {
+    const file = watchUpdateRef.current;
+    if (!file) return;
+    try {
+      await replacePdf(file);
+      // Only clear once the swap took: a failed replace keeps the pending
+      // file so the pill can be clicked again.
+      watchUpdateRef.current = null;
+      setDeckWatchStatus("watching");
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Failed to replace the PDF");
+    }
+  }, [replacePdf]);
+
+  // Explicit re-grant after a reload dropped the permission. Runs from the
+  // pill's click, which is the user gesture requestPermission() needs.
+  const resumeDeckWatch = useCallback(() => {
+    void watcherRef.current?.resume();
+  }, []);
 
   const onMediaControl = useCallback(
     (id: string, action: "play" | "pause" | "reset") => {
@@ -958,6 +1029,9 @@ export default function Presentation() {
       onReplacePdf={replacePdf}
       currentCanvasRef={currentCanvasRef}
       blanked={blanked}
+      deckWatchStatus={deckWatchStatus}
+      onDeckWatchApply={applyDeckWatchUpdate}
+      onDeckWatchResume={resumeDeckWatch}
       onBlankToggle={() => {
         const next = !blanked;
         // Server mode learns the new state from the socket echo; local mode has

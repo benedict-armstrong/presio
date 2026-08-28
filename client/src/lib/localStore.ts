@@ -13,6 +13,10 @@ export interface LocalPresentation {
   /** SHA-256 hex of the stored PDF's bytes, when known. Optional: records
    * created before v2 have no hash. */
   sha256?: string;
+  /** File System Access handle to the deck's file on disk (Chromium only),
+   * so the deck can be watched for recompiles. Handles are structured-
+   * cloneable, so they live on the record directly — no schema change. */
+  handle?: FileSystemFileHandle;
   createdAt: number;
 }
 

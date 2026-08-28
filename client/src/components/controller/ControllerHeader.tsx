@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import type { DeckWatchStatus } from "@/lib/deckWatcher";
 import { PresioLogo } from "@/components/PresioLogo";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
+import { DeckWatchPill } from "@/components/controller/DeckWatchPill";
 
 // Shared top bar for both the desktop and mobile controller. The right-hand
 // `actions` slot is where the two surfaces differ: a button toolbar on desktop,
@@ -13,6 +15,9 @@ export function ControllerHeader({
   blanked = false,
   showingCode = false,
   compact = false,
+  deckWatchStatus,
+  onDeckWatchApply,
+  onDeckWatchResume,
   actions,
 }: {
   id: string;
@@ -20,6 +25,11 @@ export function ControllerHeader({
   blanked?: boolean;
   /** Whether the join code / QR is currently shown on all viewers. */
   showingCode?: boolean;
+  /** Deck file watching status (lib/deckWatcher) — omitted on unsupported
+   * browsers and for non-controller roles, rendering nothing. */
+  deckWatchStatus?: DeckWatchStatus | null;
+  onDeckWatchApply?: () => void;
+  onDeckWatchResume?: () => void;
   /** Tighter spacing + bare code (no "Code:" label) for the mobile header. */
   compact?: boolean;
   actions?: ReactNode;
@@ -57,6 +67,13 @@ export function ControllerHeader({
           <span className="text-xs font-medium text-primary px-1.5 py-0.5 rounded bg-primary/10">
             Code shown
           </span>
+        )}
+        {deckWatchStatus && onDeckWatchApply && onDeckWatchResume && (
+          <DeckWatchPill
+            status={deckWatchStatus}
+            onApply={onDeckWatchApply}
+            onResume={onDeckWatchResume}
+          />
         )}
       </div>
       <div className="flex items-center gap-1">{actions}</div>
