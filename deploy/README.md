@@ -316,7 +316,44 @@ database and filesystem storage under `/data` (see `server/local/`) instead of
 Postgres/GoTrue/Storage/Kong. Login and cross-device sync-by-account aren't
 available in this mode (there's no auth provider to back them), but everything
 else works: local presentations, handoff links, and controller/viewer sync
-over Socket.IO. To present to viewers on other devices on the same network,
-have them open `http://<this-machine's-LAN-IP>:3001` instead of `localhost` —
-PDF links are relative, so they resolve correctly either way, and CORS accepts
-any origin in this mode since there's no fixed domain to allow ahead of time.
+over Socket.IO. CORS accepts any origin in this mode since there's no fixed
+domain to allow ahead of time, and PDF links are relative, so they resolve
+correctly whichever address the page was opened at.
+
+### Joining from other devices
+
+Viewers on the same network join by scanning the QR code on the share screen.
+Presio works out this machine's LAN address itself, so on a local install
+there's usually nothing to configure — but it can only do that when it can see
+the host's network, and a container on Docker's default bridge network can't:
+every address it can see belongs to the container. In that case set
+`PRESIO_PUBLIC_HOST` to the address other devices reach this machine on, read
+at run time so it needs no rebuild:
+
+```bash
+docker run -d --name presio -p 3001:3001 \
+  -e PRESIO_MODE=local -e LOCAL_DATA_DIR=/data -e TRUST_PROXY=false \
+  -e PRESIO_PUBLIC_HOST=192.168.1.20:3001 \
+  -v presio-data:/data \
+  ghcr.io/benedict-armstrong/presio-local:1
+```
+
+On Linux, `--network host` works instead and needs no address at all — but not
+on Docker Desktop, where the "host" is a Linux VM rather than your machine.
+Without either, the share screen asks for the address once and remembers it.
+
+To find the address, run this **on the host machine**, not inside the
+container — it's the one on the network your phone or laptop is on, usually
+starting `192.168.`, `10.` or `172.`:
+
+| OS | Command |
+| --- | --- |
+| macOS | `ipconfig getifaddr en0` (Wi-Fi; try `en1` if that's empty), or System Settings › Network |
+| Windows | `ipconfig`, then the `IPv4 Address` of the connected adapter |
+| Linux | `hostname -I` (the first address), or `ip route get 1.1.1.1` and read `src` |
+
+Append the port Presio is served on (`3001` above). Opening
+`http://<that-address>:3001` on the other device directly works too. If it
+doesn't connect, check that both devices are on the same network — guest Wi-Fi
+and client isolation block it regardless of the address — and that the host
+firewall allows the port.

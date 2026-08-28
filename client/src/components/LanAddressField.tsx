@@ -85,6 +85,72 @@ export function LanAddressField({
           the address, or whether a firewall is blocking the port.
         </p>
       ) : null}
+      <HowToFindIt />
+    </div>
+  );
+}
+
+// Finding a machine's own LAN address is the one part of this the presenter
+// can't be walked through by the UI alone, so the commands live here rather
+// than in a doc they'd have to go and find. Collapsed by default: it's only
+// needed by whoever hasn't done it before.
+
+function HowToFindIt() {
+  const [open, setOpen] = useState(false);
+  // The port that matters is the one serving this page, not the server's own:
+  // under `npm run dev` the client is on Vite's port.
+  const port = window.location.port;
+  return (
+    <div className="text-xs text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="underline underline-offset-2 hover:text-foreground"
+        aria-expanded={open}
+      >
+        How do I find it?
+      </button>
+      {open && (
+        <div className="mt-1 space-y-1">
+          <p>
+            It&apos;s the address of the machine running Presio — the host machine, if it&apos;s in
+            a container — on the network the other devices are on, usually starting{" "}
+            <span className="font-mono">192.168.</span>, <span className="font-mono">10.</span> or{" "}
+            <span className="font-mono">172.</span>
+            {port ? (
+              <>
+                . Add <span className="font-mono">:{port}</span> to whatever you find.
+              </>
+            ) : (
+              "."
+            )}
+          </p>
+          <ul className="space-y-0.5">
+            <li>
+              <span className="font-medium">macOS</span> —{" "}
+              <span className="font-mono">ipconfig getifaddr en0</span> (Wi-Fi;{" "}
+              <span className="font-mono">en1</span> if that&apos;s empty), or System Settings ›
+              Network › the connected adapter.
+            </li>
+            <li>
+              <span className="font-medium">Windows</span> —{" "}
+              <span className="font-mono">ipconfig</span> in PowerShell, then the{" "}
+              <span className="font-mono">IPv4 Address</span> of the adapter you&apos;re connected
+              on.
+            </li>
+            <li>
+              <span className="font-medium">Linux</span> —{" "}
+              <span className="font-mono">hostname -I</span> (the first address), or{" "}
+              <span className="font-mono">ip route get 1.1.1.1</span> and read the{" "}
+              <span className="font-mono">src</span> address.
+            </li>
+          </ul>
+          <p>
+            Phones and laptops must be on the same network — a &ldquo;guest&rdquo; Wi-Fi or client
+            isolation will block the connection even with the right address.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
