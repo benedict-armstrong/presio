@@ -22,6 +22,8 @@ export function ControllerHeader({
   onDeckWatchCycle,
   onDeckWatchApply,
   onDeckWatchResume,
+  remoteDeckUpdate = false,
+  onRemoteDeckApply,
   actions,
 }: {
   id: string;
@@ -41,6 +43,9 @@ export function ControllerHeader({
   onDeckWatchCycle?: () => void;
   onDeckWatchApply?: () => void;
   onDeckWatchResume?: () => void;
+  /** A URL-backed deck's source PDF was republished — offer the new version. */
+  remoteDeckUpdate?: boolean;
+  onRemoteDeckApply?: () => void;
   /** Tighter spacing + bare code (no "Code:" label) for the mobile header. */
   compact?: boolean;
   actions?: ReactNode;
@@ -84,10 +89,12 @@ export function ControllerHeader({
             filename={filename}
             mode={deckWatchMode}
             status={deckWatchStatus ?? null}
+            remoteUpdate={remoteDeckUpdate}
             onReplace={onReplaceDeck}
             onCycleMode={onDeckWatchCycle}
             onApply={onDeckWatchApply}
             onResume={onDeckWatchResume}
+            onRemoteApply={onRemoteDeckApply}
           />
         )}
       </div>

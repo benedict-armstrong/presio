@@ -36,6 +36,67 @@ function singleField(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+// --- URL-backed deck republish detection ---
+
+// Cheap change-detection metadata for a remote PDF: the host's validator
+// headers, as available. Opaque strings only — the body is never downloaded.
+interface RemotePdfMeta {
+  etag: string;
+  lastModified: string;
+  contentLength: string;
+}
+
+const REMOTE_PROBE_TIMEOUT_MS = 10_000;
+
+function metaFromHeaders(h: Headers, ranged: boolean): RemotePdfMeta {
+  let contentLength = h.get("content-length") ?? "";
+  if (ranged) {
+    // A 206's Content-Length is the range size, not the file size; the total
+    // rides along in Content-Range ("bytes 0-0/48213").
+    const total = h.get("content-range")?.split("/")[1];
+    if (total && /^\d+$/.test(total)) contentLength = total;
+  }
+  return {
+    etag: h.get("etag") ?? "",
+    lastModified: h.get("last-modified") ?? "",
+    contentLength,
+  };
+}
+
+/**
+ * Probe a remote PDF for its validator headers without downloading it: a HEAD
+ * first, falling back to a one-byte ranged GET for hosts that reject HEAD.
+ * Returns null when the host is unreachable or errors — callers degrade to
+ * "no change detection" rather than surfacing a failure.
+ */
+async function fetchRemotePdfMeta(url: string): Promise<RemotePdfMeta | null> {
+  const probe = async (method: "HEAD" | "GET"): Promise<Response> => {
+    const res = await fetch(url, {
+      method,
+      ...(method === "GET" ? { headers: { Range: "bytes=0-0" } } : {}),
+      redirect: "follow",
+      signal: AbortSignal.timeout(REMOTE_PROBE_TIMEOUT_MS),
+    });
+    // Release the (at most one-byte) body so the connection is not held open.
+    try {
+      await res.body?.cancel();
+    } catch {
+      // Already consumed or not cancelable — nothing to do.
+    }
+    return res;
+  };
+  try {
+    const head = await probe("HEAD");
+    if (head.ok) return metaFromHeaders(head.headers, false);
+    // Some hosts and CDNs only route GET; retry with a ranged request.
+    const get = await probe("GET");
+    if (get.ok) return metaFromHeaders(get.headers, true);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function registerSessionRoutes(app: express.Express, { supabase, io, socketState }: RouteDeps) {
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -619,6 +680,117 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
     }
   });
 
+  // GET /api/sessions/:id/remote-version — cheap republish detection for a
+  // URL-backed deck. Answers with the remote PDF's validator tuple (ETag /
+  // Last-Modified / Content-Length, as available) so the controller can tell,
+  // without downloading anything, whether the file at `pdf_url` has changed
+  // since the previous poll. Authorized like the /pdf route (controller token
+  // or the logged-in owner): the values themselves are opaque strings, but
+  // there is no reason to let arbitrary visitors probe them.
+  //
+  //   - 404 when the session is unknown/expired or not URL-backed (local and
+  //     server-hosted decks have no pdf_url) — the client reads this as
+  //     "nothing to watch" and stops polling.
+  //   - 502 when the remote host is unreachable or errors — the client backs
+  //     off and keeps today's behaviour; nothing surfaces to the presenter.
+  app.get("/api/sessions/:id/remote-version", async (req, res) => {
+    try {
+      const user = isLocalMode ? null : await resolveOptionalUserId(supabase, req);
+
+      const { data: row, error: rowError } = await supabase
+        .from("sessions")
+        .select("id, local, pdf_url, user_id, controller_token")
+        .eq("id", req.params.id)
+        .neq("status", "expired")
+        .single();
+      if (rowError || !row) {
+        res.status(404).json({ error: "Session not found" });
+        return;
+      }
+      const authorized =
+        safeEqual(req.get("x-controller-token") || "", row.controller_token) ||
+        (!isLocalMode && !!user && row.user_id === user);
+      if (!authorized) {
+        res.status(403).json({ error: "Not authorized" });
+        return;
+      }
+      if (row.local || !row.pdf_url) {
+        res.status(404).json({ error: "This presentation is not backed by an external URL" });
+        return;
+      }
+
+      const meta = await fetchRemotePdfMeta(row.pdf_url);
+      if (!meta) {
+        res.status(502).json({ error: "The remote host could not be reached" });
+        return;
+      }
+      res.json(meta);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /api/sessions/:id/deck-refreshed — the controller noticed (via
+  // remote-version polling) that a URL-backed deck was republished at its
+  // source and the presenter accepted the new version. Unlike /pdf there are
+  // no bytes to store — pdf_url decks keep no server copy — so this only
+  // records the new page count, clamps the current slide into range, drops
+  // the stored drawings (keyed by slide number) and announces the swap to the
+  // room; every client re-fetches the URL itself. The filename is unchanged:
+  // a republish replaces the content, not the presentation's title.
+  app.post("/api/sessions/:id/deck-refreshed", async (req, res) => {
+    try {
+      const user = isLocalMode ? null : await resolveOptionalUserId(supabase, req);
+
+      const totalSlides = parseInt(req.body.total_slides, 10);
+      if (!isValidTotalSlides(totalSlides)) {
+        res.status(400).json({ error: "A valid total_slides is required" });
+        return;
+      }
+
+      const { data: row, error: rowError } = await supabase
+        .from("sessions")
+        .select("id, local, pdf_url, user_id, controller_token, filename, current_slide")
+        .eq("id", req.params.id)
+        .neq("status", "expired")
+        .single();
+      if (rowError || !row) {
+        res.status(404).json({ error: "Session not found" });
+        return;
+      }
+      const authorized =
+        safeEqual(req.get("x-controller-token") || "", row.controller_token) ||
+        (!isLocalMode && !!user && row.user_id === user);
+      if (!authorized) {
+        res.status(403).json({ error: "Not authorized" });
+        return;
+      }
+      if (row.local || !row.pdf_url) {
+        res.status(400).json({ error: "This presentation is not backed by an external URL" });
+        return;
+      }
+
+      const clampedSlide = Math.min(Math.max(row.current_slide ?? 1, 1), totalSlides);
+      const { error: updateError } = await supabase
+        .from("sessions")
+        .update({ total_slides: totalSlides, current_slide: clampedSlide })
+        .eq("id", row.id);
+      if (updateError) {
+        res.status(500).json({ error: "Failed to update session" });
+        return;
+      }
+
+      socketState?.annotations.delete(String(req.params.id));
+      io.to(req.params.id).emit("deck_updated", { filename: row.filename, totalSlides });
+
+      res.json({ ok: true, totalSlides, filename: row.filename });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.get("/api/sessions/:id", async (req, res) => {
     const { data, error } = await supabase
       .from("sessions")
@@ -652,6 +824,11 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       current_slide: data.current_slide,
       local: data.local,
       pdfUrl,
+      // Whether pdfUrl points at someone else's host rather than our storage.
+      // The client needs this to re-fetch a changed deck correctly: our own
+      // object URLs take a cache-busting query parameter, but an external one
+      // may be presigned, where an extra parameter invalidates the signature.
+      external: !!data.pdf_url,
     });
   });
 

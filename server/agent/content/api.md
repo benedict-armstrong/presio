@@ -71,6 +71,18 @@ curl -s -F file=@deck.pdf BASE/api/check
   **200:** `[{ id, filename, total_slides, created_at, expires_at, controllerToken }]`. `controllerToken` is included because the owner is entitled to it — it lets any device the user signs in on open the presentation as its controller. 401 without a valid token; not available in local mode.
 - `DELETE /api/sessions/:id` — header `x-controller-token` — end a presentation: viewers are disconnected, the PDF is removed, and the row is marked expired (not recoverable).
 
+## URL-backed decks (republish detection)
+
+Presentations created with `POST /api/sessions/external` point at a PDF hosted elsewhere. A running session can detect that the file at the source URL was republished and swap it in live, without re-uploading anything.
+
+- `GET /api/sessions/:id/remote-version` — header `x-controller-token` (or `Authorization: Bearer <login JWT>` for the owner) — cheap change detection for a URL-backed deck. The server probes the deck's source URL with a HEAD request (a one-byte ranged GET for hosts that reject HEAD) and returns the validator tuple:
+  **200:** `{ etag, lastModified, contentLength }` — each field an opaque string, `""` when the host does not send it. Nothing is downloaded.
+  - **404** when the session is unknown or expired, or is **not URL-backed** (local and server-hosted decks have no `pdf_url`) — treat this as "nothing to watch".
+  - **502** when the remote host is unreachable or errors — back off and retry later; the session keeps working with its current deck.
+  - **403** on a wrong controller token.
+- `POST /api/sessions/:id/deck-refreshed` — same auth — the presenter accepted a republished deck. Body: `{ "total_slides": N }` (the new page count, read from the republished PDF). Records the new page count, clamps the stored current slide into range, drops the stored drawings, and broadcasts `deck_updated` to the room so every connected client re-fetches the source URL.
+  **200:** `{ ok: true, totalSlides, filename }`. **400** for a missing/invalid `total_slides` or a presentation that is not URL-backed. No bytes are uploaded — `pdf_url` decks keep no server copy.
+
 ## OpenAPI
 
 Machine-readable: `BASE/openapi.json`

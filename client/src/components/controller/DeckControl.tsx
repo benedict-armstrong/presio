@@ -14,7 +14,16 @@ import type { DeckWatchMode, DeckWatchStatus } from "@/lib/deckWatcher";
 const chipBase =
   "text-xs font-medium px-1.5 py-0.5 rounded transition-colors whitespace-nowrap";
 
-function modeChip(mode: DeckWatchMode, status: DeckWatchStatus | null) {
+interface Chip {
+  label: string;
+  title: string;
+  className: string;
+  /** What clicking does — "none" renders plain text instead of a button. */
+  action: "none" | "resume" | "apply" | "remote" | "cycle";
+  icon?: boolean;
+}
+
+function modeChip(mode: DeckWatchMode, status: DeckWatchStatus | null): Chip {
   // Trouble states outrank the mode: there is no point saying "watching" when
   // the grant lapsed or the file went away.
   if (status === "needs-permission") {
@@ -22,7 +31,7 @@ function modeChip(mode: DeckWatchMode, status: DeckWatchStatus | null) {
       label: "Resume watching",
       title: "Access to the deck file lapsed — click to resume watching it for recompiles",
       className: "text-amber-600 dark:text-amber-500 bg-amber-500/10 hover:bg-amber-500/20",
-      action: "resume" as const,
+      action: "resume",
     };
   }
   if (status === "stopped") {
@@ -30,7 +39,7 @@ function modeChip(mode: DeckWatchMode, status: DeckWatchStatus | null) {
       label: "Watch stopped",
       title: "The deck file was moved or deleted — watching stopped",
       className: "text-muted-foreground bg-muted",
-      action: "none" as const,
+      action: "none",
     };
   }
   if (status === "updated") {
@@ -38,7 +47,7 @@ function modeChip(mode: DeckWatchMode, status: DeckWatchStatus | null) {
       label: "Deck updated",
       title: "A recompiled version of this deck is ready — click to show it to everyone",
       className: "text-primary bg-primary/10 hover:bg-primary/20",
-      action: "apply" as const,
+      action: "apply",
     };
   }
   if (mode === "off") {
@@ -46,7 +55,7 @@ function modeChip(mode: DeckWatchMode, status: DeckWatchStatus | null) {
       label: "Live reload off",
       title: "Not watching the deck file — click to watch it for recompiles",
       className: "text-muted-foreground bg-muted hover:bg-muted-foreground/20",
-      action: "cycle" as const,
+      action: "cycle",
     };
   }
   if (mode === "auto") {
@@ -54,7 +63,7 @@ function modeChip(mode: DeckWatchMode, status: DeckWatchStatus | null) {
       label: "Auto reload",
       title: "Recompiles are applied as soon as they land — click to turn live reload off",
       className: "text-emerald-600 dark:text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20",
-      action: "cycle" as const,
+      action: "cycle",
       icon: true,
     };
   }
@@ -71,22 +80,38 @@ export function DeckControl({
   filename,
   mode,
   status,
+  remoteUpdate = false,
   onReplace,
   onCycleMode,
   onResume,
   onApply,
+  onRemoteApply,
 }: {
   filename: string;
   /** null when this deck can't be watched (synced deck, or no File System
    *  Access API) — the filename still shows and still swaps the deck. */
   mode: DeckWatchMode | null;
   status: DeckWatchStatus | null;
+  /** A URL-backed deck's source PDF was republished. Reported by the server-side
+   *  poller rather than the file watcher, but it means the same thing to the
+   *  presenter, so it reads as the same chip. */
+  remoteUpdate?: boolean;
   onReplace: () => void;
   onCycleMode: () => void;
   onResume: () => void;
   onApply: () => void;
+  onRemoteApply?: () => void;
 }) {
-  const chip = mode ? modeChip(mode, status) : null;
+  const chip: Chip | null = remoteUpdate
+    ? {
+        label: "Deck updated",
+        title: "A newer version of this deck was published at its source URL — click to show it to everyone",
+        className: "text-primary bg-primary/10 hover:bg-primary/20",
+        action: "remote",
+      }
+    : mode
+      ? modeChip(mode, status)
+      : null;
   return (
     <span className="flex min-w-0 items-center gap-1.5">
       <button
@@ -112,7 +137,9 @@ export function DeckControl({
                 ? onResume
                 : chip.action === "apply"
                   ? onApply
-                  : onCycleMode
+                  : chip.action === "remote"
+                    ? onRemoteApply
+                    : onCycleMode
             }
             className={`${chipBase} ${chip.className} inline-flex items-center gap-1`}
           >

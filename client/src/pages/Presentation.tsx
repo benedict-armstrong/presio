@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, useSearchParams, useNavigate, useLocation, Link } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { getDocument } from "pdfjs-dist";
-import { loadPdf, loadPdfData, freshPdfUrl, renderPage, clearCache } from "@/lib/pdf";
+import { loadPdf, loadPdfData, freshPdfUrl, loadLatestPdf, renderPage, clearCache } from "@/lib/pdf";
 import { loadDeckInfo, type Deck, type DeckInfo } from "@/lib/deck";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
@@ -157,12 +157,27 @@ export default function Presentation() {
   });
   const deckWatchModeRef = useRef(deckWatchMode);
   deckWatchModeRef.current = deckWatchMode;
-  // A detected recompile waiting on the presenter (prompt mode only).
-  const [reloadPrompt, setReloadPrompt] = useState(false);
+  // A detected deck change waiting on the presenter: "watch" from the file
+  // watcher (prompt mode only), "remote" from the URL-republish poller. Both
+  // clear drawings and Presio-edited notes, so both get the same warning.
+  const [reloadPrompt, setReloadPrompt] = useState<"watch" | "remote" | null>(null);
   const [applyingWatch, setApplyingWatch] = useState(false);
   // Speaker notes edited in Presio live in the current PDF's bytes, so a
   // recompiled file replaces them. Tracked to warn before that happens.
   const [notesEdited, setNotesEdited] = useState(false);
+
+  // A URL-backed deck's source PDF was republished (remote-version polling
+  // below); held until the presenter applies it or the poller replaces it
+  // with a newer sighting. Null = nothing pending.
+  const [remoteUpdate, setRemoteUpdate] = useState<{ totalSlides: number } | null>(null);
+  // Whether pdfUrl points at someone else's host (a URL-backed deck) rather
+  // than our own storage. Decides how a changed deck is re-fetched.
+  const [externalPdf, setExternalPdf] = useState(false);
+  const externalPdfRef = useRef(false);
+  externalPdfRef.current = externalPdf;
+  // The republished deck, already downloaded and parsed by the poller to
+  // confirm it. Handed to applyDeckUpdate so applying costs no second download.
+  const prefetchedDeckRef = useRef<PDFDocumentProxy | null>(null);
 
   useEffect(() => {
     // The settled role, not the requested one: a second controller demoted to
@@ -190,7 +205,7 @@ export default function Presentation() {
             // Auto mode swaps without asking; prompt mode puts the decision
             // (and what it costs) in front of the presenter first.
             if (deckWatchModeRef.current === "auto") void applyDeckWatchUpdateRef.current();
-            else setReloadPrompt(true);
+            else setReloadPrompt("watch");
           },
         });
         watcherRef.current = watcher;
@@ -205,7 +220,7 @@ export default function Presentation() {
       watcherRef.current?.stop();
       watcherRef.current = null;
       setDeckWatchStatus(null);
-      setReloadPrompt(false);
+      setReloadPrompt((p) => (p === "watch" ? null : p));
     };
   }, [local, id, role, watchedHandleEpoch, deckWatchMode]);
 
@@ -266,10 +281,22 @@ export default function Presentation() {
             localUrlRef.current = url;
             setPdfUrl(url);
           } else {
-            // The stored object path doesn't change on replace, so bust any
-            // cached copy along the way before re-fetching.
             clearCache();
-            const doc = await loadPdf(freshPdfUrl(pdfUrlRef.current, Date.now()));
+            // The remote-version poller already downloaded and parsed the
+            // republished deck to confirm it. When this update is that one,
+            // adopt the document it has rather than fetching the same bytes
+            // again mid-presentation.
+            const prefetched = prefetchedDeckRef.current;
+            prefetchedDeckRef.current = null;
+            if (prefetched && prefetched.numPages === totalSlides) {
+              setPdf(prefetched);
+              return;
+            }
+            void prefetched?.destroy();
+            const doc = await loadLatestPdf(pdfUrlRef.current, {
+              external: externalPdfRef.current,
+              version: Date.now(),
+            });
             setPdf(doc);
           }
         } catch {
@@ -314,6 +341,7 @@ export default function Presentation() {
         }
         if (cancelled) return;
         setLocal(false);
+        setExternalPdf(!!session.external);
         // Arriving straight from a replace (Home's recents/re-upload flow) the
         // stored object has new bytes at the same URL, and this browser is the
         // one most likely to have the old copy cached — it had the deck open
@@ -737,6 +765,181 @@ export default function Presentation() {
     return { "x-controller-token": controllerToken };
   }, [id]);
 
+  // Remote republish watching for URL-backed decks. A deck loaded from an
+  // external link re-fetches its PDF on every load, so a republish at the
+  // same URL is only invisible to a session that is already running. The
+  // controller polls the server's cheap metadata endpoint (one poller per
+  // session — viewers never poll) and, when the remote file provably changed,
+  // offers the new deck through the header pill. Same house rule as the file
+  // watcher: nothing swaps until the presenter clicks, and nothing surfaces
+  // when the host is unreachable or doesn't support the check.
+  useEffect(() => {
+    if (local !== false || role !== "controller") return;
+    const base = pdfUrlRef.current;
+    if (!base || base.startsWith("blob:")) return;
+
+    const BASE_MS = 30_000;
+    const MAX_MS = 4 * 60_000;
+    interface Sig {
+      etag: string;
+      lastModified: string;
+      contentLength: string;
+    }
+    const same = (a: Sig, b: Sig) =>
+      a.etag === b.etag && a.lastModified === b.lastModified && a.contentLength === b.contentLength;
+    const hasValidators = (s: Sig) => !!(s.etag || s.lastModified || s.contentLength);
+
+    let stopped = false;
+    let busy = false; // a poll's probes + parse can outlast one interval; never overlap
+    let backedOff = false; // parked at the slow cadence by an unreachable host
+    let delay = BASE_MS;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let baseline: Sig | null = null;
+    let candidate: Sig | null = null;
+
+    const stop = () => {
+      stopped = true;
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+    const schedule = () => {
+      if (stopped) return;
+      timer = setTimeout(() => { void poll(); }, delay);
+    };
+
+    const poll = async () => {
+      if (stopped || busy) return;
+      // Frozen background tabs can't present anyway; skip the round without
+      // spending a request on the remote host.
+      if (document.hidden) {
+        schedule();
+        return;
+      }
+      busy = true;
+      try {
+        let headers: Record<string, string>;
+        try {
+          headers = await pdfWriteAuth();
+        } catch {
+          stop(); // no credential to poll with — degrade silently
+          return;
+        }
+        let sig: Sig;
+        try {
+          const res = await fetch(`/api/sessions/${id}/remote-version`, { headers });
+          if (res.status === 403 || res.status === 404) {
+            stop(); // session gone, or not URL-backed: nothing to watch
+            return;
+          }
+          if (!res.ok) {
+            // Remote host unreachable (the server answers 502): back off to
+            // the slowest cadence and keep trying, still silently.
+            delay = MAX_MS;
+            backedOff = true;
+            schedule();
+            return;
+          }
+          sig = await res.json();
+          if (backedOff) {
+            // The host answered again. Without this the session stays parked at
+            // the four-minute cadence for good, since only a confirmed change
+            // resets it — and it can't see one while the host is down.
+            backedOff = false;
+            delay = BASE_MS;
+          }
+        } catch {
+          stop(); // network failure — today's behaviour, without errors
+          return;
+        }
+        if (!hasValidators(sig)) {
+          stop(); // host sends no validators — there is nothing to compare
+          return;
+        }
+        if (!baseline) {
+          baseline = sig; // first observation is the reference, never a change
+          schedule();
+          return;
+        }
+        if (same(sig, baseline)) {
+          candidate = null;
+          delay = Math.min(delay * 2, MAX_MS); // polite backoff while unchanged
+          schedule();
+          return;
+        }
+        // Different from the baseline. Hosts behind some CDNs mint a fresh
+        // ETag per request, so require the new signature to hold steady
+        // across two consecutive polls before trusting it.
+        if (!candidate || !same(sig, candidate)) {
+          candidate = sig;
+          schedule();
+          return;
+        }
+        // Confirmed change: read the new document's page count before
+        // offering it, so applying clamps correctly. A parse failure means
+        // the publish is probably mid-flight — keep watching silently and
+        // re-detect on the next poll.
+        candidate = null;
+        try {
+          // Always external here: the server only answers remote-version for a
+          // deck backed by someone else's URL.
+          const doc = await loadLatestPdf(base, { external: true, version: Date.now() });
+          if (stopped) {
+            void doc.destroy();
+            return;
+          }
+          // Keep it: if the presenter applies this update, applyDeckUpdate
+          // adopts the document instead of downloading the same bytes again.
+          void prefetchedDeckRef.current?.destroy();
+          prefetchedDeckRef.current = doc;
+          baseline = sig;
+          delay = BASE_MS; // stay fast for a while after a real change
+          setRemoteUpdate({ totalSlides: doc.numPages });
+          setReloadPrompt("remote");
+        } catch {
+          // candidate stays null: the next poll re-confirms and retries.
+        }
+        schedule();
+      } finally {
+        busy = false;
+      }
+    };
+
+    schedule();
+    return () => {
+      stop();
+      void prefetchedDeckRef.current?.destroy();
+      prefetchedDeckRef.current = null;
+    };
+  }, [local, role, id, pdfUrl, pdfWriteAuth]);
+
+  // Pill click: announce the republished deck for controller and viewers via
+  // the server's deck_updated broadcast — every client (this one included)
+  // cache-busts the URL and reloads through the ordinary deck_updated path.
+  const applyRemoteDeckUpdate = useCallback(async () => {
+    if (!remoteUpdate || applyingWatch) return;
+    setApplyingWatch(true);
+    try {
+      const authHeaders = await pdfWriteAuth();
+      const res = await fetch(`/api/sessions/${id}/deck-refreshed`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ total_slides: remoteUpdate.totalSlides }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to apply the updated deck");
+      }
+      setRemoteUpdate(null);
+      setReloadPrompt(null);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Failed to apply the updated deck");
+    } finally {
+      setApplyingWatch(false);
+    }
+  }, [remoteUpdate, applyingWatch, id, pdfWriteAuth]);
+
   // Persist edited speaker notes by writing them back into the PDF as a JSON
   // sidecar (matching presio's format), then swap in the updated document so
   // further edits build on it. Local sessions update IndexedDB; synced ones
@@ -885,7 +1088,7 @@ export default function Presentation() {
       // replace leaves the update pending and the pill clickable.
       watcher.adopt(update.meta);
       setDeckWatchStatus("watching");
-      setReloadPrompt(false);
+      setReloadPrompt(null);
     } catch (e) {
       window.alert(e instanceof Error ? e.message : "Failed to replace the PDF");
     } finally {
@@ -1106,15 +1309,16 @@ export default function Presentation() {
       {reloadPrompt && (
         <ConfirmDeckReloadDialog
           filename={filename}
+          source={reloadPrompt}
           annotatedSlides={
             Object.values(annotations).filter((strokes) => strokes.length > 0).length
           }
           notesEdited={notesEdited}
           busy={applyingWatch}
-          onConfirm={applyDeckWatchUpdate}
+          onConfirm={reloadPrompt === "watch" ? applyDeckWatchUpdate : applyRemoteDeckUpdate}
           // Dismissed, not declined: the header keeps the "Deck updated" chip
-          // so the recompile can still be applied when the moment is right.
-          onClose={() => setReloadPrompt(false)}
+          // so the update can still be applied when the moment is right.
+          onClose={() => setReloadPrompt(null)}
         />
       )}
       <ControllerView
@@ -1136,6 +1340,8 @@ export default function Presentation() {
         onDeckWatchCycle={cycleDeckWatchMode}
         onDeckWatchApply={applyDeckWatchUpdate}
         onDeckWatchResume={resumeDeckWatch}
+        remoteDeckUpdate={!!remoteUpdate}
+        onRemoteDeckApply={applyRemoteDeckUpdate}
         onBlankToggle={() => {
           const next = !blanked;
           // Server mode learns the new state from the socket echo; local mode has

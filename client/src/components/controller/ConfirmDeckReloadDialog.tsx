@@ -7,6 +7,7 @@ import { DialogOverlay } from "@/components/ui/dialog-overlay";
 // Only ever shown in "prompt" mode; "auto" applies without asking.
 export function ConfirmDeckReloadDialog({
   filename,
+  source,
   annotatedSlides,
   notesEdited,
   busy,
@@ -14,6 +15,8 @@ export function ConfirmDeckReloadDialog({
   onClose,
 }: {
   filename: string;
+  /** Where the change came from: the file on disk, or the deck's source URL. */
+  source: "watch" | "remote";
   /** How many slides carry drawings right now (0 = nothing to lose). */
   annotatedSlides: number;
   /** Whether speaker notes were edited in Presio since this deck was loaded. */
@@ -33,10 +36,15 @@ export function ConfirmDeckReloadDialog({
   return (
     <DialogOverlay onClose={onClose}>
       <div className="space-y-2 text-center">
-        <h2 className="text-lg font-semibold">Deck updated on disk</h2>
+        <h2 className="text-lg font-semibold">
+          {source === "watch" ? "Deck updated on disk" : "New version published"}
+        </h2>
         <p className="text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">{filename || "This deck"}</span> was
-          recompiled. Showing it swaps the slides for you and everyone watching.
+          <span className="font-medium text-foreground">{filename || "This deck"}</span>{" "}
+          {source === "watch"
+            ? "was recompiled."
+            : "changed at its source link."}{" "}
+          Showing it swaps the slides for you and everyone watching.
         </p>
         {losses.length > 0 && (
           <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">

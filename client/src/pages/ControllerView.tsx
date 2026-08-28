@@ -93,6 +93,9 @@ interface ControllerViewProps {
   onDeckWatchCycle: () => void;
   onDeckWatchApply: () => void;
   onDeckWatchResume: () => void;
+  /** A URL-backed deck's source PDF was republished (see Presentation). */
+  remoteDeckUpdate: boolean;
+  onRemoteDeckApply: () => void;
   mediaState: MediaState;
   onMediaControl: (id: string, action: "play" | "pause" | "reset") => void;
   onMediaTime: (id: string, t: number, playing: boolean, sampledAt: number) => void;
@@ -130,6 +133,8 @@ export function ControllerView({
   onDeckWatchCycle,
   onDeckWatchApply,
   onDeckWatchResume,
+  remoteDeckUpdate,
+  onRemoteDeckApply,
   mediaState,
   onMediaControl,
   onMediaTime,
@@ -533,6 +538,8 @@ export function ControllerView({
         onDeckWatchCycle={onDeckWatchCycle}
         onDeckWatchApply={onDeckWatchApply}
         onDeckWatchResume={onDeckWatchResume}
+        remoteDeckUpdate={remoteDeckUpdate}
+        onRemoteDeckApply={onRemoteDeckApply}
         actions={isMobile ? mobileActions : desktopActions}
       />
 
