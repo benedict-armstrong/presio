@@ -24,7 +24,8 @@ declare global {
   }
   interface Window {
     showOpenFilePicker?(options?: {
-      types?: { description?: string; accept: Record<string, string[]> }[];
+      types?: readonly { description?: string; accept: Record<string, readonly string[]> }[];
+      excludeAcceptAllOption?: boolean;
       multiple?: boolean;
     }): Promise<FileSystemFileHandle[]>;
   }
@@ -37,8 +38,12 @@ declare global {
 // handle where the platform allows it.
 export const PDF_PICKER_OPTIONS = {
   types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }],
+  // Without this the picker still offers an "All Files" filter, and a
+  // non-PDF pick would skip the type check the drop path does and only fail
+  // deep inside pdf.js.
+  excludeAcceptAllOption: true,
   multiple: false,
-};
+} as const;
 
 export function isDeckWatchSupported(): boolean {
   return typeof window !== "undefined" && typeof window.showOpenFilePicker === "function";
@@ -46,18 +51,24 @@ export function isDeckWatchSupported(): boolean {
 
 export type DeckWatchStatus = "watching" | "updated" | "needs-permission" | "stopped";
 
-interface FileMeta {
+export interface FileMeta {
   lastModified: number;
   size: number;
 }
 
 const POLL_MS = 2000;
 
+// How many times a steady-but-unparseable candidate is retried before it is
+// written off. A tool rewriting the file in place resolves within a poll or
+// two; a file that is simply not a valid PDF never will, and re-reading and
+// re-parsing it every POLL_MS for the rest of a talk is pure waste.
+const MAX_PARSE_ATTEMPTS = 10;
+
 export class DeckWatcher {
   private handle: FileSystemFileHandle;
   private callbacks: {
     onStatus: (status: DeckWatchStatus) => void;
-    onUpdate: (file: File) => void;
+    onUpdate: () => void;
   };
   private timer: ReturnType<typeof setInterval> | null = null;
   private polling = false;
@@ -69,12 +80,14 @@ export class DeckWatcher {
   private baseline: FileMeta | null = null;
   // First sighting of a change, waiting for a second poll to confirm it held.
   private candidate: FileMeta | null = null;
+  // Failed parses of the current candidate (see MAX_PARSE_ATTEMPTS).
+  private parseAttempts = 0;
 
   constructor(
     handle: FileSystemFileHandle,
     callbacks: {
       onStatus: (status: DeckWatchStatus) => void;
-      onUpdate: (file: File) => void;
+      onUpdate: () => void;
     }
   ) {
     this.handle = handle;
@@ -117,12 +130,37 @@ export class DeckWatcher {
     this.stopPolling();
   }
 
-  /** Forget the known file metadata, e.g. right after the deck was replaced.
-   * The swap itself rewrites the file; without this the watcher would
-   * immediately re-detect the just-applied version as another update. */
-  resetBaseline(): void {
-    this.baseline = null;
+  /**
+   * Read the watched file for applying. The `File` seen at detection time is
+   * only a reference to what was on disk then, so by the time the presenter
+   * clicks the pill a watch-mode build has usually rewritten it and reading
+   * those bytes throws. Re-reading here is the only way to get bytes that are
+   * still valid, and it hands over what is genuinely on disk *now*.
+   *
+   * Returns null while a write is still in flight (unreadable or unparseable),
+   * so the caller can leave the update pending rather than failing the swap.
+   * The caller confirms with `adopt()` once the replace actually took — a
+   * failed replace must not move the reference point.
+   */
+  async takeUpdate(): Promise<{ file: File; meta: FileMeta } | null> {
+    if (this.dead) return null;
+    try {
+      const file = await this.handle.getFile();
+      const meta = { lastModified: file.lastModified, size: file.size };
+      const doc = await getDocument({ data: await file.arrayBuffer() }).promise;
+      doc.destroy();
+      return { file, meta };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Adopt the metadata of a file that was actually applied as the new
+   * reference point, so the just-swapped version isn't offered again. */
+  adopt(meta: FileMeta): void {
+    this.baseline = meta;
     this.candidate = null;
+    this.parseAttempts = 0;
   }
 
   private startPolling(): void {
@@ -182,6 +220,7 @@ export class DeckWatcher {
       }
       if (meta.lastModified === this.baseline.lastModified && meta.size === this.baseline.size) {
         this.candidate = null;
+        this.parseAttempts = 0;
         return;
       }
 
@@ -193,21 +232,32 @@ export class DeckWatcher {
         this.candidate.size !== meta.size
       ) {
         this.candidate = meta;
+        this.parseAttempts = 0;
         return;
       }
 
       // Steady for two polls — parse before believing it. A failure means the
       // document is truncated or not yet complete: keep waiting, no error.
+      // After MAX_PARSE_ATTEMPTS, write this version off and treat it as the
+      // reference point; it isn't a deck, and a later edit gets a fresh chance.
       try {
         const doc = await getDocument({ data: await file.arrayBuffer() }).promise;
         doc.destroy();
       } catch {
+        if (++this.parseAttempts >= MAX_PARSE_ATTEMPTS) {
+          this.baseline = meta;
+          this.candidate = null;
+          this.parseAttempts = 0;
+        }
         return;
       }
 
       this.baseline = meta;
       this.candidate = null;
-      this.callbacks.onUpdate(file);
+      this.parseAttempts = 0;
+      // The File read here is deliberately not handed over: it will very
+      // likely be stale by the time the presenter clicks. See takeUpdate().
+      this.callbacks.onUpdate();
     } finally {
       this.busy = false;
     }

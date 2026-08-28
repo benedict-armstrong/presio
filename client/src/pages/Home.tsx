@@ -424,8 +424,14 @@ export default function Home() {
     if (isDeckWatchSupported()) {
       window.showOpenFilePicker?.(PDF_PICKER_OPTIONS)
         .then(async ([handle]) => {
+          const file = await handle.getFile();
+          if (file.type !== "application/pdf") {
+            setReplaceTarget(null);
+            setError("Please choose a PDF file");
+            return;
+          }
           setReplaceHandle(handle);
-          setReplaceFile(await handle.getFile());
+          setReplaceFile(file);
         })
         .catch(() => setReplaceTarget(null)); // cancelled: nothing to confirm
       return;
@@ -832,7 +838,16 @@ export default function Home() {
   const openFilePicker = useCallback(() => {
     if (isDeckWatchSupported()) {
       window.showOpenFilePicker?.(PDF_PICKER_OPTIONS)
-        .then(async ([handle]) => upload(await handle.getFile(), handle))
+        .then(async ([handle]) => {
+          const file = await handle.getFile();
+          // The picker's filter is a hint, not a guarantee — check the same way
+          // the drop path does rather than failing deep inside pdf.js.
+          if (file.type !== "application/pdf") {
+            setError("Please choose a PDF file");
+            return;
+          }
+          upload(file, handle);
+        })
         .catch(() => { /* cancelled */ });
       return;
     }

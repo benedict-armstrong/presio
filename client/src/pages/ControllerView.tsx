@@ -220,8 +220,14 @@ export function ControllerView({
     if (isDeckWatchSupported()) {
       window.showOpenFilePicker?.(PDF_PICKER_OPTIONS)
         .then(async ([handle]) => {
+          const file = await handle.getFile();
+          // The picker's filter is a hint, not a guarantee.
+          if (file.type !== "application/pdf") {
+            window.alert("Please choose a PDF file");
+            return;
+          }
           replaceHandleRef.current = handle;
-          setReplaceCandidate(await handle.getFile());
+          setReplaceCandidate(file);
         })
         .catch(() => { /* cancelled: nothing to confirm */ });
       return;

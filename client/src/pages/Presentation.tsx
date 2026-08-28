@@ -122,10 +122,16 @@ export default function Presentation() {
   // controller applies the update on everyone's behalf.
   const [deckWatchStatus, setDeckWatchStatus] = useState<DeckWatchStatus | null>(null);
   const watcherRef = useRef<DeckWatcher | null>(null);
-  const watchUpdateRef = useRef<File | null>(null);
+  const applyingWatchRef = useRef(false);
+  // Bumped when a replace stores a new file handle, so the effect below tears
+  // the watcher down and re-reads the record — otherwise watching would stay
+  // pinned to the previous file until a reload.
+  const [watchedHandleEpoch, setWatchedHandleEpoch] = useState(0);
 
   useEffect(() => {
-    if (!local || requestedRole !== "controller") return;
+    // The settled role, not the requested one: a second controller demoted to
+    // viewer by session_state must stop watching too.
+    if (!local || role !== "controller") return;
     if (!isDeckWatchSupported()) return;
     let cancelled = false;
     idbGet(id!)
@@ -135,10 +141,9 @@ export default function Presentation() {
           onStatus: (status) => {
             if (!cancelled) setDeckWatchStatus(status);
           },
-          onUpdate: (file) => {
-            if (cancelled) return;
-            watchUpdateRef.current = file;
-            setDeckWatchStatus("updated");
+          // Signal only — the File seen at detection is re-read at apply time.
+          onUpdate: () => {
+            if (!cancelled) setDeckWatchStatus("updated");
           },
         });
         watcherRef.current = watcher;
@@ -152,10 +157,9 @@ export default function Presentation() {
       cancelled = true;
       watcherRef.current?.stop();
       watcherRef.current = null;
-      watchUpdateRef.current = null;
       setDeckWatchStatus(null);
     };
-  }, [local, id, requestedRole]);
+  }, [local, id, role, watchedHandleEpoch]);
 
   // Persist the controller's drawings across reloads.
   useEffect(() => {
@@ -788,9 +792,11 @@ export default function Presentation() {
         slides: totalSlides,
         mode: local ? "local" : "server",
       });
-      // The swap rewrote the deck file; adopt its new metadata as the watcher
-      // baseline so the just-applied version isn't re-detected as an update.
-      watcherRef.current?.resetBaseline();
+      // A replace writes IndexedDB, never the file on disk, so the watcher's
+      // reference point is still valid. What can change is *which* file is
+      // watched: a pick that came with its own handle replaced the stored one,
+      // so restart the watcher against it.
+      if (handle) setWatchedHandleEpoch((n) => n + 1);
     },
     [local, id, applyDeckUpdate, pdfWriteAuth]
   );
@@ -798,16 +804,27 @@ export default function Presentation() {
   // Pill click: swap the detected recompile in for controller and viewers via
   // the ordinary replace path (one presenter-side decision for everyone).
   const applyDeckWatchUpdate = useCallback(async () => {
-    const file = watchUpdateRef.current;
-    if (!file) return;
+    const watcher = watcherRef.current;
+    if (!watcher || applyingWatchRef.current) return;
+    applyingWatchRef.current = true;
     try {
-      await replacePdf(file);
-      // Only clear once the swap took: a failed replace keeps the pending
-      // file so the pill can be clicked again.
-      watchUpdateRef.current = null;
+      // Read the file as it is *now*: the version detected a moment ago has
+      // usually been rewritten again by a watch-mode build, and its bytes no
+      // longer read back.
+      const update = await watcher.takeUpdate();
+      if (!update) {
+        window.alert("The deck file is still being written. Try again in a moment.");
+        return;
+      }
+      await replacePdf(update.file);
+      // Only move the reference point once the swap actually took, so a failed
+      // replace leaves the update pending and the pill clickable.
+      watcher.adopt(update.meta);
       setDeckWatchStatus("watching");
     } catch (e) {
       window.alert(e instanceof Error ? e.message : "Failed to replace the PDF");
+    } finally {
+      applyingWatchRef.current = false;
     }
   }, [replacePdf]);
 

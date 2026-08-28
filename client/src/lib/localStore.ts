@@ -20,7 +20,9 @@ export interface LocalPresentation {
   createdAt: number;
 }
 
-export type LocalPresentationMeta = Omit<LocalPresentation, "blob">;
+// `handle` is omitted alongside the blob: idbList builds its rows field by
+// field and never copies one, so advertising it would be a type-level lie.
+export type LocalPresentationMeta = Omit<LocalPresentation, "blob" | "handle">;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
