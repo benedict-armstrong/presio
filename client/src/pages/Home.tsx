@@ -10,7 +10,7 @@ import { MobileNotice } from "@/components/MobileNotice";
 import { CodeBlock } from "@/components/CodeBlock";
 import { ConfirmReplaceDialog } from "@/components/controller/ConfirmReplaceDialog";
 import { ConfirmEndDialog } from "@/components/controller/ConfirmEndDialog";
-import { idbPut, idbList } from "@/lib/localStore";
+import { idbPut, idbList, idbDelete } from "@/lib/localStore";
 import { getSessionAuth, setSessionAuth, endSession } from "@/lib/utils";
 import { lsRemove, annotationsKey } from "@/lib/storage";
 import { track, sha256Hex } from "@/lib/analytics";
@@ -399,18 +399,27 @@ export default function Home() {
     [navigate]
   );
 
-  // Close (end) a presentation for everyone. Not recoverable — the server
-  // marks the row expired and drops its PDF — hence the confirm dialog.
+  // Close (end) a presentation. A local deck's PDF only ever lived in this
+  // browser, so ending it means deleting that IndexedDB copy — the same
+  // teardown the controller runs in Presentation.tsx. A synced deck is ended
+  // for everyone on the server: viewers are disconnected, the stored PDF is
+  // dropped and the row is marked expired. Neither is recoverable, hence the
+  // confirm dialog.
   const confirmClose = useCallback(async () => {
     if (!closeTarget || closing) return;
     setClosing(true);
     setError("");
     try {
-      const res = await endSession(closeTarget.id, closeTarget.controllerToken);
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || "Failed to close the presentation");
+      if (closeTarget.kind === "local") {
+        await idbDelete(closeTarget.id);
+      } else {
+        const res = await endSession(closeTarget.id, closeTarget.controllerToken);
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || "Failed to close the presentation");
+        }
       }
+      // The stored controller credential is dead weight either way.
       lsRemove(`session_${closeTarget.id}`);
       setRecents((rs) => rs.filter((r) => r.id !== closeTarget.id));
       setCloseTarget(null);
@@ -852,7 +861,7 @@ export default function Home() {
                             <span
                               className={r.kind === "local" ? undefined : "text-(--home2-accent)"}
                             >
-                              {r.kind === "local" ? "local" : r.kind === "synced" ? "shared" : "Synced"}
+                              {r.kind === "local" ? "local" : r.kind === "synced" ? "shared" : "synced"}
                             </span>
                             {r.createdAt !== null && ` · ${formatRecentDate(r.createdAt)}`}
                           </p>
@@ -1097,7 +1106,7 @@ Hello world.
 
       {closeTarget && (
         <ConfirmEndDialog
-          local={false}
+          local={closeTarget.kind === "local"}
           onConfirm={confirmClose}
           onClose={() => setCloseTarget(null)}
         />
