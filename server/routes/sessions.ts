@@ -9,6 +9,7 @@ import { getBearerToken, requireUser, resolveOptionalUserId, safeEqual } from ".
 import { isLocalMode } from "../local/mode.js";
 import { clearSessionState, type SocketState } from "../socket.js";
 import { baseUrl } from "../lib/baseUrl.js";
+import { fetchRemotePdfMeta } from "../lib/remotePdf.js";
 import { createPresentHandoff, handoffTokenFrom, updatePresentDeck } from "../lib/presentHandoff.js";
 import { generatePassphrase, insertSession, ownedExpiry } from "../lib/sessionRows.js";
 
@@ -34,67 +35,6 @@ export const MAX_CONCURRENT_PRESENTATIONS = 3;
 function singleField(value: unknown): string | null {
   if (value === undefined) return "";
   return typeof value === "string" ? value : null;
-}
-
-// --- URL-backed deck republish detection ---
-
-// Cheap change-detection metadata for a remote PDF: the host's validator
-// headers, as available. Opaque strings only — the body is never downloaded.
-interface RemotePdfMeta {
-  etag: string;
-  lastModified: string;
-  contentLength: string;
-}
-
-const REMOTE_PROBE_TIMEOUT_MS = 10_000;
-
-function metaFromHeaders(h: Headers, ranged: boolean): RemotePdfMeta {
-  let contentLength = h.get("content-length") ?? "";
-  if (ranged) {
-    // A 206's Content-Length is the range size, not the file size; the total
-    // rides along in Content-Range ("bytes 0-0/48213").
-    const total = h.get("content-range")?.split("/")[1];
-    if (total && /^\d+$/.test(total)) contentLength = total;
-  }
-  return {
-    etag: h.get("etag") ?? "",
-    lastModified: h.get("last-modified") ?? "",
-    contentLength,
-  };
-}
-
-/**
- * Probe a remote PDF for its validator headers without downloading it: a HEAD
- * first, falling back to a one-byte ranged GET for hosts that reject HEAD.
- * Returns null when the host is unreachable or errors — callers degrade to
- * "no change detection" rather than surfacing a failure.
- */
-async function fetchRemotePdfMeta(url: string): Promise<RemotePdfMeta | null> {
-  const probe = async (method: "HEAD" | "GET"): Promise<Response> => {
-    const res = await fetch(url, {
-      method,
-      ...(method === "GET" ? { headers: { Range: "bytes=0-0" } } : {}),
-      redirect: "follow",
-      signal: AbortSignal.timeout(REMOTE_PROBE_TIMEOUT_MS),
-    });
-    // Release the (at most one-byte) body so the connection is not held open.
-    try {
-      await res.body?.cancel();
-    } catch {
-      // Already consumed or not cancelable — nothing to do.
-    }
-    return res;
-  };
-  try {
-    const head = await probe("HEAD");
-    if (head.ok) return metaFromHeaders(head.headers, false);
-    // Some hosts and CDNs only route GET; retry with a ranged request.
-    const get = await probe("GET");
-    if (get.ok) return metaFromHeaders(get.headers, true);
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 export function registerSessionRoutes(app: express.Express, { supabase, io, socketState }: RouteDeps) {
@@ -739,6 +679,13 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   // the stored drawings (keyed by slide number) and announces the swap to the
   // room; every client re-fetches the URL itself. The filename is unchanged:
   // a republish replaces the content, not the presentation's title.
+  //
+  // Unlike /pdf, the page count is asserted by the client rather than parsed
+  // here — there are no bytes on this side to count. That is safe because only
+  // the controller can call this, and because isValidTotalSlides bounds the
+  // value: total_slides scales the per-session annotation caps and gates slide
+  // numbers, so an unbounded one would be a memory lever, but a wrong-but-bounded
+  // one only mis-clamps the presenter's own deck until the next real update.
   app.post("/api/sessions/:id/deck-refreshed", async (req, res) => {
     try {
       const user = isLocalMode ? null : await resolveOptionalUserId(supabase, req);

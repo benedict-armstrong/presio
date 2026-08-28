@@ -198,7 +198,7 @@ export function buildOpenApi(base: string) {
         get: {
           summary: "Change-detection metadata for a URL-backed deck's remote PDF",
           description:
-            "Probes the deck's source URL with a HEAD request (one-byte ranged GET fallback) and returns its validator headers, so a running controller can tell whether the remote PDF was republished — without downloading it. Only for presentations backed by an external PDF URL.",
+            "Probes the deck's source URL with a HEAD request (one-byte ranged GET fallback) and returns its validator headers, so a running controller can tell whether the remote PDF was republished — without downloading it. Only for presentations backed by an external PDF URL. The probe is https-only and restricted to public addresses (loopback, private and link-local targets are refused, and redirects are re-checked at every hop).",
           operationId: "remoteSessionVersion",
           parameters: [
             { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -232,7 +232,10 @@ export function buildOpenApi(base: string) {
               description:
                 "Unknown or expired session, or the presentation is not backed by an external URL (local and server-hosted decks have no pdf_url) — nothing to watch",
             },
-            "502": { description: "The remote host could not be reached" },
+            "502": {
+              description:
+                "The remote host could not be reached, or the URL is one the server refuses to fetch",
+            },
           },
         },
       },

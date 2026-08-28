@@ -78,8 +78,10 @@ Presentations created with `POST /api/sessions/external` point at a PDF hosted e
 - `GET /api/sessions/:id/remote-version` — header `x-controller-token` (or `Authorization: Bearer <login JWT>` for the owner) — cheap change detection for a URL-backed deck. The server probes the deck's source URL with a HEAD request (a one-byte ranged GET for hosts that reject HEAD) and returns the validator tuple:
   **200:** `{ etag, lastModified, contentLength }` — each field an opaque string, `""` when the host does not send it. Nothing is downloaded.
   - **404** when the session is unknown or expired, or is **not URL-backed** (local and server-hosted decks have no `pdf_url`) — treat this as "nothing to watch".
-  - **502** when the remote host is unreachable or errors — back off and retry later; the session keeps working with its current deck.
+  - **502** when the remote host is unreachable or errors, or when the URL is one the server refuses to fetch — back off and retry later; the session keeps working with its current deck.
   - **403** on a wrong controller token.
+
+  The probe is https-only and restricted to public addresses: a `pdf_url` that resolves to a loopback, private, link-local or otherwise internal address is refused, and redirects are followed only while they stay https and public. A deck hosted somewhere only reachable inside a private network can be presented as normal — it just gets no republish detection.
 - `POST /api/sessions/:id/deck-refreshed` — same auth — the presenter accepted a republished deck. Body: `{ "total_slides": N }` (the new page count, read from the republished PDF). Records the new page count, clamps the stored current slide into range, drops the stored drawings, and broadcasts `deck_updated` to the room so every connected client re-fetches the source URL.
   **200:** `{ ok: true, totalSlides, filename }`. **400** for a missing/invalid `total_slides` or a presentation that is not URL-backed. No bytes are uploaded — `pdf_url` decks keep no server copy.
 

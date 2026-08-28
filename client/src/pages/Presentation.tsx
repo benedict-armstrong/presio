@@ -750,19 +750,27 @@ export default function Presentation() {
     navigate("/", { replace: true });
   }, [local, id, navigate]);
 
-  // Authorization for rewriting a synced deck's stored PDF. A logged-in owner
-  // sends their bearer token; a presenter holding only the controller token
-  // (anonymous creation, local-mode server, passphrase-granted controllers)
-  // sends that — the server accepts both, exactly like ending a session.
+  // Authorization for rewriting a synced deck's stored PDF. The server accepts
+  // either the presentation's controller token or the logged-in owner's bearer
+  // token, so send whichever this browser has — and both when it has both.
+  //
+  // Sending only the bearer token used to be enough for the common case and
+  // wrong for one that matters: a signed-in presenter who took control by
+  // passphrase isn't the owner, so their token doesn't authorize the write and
+  // the controller token that would was never sent.
   const pdfWriteAuth = useCallback(async (): Promise<Record<string, string>> => {
+    const headers: Record<string, string> = {};
+    const { controllerToken } = getSessionAuth(id!);
+    if (controllerToken) headers["x-controller-token"] = controllerToken;
     if (authEnabled) {
       const { data } = await supabase.auth.getSession();
       const accessToken = data.session?.access_token;
-      if (accessToken) return { Authorization: `Bearer ${accessToken}` };
+      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
     }
-    const { controllerToken } = getSessionAuth(id!);
-    if (!controllerToken) throw new Error("This browser isn't the controller for this presentation");
-    return { "x-controller-token": controllerToken };
+    if (!Object.keys(headers).length) {
+      throw new Error("This browser isn't the controller for this presentation");
+    }
+    return headers;
   }, [id]);
 
   // Remote republish watching for URL-backed decks. A deck loaded from an
