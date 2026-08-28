@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { nanoid } from "nanoid";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { isValidHttpsUrl, isValidTotalSlides, MAX_TOTAL_SLIDES } from "../validation.js";
-import { getBearerToken, resolveOptionalUserId, safeEqual } from "../auth.js";
+import { getBearerToken, requireUser, resolveOptionalUserId, safeEqual } from "../auth.js";
 import { isLocalMode } from "../local/mode.js";
 import { clearSessionState, type SocketState } from "../socket.js";
 import { baseUrl } from "../lib/baseUrl.js";
@@ -155,6 +155,55 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       res.status(500).json({ error: "Internal server error" });
     }
   });
+
+  /**
+   * GET /api/sessions/mine — the signed-in account's live synced presentations,
+   * newest first. The home screen asks this on any device the user signs in on:
+   * local decks are device-bound IndexedDB, but synced ones belong to the
+   * account, so a new device needs this list (plus each deck's controller
+   * token — the owner is entitled to it, and without it the device could never
+   * open the controller). Local handoff rows are excluded: their PDF only ever
+   * belongs in the creating browser.
+   */
+  if (!isLocalMode) {
+    app.get("/api/sessions/mine", async (req, res) => {
+      try {
+        const user = await requireUser(supabase, req);
+        if (!user) {
+          res.status(401).json({ error: "Authentication required" });
+          return;
+        }
+        // The filter comes from the verified token only — a client-supplied id
+        // is never trusted, so no account can see another's rows.
+        const { data, error } = await supabase
+          .from("sessions")
+          .select("id, filename, total_slides, created_at, expires_at, controller_token")
+          .eq("user_id", user.id)
+          .eq("local", false)
+          .neq("status", "expired")
+          .gt("expires_at", new Date().toISOString())
+          .order("created_at", { ascending: false });
+        if (error) {
+          res.status(500).json({ error: "Failed to list presentations" });
+          return;
+        }
+        // Whitelist the response fields; only controller_token is renamed.
+        res.json(
+          (data ?? []).map((row) => ({
+            id: row.id,
+            filename: row.filename,
+            total_slides: row.total_slides,
+            created_at: row.created_at,
+            expires_at: row.expires_at,
+            controllerToken: row.controller_token,
+          }))
+        );
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+  }
 
   // Download a staged handoff PDF (token required). Does not delete yet.
   app.get("/api/sessions/:id/handoff", async (req, res) => {

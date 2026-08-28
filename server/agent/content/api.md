@@ -2,7 +2,7 @@
 title: Presio API
 description: REST reference for starting local PDF presentations and validating sidecars, with curl examples.
 canonical: BASE/api.md
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # Presio API
@@ -64,6 +64,12 @@ curl -s -F file=@deck.pdf BASE/api/check
 
 - `GET /api/sessions/:id/handoff?t=TOKEN` — download staged PDF
 - `POST /api/sessions/:id/handoff/complete` — header `x-controller-token` — clear server copy
+
+## Account presentations
+
+- `GET /api/sessions/mine` — header `Authorization: Bearer <login JWT>` — the signed-in user's live synced presentations, newest first.
+  **200:** `[{ id, filename, total_slides, created_at, expires_at, controllerToken }]`. `controllerToken` is included because the owner is entitled to it — it lets any device the user signs in on open the presentation as its controller. 401 without a valid token; not available in local mode.
+- `DELETE /api/sessions/:id` — header `x-controller-token` — end a presentation: viewers are disconnected, the PDF is removed, and the row is marked expired (not recoverable).
 
 ## OpenAPI
 

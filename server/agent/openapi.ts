@@ -152,6 +152,77 @@ export function buildOpenApi(base: string) {
           },
         },
       },
+      "/api/sessions/mine": {
+        get: {
+          summary: "List the signed-in user's live synced presentations",
+          description:
+            "Every non-expired synced presentation owned by the authenticated user, newest first. Each row carries its controller token — the owner is entitled to it, so any device the user signs in on can open the controller. Not available in local mode.",
+          operationId: "mySessions",
+          parameters: [
+            {
+              name: "Authorization",
+              in: "header",
+              required: true,
+              schema: { type: "string" },
+              description: "Bearer Presio login JWT",
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Live synced presentations, newest first",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["id", "filename", "total_slides", "controllerToken"],
+                      properties: {
+                        id: { type: "string" },
+                        filename: { type: "string" },
+                        total_slides: { type: "integer" },
+                        created_at: { type: "string", format: "date-time" },
+                        expires_at: { type: "string", format: "date-time" },
+                        controllerToken: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { description: "Missing or invalid bearer token" },
+          },
+        },
+      },
+      "/api/sessions/{id}": {
+        delete: {
+          summary: "End a presentation",
+          description:
+            "Disconnects all viewers, removes the PDF, and marks the session expired — not recoverable. Authorized by the presentation's controller token.",
+          operationId: "endSession",
+          parameters: [
+            { name: "id", in: "path", required: true, schema: { type: "string" } },
+            {
+              name: "x-controller-token",
+              in: "header",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: { type: "object", properties: { ok: { type: "boolean" } } },
+                },
+              },
+            },
+            "403": { description: "Wrong controller token" },
+            "404": { description: "Unknown session id" },
+          },
+        },
+      },
     },
   };
 }

@@ -42,6 +42,7 @@ class Query<T = unknown> implements PromiseLike<T> {
   private filters: Filter[] = [];
   private wantSingle = false;
   private wantCount = false;
+  private orderSpec?: { col: string; ascending: boolean };
 
   constructor(
     private rows: SessionRow[],
@@ -58,10 +59,22 @@ class Query<T = unknown> implements PromiseLike<T> {
   gt(col: string, val: unknown) { this.filters.push({ col, op: "gt", val }); return this; }
   lt(col: string, val: unknown) { this.filters.push({ col, op: "lt", val }); return this; }
   in(col: string, val: unknown[]) { this.filters.push({ col, op: "in", val }); return this; }
+  order(col: string, opts?: { ascending?: boolean }) {
+    this.orderSpec = { col, ascending: opts?.ascending ?? true };
+    return this;
+  }
   single() { this.wantSingle = true; return this; }
 
   private matched(): SessionRow[] {
-    return this.rows.filter((r) => this.filters.every((f) => matches(r, f)));
+    const matched = this.rows.filter((r) => this.filters.every((f) => matches(r, f)));
+    if (this.orderSpec) {
+      const { col, ascending } = this.orderSpec;
+      matched.sort((a, b) => {
+        const cmp = a[col] === b[col] ? 0 : (a[col] as never) > (b[col] as never) ? 1 : -1;
+        return ascending ? cmp : -cmp;
+      });
+    }
+    return matched;
   }
 
   private run(): unknown {
