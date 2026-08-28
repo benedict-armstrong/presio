@@ -2,7 +2,7 @@
 // uploaded to the server. Shared across same-origin tabs/windows.
 
 const DB_NAME = "presio";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = "presentations";
 
 export interface LocalPresentation {
@@ -10,6 +10,9 @@ export interface LocalPresentation {
   filename: string;
   totalSlides: number;
   blob: Blob;
+  /** SHA-256 hex of the stored PDF's bytes, when known. Optional: records
+   * created before v2 have no hash. */
+  sha256?: string;
   createdAt: number;
 }
 
@@ -62,7 +65,13 @@ export function idbDelete(id: string): Promise<void> {
 export function idbList(): Promise<LocalPresentationMeta[]> {
   return tx<LocalPresentation[]>("readonly", (store) => store.getAll()).then((recs) =>
     recs
-      .map((r) => ({ id: r.id, filename: r.filename, totalSlides: r.totalSlides, createdAt: r.createdAt }))
+      .map((r) => ({
+        id: r.id,
+        filename: r.filename,
+        totalSlides: r.totalSlides,
+        sha256: r.sha256,
+        createdAt: r.createdAt,
+      }))
       .sort((a, b) => b.createdAt - a.createdAt)
   );
 }

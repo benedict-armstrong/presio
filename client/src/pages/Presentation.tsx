@@ -698,7 +698,7 @@ export default function Presentation() {
       if (local) {
         const rec = await idbGet(id!);
         if (!rec) throw new Error("This presentation is no longer in this browser");
-        await idbPut({ ...rec, blob, filename, totalSlides });
+        await idbPut({ ...rec, blob, filename, totalSlides, sha256 });
         channelRef.current?.postMessage({
           type: "deck_update",
           payload: { filename, totalSlides },
