@@ -7,14 +7,30 @@ import { loadDeckInfo, type Deck, type DeckInfo } from "@/lib/deck";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
 import { hasAnyStrokes, parseDrawing, serializeDrawing, type AnnotationsBySlide, type LaserPoint, type Stroke } from "@/lib/annotations";
-import { lsGet, lsSet, lsRemove, annotationsKey } from "@/lib/storage";
+import {
+  lsGet,
+  lsSet,
+  lsRemove,
+  lsGetString,
+  lsSetString,
+  annotationsKey,
+  deckWatchKey,
+} from "@/lib/storage";
 import { socket } from "@/lib/socket";
 import { startClockSync } from "@/lib/clock";
 import { supabase } from "@/lib/supabaseClient";
 import { authEnabled } from "@/lib/authMode";
 import { getSessionAuth, endSession } from "@/lib/utils";
 import { idbGet, idbPut, idbDelete } from "@/lib/localStore";
-import { DeckWatcher, isDeckWatchSupported, type DeckWatchStatus } from "@/lib/deckWatcher";
+import {
+  DeckWatcher,
+  isDeckWatchSupported,
+  isDeckWatchMode,
+  nextDeckWatchMode,
+  type DeckWatchMode,
+  type DeckWatchStatus,
+} from "@/lib/deckWatcher";
+import { ConfirmDeckReloadDialog } from "@/components/controller/ConfirmDeckReloadDialog";
 import { track, sha256Hex } from "@/lib/analytics";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -123,27 +139,58 @@ export default function Presentation() {
   const [deckWatchStatus, setDeckWatchStatus] = useState<DeckWatchStatus | null>(null);
   const watcherRef = useRef<DeckWatcher | null>(null);
   const applyingWatchRef = useRef(false);
+  // Auto mode applies from inside the watcher's callback, which captured an
+  // older closure; a ref keeps that path on the current applyDeckWatchUpdate.
+  const applyDeckWatchUpdateRef = useRef<() => Promise<void>>(async () => {});
   // Bumped when a replace stores a new file handle, so the effect below tears
   // the watcher down and re-reads the record — otherwise watching would stay
   // pinned to the previous file until a reload.
   const [watchedHandleEpoch, setWatchedHandleEpoch] = useState(0);
+  // Whether this deck carries a watchable file handle. Until that's known the
+  // header shows no live-reload control at all rather than a wrong one.
+  const [deckWatchable, setDeckWatchable] = useState(false);
+  // How the presenter wants recompiles handled. Chosen at upload (Home's
+  // live-reload checkbox), changed from the header, and remembered per deck.
+  const [deckWatchMode, setDeckWatchMode] = useState<DeckWatchMode>(() => {
+    const stored = lsGetString(deckWatchKey(id!));
+    return isDeckWatchMode(stored) ? stored : "prompt";
+  });
+  const deckWatchModeRef = useRef(deckWatchMode);
+  deckWatchModeRef.current = deckWatchMode;
+  // A detected recompile waiting on the presenter (prompt mode only).
+  const [reloadPrompt, setReloadPrompt] = useState(false);
+  const [applyingWatch, setApplyingWatch] = useState(false);
+  // Speaker notes edited in Presio live in the current PDF's bytes, so a
+  // recompiled file replaces them. Tracked to warn before that happens.
+  const [notesEdited, setNotesEdited] = useState(false);
 
   useEffect(() => {
     // The settled role, not the requested one: a second controller demoted to
     // viewer by session_state must stop watching too.
-    if (!local || role !== "controller") return;
-    if (!isDeckWatchSupported()) return;
+    if (!local || role !== "controller" || !isDeckWatchSupported()) {
+      setDeckWatchable(false);
+      return;
+    }
     let cancelled = false;
     idbGet(id!)
       .then((rec) => {
         if (cancelled || !rec?.handle) return;
+        // The control appears as soon as there's a file to watch, whatever the
+        // mode — that's what makes "live reload off" a state you can leave.
+        setDeckWatchable(true);
+        if (deckWatchModeRef.current === "off") return;
         const watcher = new DeckWatcher(rec.handle, {
           onStatus: (status) => {
             if (!cancelled) setDeckWatchStatus(status);
           },
           // Signal only — the File seen at detection is re-read at apply time.
           onUpdate: () => {
-            if (!cancelled) setDeckWatchStatus("updated");
+            if (cancelled) return;
+            setDeckWatchStatus("updated");
+            // Auto mode swaps without asking; prompt mode puts the decision
+            // (and what it costs) in front of the presenter first.
+            if (deckWatchModeRef.current === "auto") void applyDeckWatchUpdateRef.current();
+            else setReloadPrompt(true);
           },
         });
         watcherRef.current = watcher;
@@ -158,8 +205,18 @@ export default function Presentation() {
       watcherRef.current?.stop();
       watcherRef.current = null;
       setDeckWatchStatus(null);
+      setReloadPrompt(false);
     };
-  }, [local, id, role, watchedHandleEpoch]);
+  }, [local, id, role, watchedHandleEpoch, deckWatchMode]);
+
+  // Persist the live-reload choice per deck, so it survives a reload.
+  useEffect(() => {
+    if (local && role === "controller") lsSetString(deckWatchKey(id!), deckWatchMode);
+  }, [deckWatchMode, local, role, id]);
+
+  const cycleDeckWatchMode = useCallback(() => {
+    setDeckWatchMode((mode) => nextDeckWatchMode(mode));
+  }, []);
 
   // Persist the controller's drawings across reloads.
   useEffect(() => {
@@ -191,6 +248,8 @@ export default function Presentation() {
       setFilename(filename);
       setAnnotations({});
       lsRemove(annotationsKey(id!));
+      // Whatever notes were edited here lived in the outgoing PDF's bytes.
+      setNotesEdited(false);
       setTotalSlides(totalSlides);
       setCurrentSlide((slide) => Math.min(Math.max(slide, 1), totalSlides));
       (async () => {
@@ -713,6 +772,10 @@ export default function Presentation() {
         }
       }
 
+      // These edits live in this PDF's bytes, so a recompiled file would drop
+      // them. Remembered so the live-reload prompt can say so.
+      setNotesEdited(true);
+
       // Reflect the edit immediately; the deck re-derives from the new pdf.
       setDeckInfo((info) => {
         if (!info) return info;
@@ -807,6 +870,7 @@ export default function Presentation() {
     const watcher = watcherRef.current;
     if (!watcher || applyingWatchRef.current) return;
     applyingWatchRef.current = true;
+    setApplyingWatch(true);
     try {
       // Read the file as it is *now*: the version detected a moment ago has
       // usually been rewritten again by a watch-mode build, and its bytes no
@@ -821,12 +885,17 @@ export default function Presentation() {
       // replace leaves the update pending and the pill clickable.
       watcher.adopt(update.meta);
       setDeckWatchStatus("watching");
+      setReloadPrompt(false);
     } catch (e) {
       window.alert(e instanceof Error ? e.message : "Failed to replace the PDF");
     } finally {
       applyingWatchRef.current = false;
+      setApplyingWatch(false);
     }
   }, [replacePdf]);
+  applyDeckWatchUpdateRef.current = applyDeckWatchUpdate;
+
+
 
   // Explicit re-grant after a reload dropped the permission. Runs from the
   // pill's click, which is the user gesture requestPermission() needs.
@@ -1033,49 +1102,68 @@ export default function Presentation() {
   }
 
   return (
-    <ControllerView
-      id={id!}
-      local={!!local}
-      deck={deck!}
-      currentSlide={currentSlide}
-      onGoTo={goTo}
-      onSyncAll={syncAll}
-      onEnd={endPresentation}
-      onSynced={() => setLocal(false)}
-      onSaveNotes={saveNotes}
-      onReplacePdf={replacePdf}
-      currentCanvasRef={currentCanvasRef}
-      blanked={blanked}
-      deckWatchStatus={deckWatchStatus}
-      onDeckWatchApply={applyDeckWatchUpdate}
-      onDeckWatchResume={resumeDeckWatch}
-      onBlankToggle={() => {
-        const next = !blanked;
-        // Server mode learns the new state from the socket echo; local mode has
-        // no echo (BroadcastChannel doesn't deliver to the sender), so set it here.
-        if (local) setBlanked(next);
-        broadcast({ type: "blank_update", payload: { blanked: next } }, { event: "blank_toggle" });
-      }}
-      showCode={showCode}
-      onShowCodeToggle={() => {
-        const next = !showCode;
-        // Same echo asymmetry as blanking: local mode sets it directly.
-        if (local) setShowCode(next);
-        broadcast({ type: "code_update", payload: { showCode: next } }, { event: "code_toggle" });
-      }}
-      mediaState={mediaState}
-      onMediaControl={onMediaControl}
-      onMediaTime={onMediaTime}
-      muted={effectiveMuted}
-      audioState={audioState}
-      onAudioChange={onAudioChange}
-      onLaserMove={onLaserMove}
-      onStrokeProgress={onStrokeProgress}
-      onStrokeCommit={onStrokeCommit}
-      onStrokeUndo={onStrokeUndo}
-      onAnnotationsClear={onAnnotationsClear}
-      onSaveDrawing={onSaveDrawing}
-      onLoadDrawing={onLoadDrawing}
-    />
+    <>
+      {reloadPrompt && (
+        <ConfirmDeckReloadDialog
+          filename={filename}
+          annotatedSlides={
+            Object.values(annotations).filter((strokes) => strokes.length > 0).length
+          }
+          notesEdited={notesEdited}
+          busy={applyingWatch}
+          onConfirm={applyDeckWatchUpdate}
+          // Dismissed, not declined: the header keeps the "Deck updated" chip
+          // so the recompile can still be applied when the moment is right.
+          onClose={() => setReloadPrompt(false)}
+        />
+      )}
+      <ControllerView
+        id={id!}
+        local={!!local}
+        deck={deck!}
+        currentSlide={currentSlide}
+        onGoTo={goTo}
+        onSyncAll={syncAll}
+        onEnd={endPresentation}
+        onSynced={() => setLocal(false)}
+        onSaveNotes={saveNotes}
+        onReplacePdf={replacePdf}
+        currentCanvasRef={currentCanvasRef}
+        blanked={blanked}
+        filename={filename}
+        deckWatchMode={deckWatchable ? deckWatchMode : null}
+        deckWatchStatus={deckWatchStatus}
+        onDeckWatchCycle={cycleDeckWatchMode}
+        onDeckWatchApply={applyDeckWatchUpdate}
+        onDeckWatchResume={resumeDeckWatch}
+        onBlankToggle={() => {
+          const next = !blanked;
+          // Server mode learns the new state from the socket echo; local mode has
+          // no echo (BroadcastChannel doesn't deliver to the sender), so set it here.
+          if (local) setBlanked(next);
+          broadcast({ type: "blank_update", payload: { blanked: next } }, { event: "blank_toggle" });
+        }}
+        showCode={showCode}
+        onShowCodeToggle={() => {
+          const next = !showCode;
+          // Same echo asymmetry as blanking: local mode sets it directly.
+          if (local) setShowCode(next);
+          broadcast({ type: "code_update", payload: { showCode: next } }, { event: "code_toggle" });
+        }}
+        mediaState={mediaState}
+        onMediaControl={onMediaControl}
+        onMediaTime={onMediaTime}
+        muted={effectiveMuted}
+        audioState={audioState}
+        onAudioChange={onAudioChange}
+        onLaserMove={onLaserMove}
+        onStrokeProgress={onStrokeProgress}
+        onStrokeCommit={onStrokeCommit}
+        onStrokeUndo={onStrokeUndo}
+        onAnnotationsClear={onAnnotationsClear}
+        onSaveDrawing={onSaveDrawing}
+        onLoadDrawing={onLoadDrawing}
+      />
+    </>
   );
 }

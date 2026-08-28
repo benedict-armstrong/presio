@@ -321,3 +321,22 @@ describe("DeckWatcher.takeUpdate / adopt", () => {
     watcher.stop();
   });
 });
+
+describe("watch modes", () => {
+  it("cycles off -> prompt -> auto -> off", async () => {
+    const { nextDeckWatchMode } = await import("@/lib/deckWatcher");
+    expect(nextDeckWatchMode("off")).toBe("prompt");
+    expect(nextDeckWatchMode("prompt")).toBe("auto");
+    expect(nextDeckWatchMode("auto")).toBe("off");
+  });
+
+  it("recognises only the three real modes, so junk in storage falls back", async () => {
+    const { isDeckWatchMode } = await import("@/lib/deckWatcher");
+    expect(isDeckWatchMode("off")).toBe(true);
+    expect(isDeckWatchMode("prompt")).toBe(true);
+    expect(isDeckWatchMode("auto")).toBe(true);
+    for (const junk of ["", "on", "PROMPT", null, undefined, 1, {}]) {
+      expect(isDeckWatchMode(junk), String(junk)).toBe(false);
+    }
+  });
+});

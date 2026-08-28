@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { getDocument } from "pdfjs-dist";
-import { ExternalLink, RefreshCw, X } from "lucide-react";
+import { ExternalLink, RefreshCw, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AccountControl } from "@/components/AccountControl";
@@ -14,7 +14,7 @@ import { ConfirmEndDialog } from "@/components/controller/ConfirmEndDialog";
 import { idbPut, idbGet, idbList, idbDelete } from "@/lib/localStore";
 import { isDeckWatchSupported, PDF_PICKER_OPTIONS } from "@/lib/deckWatcher";
 import { getSessionAuth, setSessionAuth, endSession } from "@/lib/utils";
-import { lsRemove, annotationsKey, sessionKey } from "@/lib/storage";
+import { lsRemove, lsSetString, annotationsKey, sessionKey, deckWatchKey } from "@/lib/storage";
 import { track, sha256Hex } from "@/lib/analytics";
 import { matchReupload } from "@/lib/reupload";
 import { loadExternalPdfMeta, createExternalSession } from "@/lib/externalSession";
@@ -373,6 +373,10 @@ export default function Home() {
   const [reuploadPrompt, setReuploadPrompt] = useState<ReuploadPrompt | null>(null);
   const [closeTarget, setCloseTarget] = useState<RecentDeck | null>(null);
   const [closing, setClosing] = useState(false);
+  // Whether a deck created from here should watch its file for recompiles.
+  // Only meaningful where the browser can hold a file handle at all.
+  const watchSupported = isDeckWatchSupported();
+  const [hotReload, setHotReload] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -651,13 +655,17 @@ export default function Home() {
           "Couldn't store the presentation in this browser. Private/incognito mode isn't supported — please use a normal window."
         );
       }
+      // Remember how this deck should treat recompiles. The handle is stored
+      // either way, so the controller's live-reload control can turn watching
+      // on later without asking for the file again.
+      lsSetString(deckWatchKey(id), p.handle && hotReload ? "prompt" : "off");
       // Counted only once the deck is durably stored; the analytics sink
       // timestamps each event, so two uploads of the same filename can be
       // compared by hash to spot recompiled vs. re-uploaded decks.
       track("upload", { filename: p.filename, sha256: p.sha256, size: p.file.size, slides: p.totalSlides });
       navigate(`/s/${id}/share`);
     },
-    [navigate]
+    [navigate, hotReload]
   );
 
   const upload = useCallback(
@@ -926,6 +934,19 @@ export default function Home() {
             </div>
 
             <div className="py-6">
+              {/* Live reload needs the File System Access API, which only
+                  Chromium ships. Worth telling everyone else it exists —
+                  it's the difference between one drop and thirty. */}
+              {!watchSupported && (
+                <div className="mb-3 flex items-start gap-2 rounded-lg border border-muted-foreground/20 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                  <Zap size={14} className="mt-px shrink-0 text-(--home2-accent)" />
+                  <p>
+                    <span className="font-medium text-foreground">Writing your talk?</span> In
+                    Chrome, Edge or another Chromium browser, Presio can watch this PDF on disk and
+                    offer the new slides each time you recompile.
+                  </p>
+                </div>
+              )}
               <div
                 className={`cursor-pointer rounded-xl border-2 border-dashed px-9 py-14 text-center transition-colors ${dragging
                   ? "border-(--home2-accent) bg-(--home2-accent-soft)"
@@ -971,6 +992,24 @@ export default function Home() {
                   onChange={onFileSelect}
                 />
               </div>
+
+              {/* Outside the drop zone: a click in here must not open the
+                  file picker. */}
+              {watchSupported && (
+                <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={hotReload}
+                    onChange={(e) => setHotReload(e.target.checked)}
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-(--home2-accent)"
+                  />
+                  <span>
+                    <span className="font-medium text-foreground">Live reload</span> — watch this
+                    file and offer the new slides when you recompile. You&apos;re always asked
+                    before anything changes on screen; switch it off any time from the controller.
+                  </span>
+                </label>
+              )}
 
               <form onSubmit={submitUrl} className="mt-3.5 flex gap-2">
                 <input

@@ -51,6 +51,28 @@ export function isDeckWatchSupported(): boolean {
 
 export type DeckWatchStatus = "watching" | "updated" | "needs-permission" | "stopped";
 
+/**
+ * What the presenter wants watching to do for this deck.
+ *
+ *  - `off`    — don't look at the file at all.
+ *  - `prompt` — watch, and ask before swapping the new version in (the default:
+ *               a deck changing under a live audience is never automatic).
+ *  - `auto`   — watch and apply every recompile as it lands. For rehearsing
+ *               against a build loop, where the confirmation is just friction.
+ */
+export type DeckWatchMode = "off" | "prompt" | "auto";
+
+export const DECK_WATCH_MODES: DeckWatchMode[] = ["off", "prompt", "auto"];
+
+export function isDeckWatchMode(value: unknown): value is DeckWatchMode {
+  return value === "off" || value === "prompt" || value === "auto";
+}
+
+/** The mode after clicking the control: off -> prompt -> auto -> off. */
+export function nextDeckWatchMode(mode: DeckWatchMode): DeckWatchMode {
+  return mode === "off" ? "prompt" : mode === "prompt" ? "auto" : "off";
+}
+
 export interface FileMeta {
   lastModified: number;
   size: number;

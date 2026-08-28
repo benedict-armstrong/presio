@@ -35,7 +35,12 @@ import { ConfirmEndDialog } from "@/components/controller/ConfirmEndDialog";
 import { ConfirmReplaceDialog } from "@/components/controller/ConfirmReplaceDialog";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useSlideTapNav } from "@/hooks/useSlideTapNav";
-import { isDeckWatchSupported, PDF_PICKER_OPTIONS, type DeckWatchStatus } from "@/lib/deckWatcher";
+import {
+  isDeckWatchSupported,
+  PDF_PICKER_OPTIONS,
+  type DeckWatchMode,
+  type DeckWatchStatus,
+} from "@/lib/deckWatcher";
 import {
   DEFAULT_KEYMAP,
   loadKeymap,
@@ -80,7 +85,12 @@ interface ControllerViewProps {
   onBlankToggle: () => void;
   showCode: boolean;
   onShowCodeToggle: () => void;
+  /** The deck on screen, shown in the header's deck control. */
+  filename: string;
+  /** Live-reload preference, or null when this deck can't be watched. */
+  deckWatchMode: DeckWatchMode | null;
   deckWatchStatus: DeckWatchStatus | null;
+  onDeckWatchCycle: () => void;
   onDeckWatchApply: () => void;
   onDeckWatchResume: () => void;
   mediaState: MediaState;
@@ -114,7 +124,10 @@ export function ControllerView({
   onBlankToggle,
   showCode,
   onShowCodeToggle,
+  filename,
+  deckWatchMode,
   deckWatchStatus,
+  onDeckWatchCycle,
   onDeckWatchApply,
   onDeckWatchResume,
   mediaState,
@@ -513,7 +526,11 @@ export function ControllerView({
         blanked={blanked}
         showingCode={showCode && !local}
         compact={isMobile}
+        filename={filename}
+        deckWatchMode={deckWatchMode}
         deckWatchStatus={deckWatchStatus}
+        onReplaceDeck={openReplacePicker}
+        onDeckWatchCycle={onDeckWatchCycle}
         onDeckWatchApply={onDeckWatchApply}
         onDeckWatchResume={onDeckWatchResume}
         actions={isMobile ? mobileActions : desktopActions}

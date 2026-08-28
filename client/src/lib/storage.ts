@@ -43,6 +43,9 @@ export const STORAGE_KEYS = {
 export const timerKey = (id: string) => `presio_timer_${id}`;
 export const annotationsKey = (id: string) => `presio_annotations_${id}`;
 export const sessionKey = (id: string) => `session_${id}`;
+/** Live-reload preference for a local deck: "off" | "prompt" | "auto". A device
+ *  preference (the file being watched is on this machine), not session state. */
+export const deckWatchKey = (id: string) => `presio_deck_watch_${id}`;
 export const viewerOpenedKey = (id: string) => `presio_viewer_opened_${id}`;
 
 /** Read and JSON-parse a value, returning `fallback` if absent or malformed. */
