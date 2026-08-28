@@ -345,6 +345,69 @@ describe("POST /api/present (update in place)", () => {
     expect(res.status).toBe(404);
   });
 
+  it("returns exactly the documented response shape", async () => {
+    const fake = new FakeSupabase([handoffRow({})]);
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "HND001")
+      .field("controller_token", "handoff-token")
+      .attach("file", realPdf, { filename: "v2.pdf", contentType: "application/pdf" });
+
+    expect(res.status).toBe(200);
+    // `ok` is an internal discriminant on PresentUpdateResult — it must not
+    // leak into the response, which create whitelists and the docs pin down.
+    expect(Object.keys(res.body).sort()).toEqual(
+      ["filename", "id", "next", "totalSlides", "updated", "url"].sort()
+    );
+  });
+
+  it("400s when session_id is sent twice instead of silently creating", async () => {
+    const fake = new FakeSupabase([handoffRow({})]);
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "HND001")
+      .field("session_id", "HND001")
+      .field("controller_token", "handoff-token")
+      .attach("file", realPdf, { filename: "v2.pdf", contentType: "application/pdf" });
+
+    // Multer hands a repeated field back as an array; reading that as "absent"
+    // used to fall through to create — a new id, a new token and a burnt slot.
+    expect(res.status).toBe(400);
+    expect(fake.rows).toHaveLength(1);
+    expect(fake.rows[0].filename).toBe("Old deck");
+  });
+
+  it("400s when controller_token is sent twice", async () => {
+    const fake = new FakeSupabase([handoffRow({})]);
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "HND001")
+      .field("controller_token", "handoff-token")
+      .field("controller_token", "handoff-token")
+      .attach("file", realPdf, { filename: "v2.pdf", contentType: "application/pdf" });
+
+    expect(res.status).toBe(400);
+    expect(fake.rows).toHaveLength(1);
+  });
+
+  it("404s on a session past expires_at that the sweeper has not marked yet", async () => {
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    const fake = new FakeSupabase([handoffRow({ expires_at: past })]);
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "HND001")
+      .field("controller_token", "handoff-token")
+      .attach("file", realPdf, { filename: "v2.pdf", contentType: "application/pdf" });
+
+    // status is only reconciled hourly, so an expired row can still read active.
+    expect(res.status).toBe(404);
+    expect(fake.uploaded.size).toBe(0);
+  });
+
   it("updates a synced hosted deck and broadcasts deck_updated", async () => {
     const fake = new FakeSupabase([
       baseRow({ current_slide: 50 }), // clamp into range
@@ -366,5 +429,8 @@ describe("POST /api/present (update in place)", () => {
     expect(fakeEmissions).toContainEqual(
       expect.objectContaining({ room: "ABC123", event: "deck_updated" })
     );
+    // A synced deck has no handoff step, so it must not be told to open a
+    // handoff link — viewers already reloaded.
+    expect(res.body.next).not.toMatch(/hand off/i);
   });
 });

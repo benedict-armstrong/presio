@@ -7,11 +7,34 @@ import type express from "express";
 import { createApp } from "./app.js";
 import { FakeSupabase, type SessionRow } from "./test/fakeSupabase.js";
 
-const fakeIo = { in: () => ({ fetchSockets: async () => [] }) } as unknown as Server;
+// Emissions are recorded so tests can assert that an MCP deck replacement
+// reaches live viewers, exactly as the REST one does.
+const fakeEmissions: { room: string; event: string; payload: unknown }[] = [];
+const fakeIo = {
+  in: () => ({ fetchSockets: async () => [] }),
+  to: (room: string) => ({
+    emit: (event: string, payload?: unknown) => fakeEmissions.push({ room, event, payload }),
+  }),
+} as unknown as Server;
 
 function appWith(fake: FakeSupabase) {
   return createApp({ supabase: fake as unknown as SupabaseClient, io: fakeIo });
 }
+
+// A synced hosted session — the only kind that has live viewers to notify.
+const syncedRow = (over: Partial<SessionRow> = {}): SessionRow => ({
+  id: "ABC123",
+  pdf_path: "ABC123.pdf",
+  filename: "Talk",
+  total_slides: 12,
+  current_slide: 3,
+  local: false,
+  controller_token: "secret-token",
+  passphrase: "PASS1234",
+  user_id: "user-1",
+  expires_at: future(),
+  ...over,
+});
 
 const future = () => new Date(Date.now() + 86_400_000).toISOString();
 
@@ -89,6 +112,42 @@ describe("MCP present_pdf (update in place)", () => {
     expect(fake.rows[0].controller_token).toBe("handoff-token");
     expect(fake.rows[0].filename).toBe("v2");
     expect(fake.rows[0].total_slides).toBeGreaterThan(0);
+  });
+
+  it("broadcasts deck_updated for a synced deck, like the REST path", async () => {
+    const fake = new FakeSupabase([syncedRow()]);
+    fakeEmissions.length = 0;
+    const app = appWith(fake);
+    const res = await callPresent(app, {
+      pdf_base64: realPdf.toString("base64"),
+      filename: "talk-v2.pdf",
+      session_id: "ABC123",
+      controller_token: "secret-token",
+    });
+
+    const result = toolResult(res);
+    expect(result.isError).toBeFalsy();
+    // registerMcpRoutes has to be handed io/socketState, or updatePresentDeck
+    // skips the emit and every viewer stays on the old slides.
+    expect(fakeEmissions).toContainEqual(
+      expect.objectContaining({ room: "ABC123", event: "deck_updated" })
+    );
+  });
+
+  it("returns the documented payload shape without the internal ok flag", async () => {
+    const fake = new FakeSupabase([handoffRow()]);
+    const app = appWith(fake);
+    const res = await callPresent(app, {
+      pdf_base64: realPdf.toString("base64"),
+      filename: "v2.pdf",
+      session_id: "HND001",
+      controller_token: "handoff-token",
+    });
+
+    const payload = JSON.parse(toolResult(res).text!);
+    expect(Object.keys(payload).sort()).toEqual(
+      ["filename", "id", "next", "totalSlides", "updated", "url"].sort()
+    );
   });
 
   it("errors without controller_token and leaves the presentation untouched", async () => {

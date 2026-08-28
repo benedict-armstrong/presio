@@ -1,4 +1,5 @@
 import type express from "express";
+import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -7,8 +8,18 @@ import { baseUrl } from "../lib/baseUrl.js";
 import { createPresentHandoff, updatePresentDeck } from "../lib/presentHandoff.js";
 import { buildCheckReport } from "./check.js";
 import { resolveOptionalUserId } from "../auth.js";
+import type { SocketState } from "../socket.js";
 
-function createPresioMcp(supabase: SupabaseClient, origin: string, req: express.Request) {
+/** Live-broadcast deps, so an MCP deck replacement reaches viewers exactly as
+ *  the REST one does. Without them `updatePresentDeck` silently skips the
+ *  `deck_updated` emit and leaves everyone watching a synced deck on the old
+ *  slides with stale drawings. */
+export interface McpDeps {
+  io?: Server;
+  socketState?: SocketState;
+}
+
+function createPresioMcp(supabase: SupabaseClient, origin: string, req: express.Request, deps: McpDeps) {
   const server = new McpServer({
     name: "presio",
     version: "1.0.0",
@@ -22,7 +33,9 @@ function createPresioMcp(supabase: SupabaseClient, origin: string, req: express.
         "Upload a PDF to start a local Presio presentation. Returns a url — open it in a browser to finish handoff (skips share). To replace an existing presentation's deck instead of creating one, pass its session_id plus controller_token (the t= parameter of the url from the original create call) and the same link keeps working. Same as POST /api/present.",
       annotations: {
         readOnlyHint: false,
-        destructiveHint: false,
+        // Creating is additive, but the session_id path overwrites an existing
+        // deck in place and the old slides are not recoverable.
+        destructiveHint: true,
         idempotentHint: false,
         openWorldHint: false,
       },
@@ -56,11 +69,22 @@ function createPresioMcp(supabase: SupabaseClient, origin: string, req: express.
           buffer,
           originalName: filename || "",
           baseUrl: origin,
+          io: deps.io,
+          socketState: deps.socketState,
         });
         if (!result.ok) {
           return { content: [{ type: "text" as const, text: result.error }], isError: true };
         }
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ...result, updated: true }, null, 2) }] };
+        // Same whitelist as the create branch below — `ok` is internal.
+        const updatedPayload = {
+          id: result.id,
+          url: result.url,
+          filename: result.filename,
+          totalSlides: result.totalSlides,
+          next: result.next,
+          updated: true,
+        };
+        return { content: [{ type: "text" as const, text: JSON.stringify(updatedPayload, null, 2) }] };
       }
       const userId = await resolveOptionalUserId(supabase, req);
       const result = await createPresentHandoff(supabase, {
@@ -111,7 +135,7 @@ function createPresioMcp(supabase: SupabaseClient, origin: string, req: express.
   return server;
 }
 
-export function registerMcpRoutes(app: express.Express, supabase: SupabaseClient) {
+export function registerMcpRoutes(app: express.Express, supabase: SupabaseClient, deps: McpDeps = {}) {
   app.get("/.well-known/mcp.json", (req, res) => {
     const origin = baseUrl(req);
     res.setHeader("Cache-Control", "public, max-age=300");
@@ -138,7 +162,7 @@ export function registerMcpRoutes(app: express.Express, supabase: SupabaseClient
 
   app.post("/mcp", async (req, res) => {
     const origin = baseUrl(req);
-    const server = createPresioMcp(supabase, origin, req);
+    const server = createPresioMcp(supabase, origin, req, deps);
     try {
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       await server.connect(transport);

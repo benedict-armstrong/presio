@@ -126,7 +126,7 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   registerSessionRoutes(app, { supabase, io, socketState });
   registerNewsletterRoutes(app, supabase);
   registerCheckRoute(app);
-  registerMcpRoutes(app, supabase);
+  registerMcpRoutes(app, supabase, { io, socketState });
 
   // Unknown API paths must 404 as JSON — falling through to the SPA catch-all
   // returns index.html with a 200, which masks client bugs as parse errors.

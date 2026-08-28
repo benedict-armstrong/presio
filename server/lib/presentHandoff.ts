@@ -76,6 +76,11 @@ export function handoffTokenFrom(req: { get(name: string): string | undefined; q
 export const PRESENT_UPDATED_NEXT =
   "Deck replaced in place — same link, same presentation. Open url again to hand off the new slides.";
 
+// Synced decks have no handoff step: viewers reload the new bytes themselves,
+// and `url` is the shared viewer link, not a `?t=` handoff link.
+export const PRESENT_SYNCED_UPDATED_NEXT =
+  "Deck replaced in place — same link, same presentation. Anyone viewing it reloads the new slides automatically.";
+
 export type PresentUpdateResult =
   | { ok: true; id: string; url: string; filename: string; totalSlides: number; next: string }
   | { ok: false; status: number; error: string };
@@ -114,6 +119,10 @@ export async function updatePresentDeck(
     .select("id, local, pdf_path, filename, current_slide, controller_token")
     .eq("id", opts.sessionId)
     .neq("status", "expired")
+    // `status` is only reconciled by the hourly sweeper in index.ts, so a row
+    // past its expiry can still read as active. Check the timestamp too, or an
+    // update revives a presentation the API documents as gone.
+    .gt("expires_at", new Date().toISOString())
     .single();
   if (error || !row) {
     return { ok: false, status: 404, error: "Presentation not found or expired" };
@@ -188,5 +197,12 @@ export async function updatePresentDeck(
   opts.socketState?.annotations.delete(String(row.id));
   opts.io?.to(row.id).emit("deck_updated", { filename, totalSlides });
 
-  return { ok: true, id: row.id, url: `${opts.baseUrl}/s/${row.id}`, filename, totalSlides, next: PRESENT_UPDATED_NEXT };
+  return {
+    ok: true,
+    id: row.id,
+    url: `${opts.baseUrl}/s/${row.id}`,
+    filename,
+    totalSlides,
+    next: PRESENT_SYNCED_UPDATED_NEXT,
+  };
 }

@@ -23,6 +23,19 @@ export interface RouteDeps {
 // not lifetime — presentations.
 export const MAX_CONCURRENT_PRESENTATIONS = 3;
 
+/**
+ * Read a multipart text field that may legitimately appear at most once.
+ * Multer hands a repeated field back as an array, which a bare
+ * `typeof x === "string"` check silently reads as "absent" — on /api/present
+ * that turned a duplicated `session_id` into a brand new presentation, burning
+ * a concurrent slot and handing back a fresh link. `null` means "sent more than
+ * once" so callers can reject instead of guessing which copy was meant.
+ */
+function singleField(value: unknown): string | null {
+  if (value === undefined) return "";
+  return typeof value === "string" ? value : null;
+}
+
 export function registerSessionRoutes(app: express.Express, { supabase, io, socketState }: RouteDeps) {
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -74,12 +87,19 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         return;
       }
 
-      const sessionId = typeof req.body.session_id === "string" ? req.body.session_id.trim() : "";
+      const rawSessionId = singleField(req.body.session_id);
+      const rawToken = singleField(req.body.controller_token);
+      if (rawSessionId === null || rawToken === null) {
+        res.status(400).json({
+          error: 'Send "session_id" and "controller_token" at most once each',
+        });
+        return;
+      }
+
+      const sessionId = rawSessionId.trim();
       if (sessionId) {
-        const token =
-          (typeof req.body.controller_token === "string" && req.body.controller_token) ||
-          req.get("x-controller-token") ||
-          "";
+        // The token is compared byte-for-byte, so it is never trimmed.
+        const token = rawToken || req.get("x-controller-token") || "";
         if (!token) {
           // Reject rather than falling back to create: silently minting a new
           // presentation would hand the agent a fresh link and consume a slot.
@@ -101,7 +121,14 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
           res.status(result.status).json({ error: result.error });
           return;
         }
-        res.json({ ...result, updated: true });
+        res.json({
+          id: result.id,
+          url: result.url,
+          filename: result.filename,
+          totalSlides: result.totalSlides,
+          next: result.next,
+          updated: true,
+        });
         return;
       }
 

@@ -34,7 +34,9 @@ To replace an existing presentation's deck instead of creating a new one, repeat
 - `session_id` — the presentation's id (`id` from the original create response)
 - `controller_token` — that presentation's controller token, taken from the **`t=` query parameter of the `url` returned when it was created**. The same value may instead be sent as an `x-controller-token` header.
 
-The deck is replaced in place: the response keeps the **same `id` and the same link** (token included), and no additional concurrent-presentation slot is used — you can iterate on slides without minting a fresh URL each pass or hitting the concurrent cap. If the browser has already completed handoff for this session, resending the link pulls the updated deck into it.
+The deck is replaced in place: the response keeps the **same `id` and the same `url`** as the original response, and no additional concurrent-presentation slot is used — you can iterate on slides without minting a fresh URL each pass or hitting the concurrent cap. If the browser has already completed handoff for this session, resending the link pulls the updated deck into it — the handoff link revives with the new deck.
+
+Send `session_id` and `controller_token` **at most once each**; a repeated field is rejected with 400 rather than guessed at.
 
 ```bash
 curl -s -F file=@deck-v2.pdf \
@@ -42,9 +44,11 @@ curl -s -F file=@deck-v2.pdf \
   BASE/api/present
 ```
 
-**200:** `{ id, url, filename, totalSlides, next, updated: true }` — `url` is unchanged from the original response.
+**200:** `{ id, url, filename, totalSlides, next, updated: true }` — `url` is unchanged from the original response. For a deck that has been synced for sharing, that `url` is the viewer link (`BASE/s/:id`), which carries no token; live viewers reload the new slides automatically.
 
-Errors: **401** if `session_id` is given without a token, **403** on a wrong token (you cannot overwrite someone else's presentation), **404** when the id is unknown or the session has expired — no new presentation is silently created in any of these cases.
+Errors: **400** if `session_id` or `controller_token` is sent more than once, **401** if `session_id` is given without a token, **403** on a wrong token (you cannot overwrite someone else's presentation), **404** when the id is unknown or the session has expired — no new presentation is silently created in any of these cases.
+
+The upload itself is validated the same way as on create: **400** for a non-PDF or an over-length deck, **413** over 50MB, **422** for bytes that will not parse as a PDF.
 
 ## POST /api/check
 

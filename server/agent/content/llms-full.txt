@@ -40,13 +40,14 @@ curl -s -F file=@deck-v2.pdf \
 
 Response: same shape as create, plus `"updated": true`, with the **same id and same url** — so whoever holds the old link just re-opens it to get the new slides. No additional concurrent-presentation slot is used, which matters when iterating on a deck.
 
-Errors: 401 without a token, 403 on a wrong token, 404 for unknown/expired ids. Never silently creates a new presentation.
+Errors: 400 if `session_id` or `controller_token` is sent more than once, 401 without a token, 403 on a wrong token, 404 for unknown/expired ids. Never silently creates a new presentation.
 
 Notes:
 
 - A wrong token cannot overwrite someone else's presentation, and an unknown or expired id fails with 404 — no new presentation is silently created.
-- If the browser has already completed handoff for this session, re-opening the returned url pulls the updated deck into it.
-- Synced decks updated this way reload live for anyone viewing them.
+- If the browser has already completed handoff for this session, re-opening the returned url pulls the updated deck into it — the link revives with the new deck.
+- Synced decks updated this way reload live for anyone viewing them, over REST and over MCP alike. For a synced deck the returned url is the viewer link (`BASE/s/:id`) and carries no token — keep the token you were given at create time.
+- Send each of `session_id` and `controller_token` exactly once. A duplicated field is a 400, not a silent new presentation.
 
 ## Validate sidecar attachments
 

@@ -28,7 +28,7 @@ export function buildOpenApi(base: string) {
                     session_id: {
                       type: "string",
                       description:
-                        "Id of an existing presentation to update in place (from an earlier present response) instead of creating a new one.",
+                        "Id of an existing presentation to update in place (from an earlier present response) instead of creating a new one. Send at most once.",
                     },
                     controller_token: {
                       type: "string",
@@ -54,7 +54,7 @@ export function buildOpenApi(base: string) {
                         type: "string",
                         format: "uri",
                         description:
-                          "Handoff link: valid until a browser claims the deck, or 24h (7 days authenticated) if unclaimed. Fetching without completing handoff does not consume it. Unchanged from the original response when updating.",
+                          "Handoff link: valid until a browser claims the deck, or 24h (7 days authenticated) if unclaimed. Fetching without completing handoff does not consume it. Unchanged from the original response when updating — for a deck that has been synced for sharing this is the viewer link (/s/{id}) instead, which carries no token.",
                       },
                       filename: {
                         type: "string",
@@ -71,9 +71,15 @@ export function buildOpenApi(base: string) {
                 },
               },
             },
+            "400": {
+              description:
+                "Missing or non-PDF file, a deck over the page limit, or session_id/controller_token sent more than once",
+            },
             "401": { description: "session_id given without a controller token" },
             "403": { description: "Wrong controller token for the referenced presentation" },
             "404": { description: "Unknown or expired session_id" },
+            "413": { description: "PDF exceeds the 50MB limit" },
+            "422": { description: "The uploaded bytes could not be parsed as a PDF" },
           },
         },
       },
