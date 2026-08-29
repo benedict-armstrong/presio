@@ -20,7 +20,7 @@ export function ControllerHeader({
   deckWatchStatus,
   onReplaceDeck,
   onDropDeck,
-  onDeckWatchCycle,
+  onDeckWatchModeChange,
   onDeckWatchApply,
   onDeckWatchResume,
   remoteDeckUpdate = false,
@@ -43,7 +43,7 @@ export function ControllerHeader({
   onReplaceDeck?: () => void;
   /** A PDF dropped onto the deck name — same swap, without the picker. */
   onDropDeck?: (file: File, handle?: FileSystemFileHandle) => void;
-  onDeckWatchCycle?: () => void;
+  onDeckWatchModeChange?: (mode: DeckWatchMode) => void;
   onDeckWatchApply?: () => void;
   onDeckWatchResume?: () => void;
   /** A URL-backed deck's source PDF was republished — offer the new version. */
@@ -53,7 +53,7 @@ export function ControllerHeader({
   compact?: boolean;
   actions?: ReactNode;
 }) {
-  const deck = onReplaceDeck && onDeckWatchCycle && onDeckWatchApply && onDeckWatchResume && (
+  const deck = onReplaceDeck && onDeckWatchModeChange && onDeckWatchApply && onDeckWatchResume && (
     <DeckControl
       filename={filename}
       mode={deckWatchMode}
@@ -61,7 +61,7 @@ export function ControllerHeader({
       remoteUpdate={remoteDeckUpdate}
       onReplace={onReplaceDeck}
       onDropDeck={onDropDeck}
-      onCycleMode={onDeckWatchCycle}
+      onSetMode={onDeckWatchModeChange}
       onApply={onDeckWatchApply}
       onResume={onDeckWatchResume}
       onRemoteApply={onRemoteDeckApply}

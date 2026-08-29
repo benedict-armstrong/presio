@@ -26,7 +26,6 @@ import {
   DeckWatcher,
   isDeckWatchSupported,
   isDeckWatchMode,
-  nextDeckWatchMode,
   type DeckWatchMode,
   type DeckWatchStatus,
 } from "@/lib/deckWatcher";
@@ -229,8 +228,10 @@ export default function Presentation() {
     if (local && role === "controller") lsSetString(deckWatchKey(id!), deckWatchMode);
   }, [deckWatchMode, local, role, id]);
 
-  const cycleDeckWatchMode = useCallback(() => {
-    setDeckWatchMode((mode) => nextDeckWatchMode(mode));
+  // Picked from the header's live-reload menu. The effect above persists it,
+  // so a mode chosen here survives a controller reload.
+  const chooseDeckWatchMode = useCallback((mode: DeckWatchMode) => {
+    setDeckWatchMode(mode);
   }, []);
 
   // Persist the controller's drawings across reloads.
@@ -1345,7 +1346,7 @@ export default function Presentation() {
         filename={filename}
         deckWatchMode={deckWatchable ? deckWatchMode : null}
         deckWatchStatus={deckWatchStatus}
-        onDeckWatchCycle={cycleDeckWatchMode}
+        onDeckWatchModeChange={chooseDeckWatchMode}
         onDeckWatchApply={applyDeckWatchUpdate}
         onDeckWatchResume={resumeDeckWatch}
         remoteDeckUpdate={!!remoteUpdate}

@@ -1,81 +1,101 @@
-import { useCallback, useState, type DragEvent } from "react";
-import { FileText, Zap } from "lucide-react";
+import { useCallback, useState, type DragEvent, type ReactNode } from "react";
+import { ChevronDown, FileText, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { DeckWatchMode, DeckWatchStatus } from "@/lib/deckWatcher";
 
 // The controller header's deck cluster: what is being presented, and — where
 // the browser can watch a file on disk — what happens when it changes.
 //
-// Two controls, because they're two different questions:
+// One button group, three jobs:
 //   • the filename swaps the deck by hand (click to pick a new PDF, or drop
 //     one straight onto it)
-//   • the chip beside it is live reload: off -> watching -> auto -> off
+//   • a light beside it reports live reload at a glance: pulsing green while
+//     watching, a bolt on auto, grey when off. Clicking it picks the mode.
+//   • a recompile that is ready to show is the one thing that can't wait in a
+//     menu, so it appears as its own button and applies on click.
 //
-// Everything here is local-deck only; a synced deck has no file on this
-// machine to watch, and passing `mode: null` renders just the filename.
+// Watching is local-deck only; a synced deck has no file on this machine to
+// watch, and passing `mode: null` renders just the filename.
 
-const chipBase =
-  "text-xs font-medium px-1.5 py-0.5 rounded transition-colors whitespace-nowrap";
+const MODES: { value: DeckWatchMode; label: string; hint: string }[] = [
+  { value: "off", label: "Off", hint: "Ignore changes to the file" },
+  { value: "prompt", label: "Watch and ask", hint: "Offer each recompile before it goes up" },
+  { value: "auto", label: "Auto reload", hint: "Show recompiles as soon as they land" },
+];
 
-interface Chip {
-  label: string;
-  title: string;
-  className: string;
-  /** What clicking does — "none" renders plain text instead of a button. */
-  action: "none" | "resume" | "apply" | "remote" | "cycle";
-  icon?: boolean;
+type Tone = "green" | "amber" | "muted";
+
+const dotTone: Record<Tone, string> = {
+  green: "bg-emerald-500",
+  amber: "bg-amber-500",
+  muted: "bg-muted-foreground/60",
+};
+
+// A pulse means "this is live right now" — reserved for watching, so a glance
+// at a still dot is enough to know nothing is being watched.
+function WatchDot({ tone, pulse = false }: { tone: Tone; pulse?: boolean }) {
+  return (
+    <span className="relative flex size-2 shrink-0">
+      {pulse && (
+        <span
+          className={cn(
+            "absolute inline-flex h-full w-full animate-ping rounded-full opacity-75",
+            dotTone[tone]
+          )}
+        />
+      )}
+      <span className={cn("relative inline-flex size-2 rounded-full", dotTone[tone])} />
+    </span>
+  );
 }
 
-function modeChip(mode: DeckWatchMode, status: DeckWatchStatus | null): Chip {
-  // Trouble states outrank the mode: there is no point saying "watching" when
-  // the grant lapsed or the file went away.
+// What the light says. Trouble outranks the mode: there is no point showing a
+// healthy green pulse when the grant lapsed or the file went away.
+function watchLight(
+  mode: DeckWatchMode,
+  status: DeckWatchStatus | null
+): { icon: ReactNode; title: string; note?: string } {
   if (status === "needs-permission") {
     return {
-      label: "Resume watching",
-      title: "Access to the deck file lapsed — click to resume watching it for recompiles",
-      className: "text-amber-600 dark:text-amber-500 bg-amber-500/10 hover:bg-amber-500/20",
-      action: "resume",
+      icon: <WatchDot tone="amber" />,
+      title: "Access to the deck file lapsed — resume watching it for recompiles",
+      note: "Access to this file lapsed.",
     };
   }
   if (status === "stopped") {
     return {
-      label: "Watch stopped",
+      icon: <WatchDot tone="muted" />,
       title: "The deck file was moved or deleted — watching stopped",
-      className: "text-muted-foreground bg-muted",
-      action: "none",
-    };
-  }
-  if (status === "updated") {
-    return {
-      label: "Deck updated",
-      title: "A recompiled version of this deck is ready — click to show it to everyone",
-      className: "text-primary bg-primary/10 hover:bg-primary/20",
-      action: "apply",
-    };
-  }
-  if (mode === "off") {
-    return {
-      label: "Live reload off",
-      title: "Not watching the deck file — click to watch it for recompiles",
-      className: "text-muted-foreground bg-muted hover:bg-muted-foreground/20",
-      action: "cycle",
+      note: "The file was moved or deleted.",
     };
   }
   if (mode === "auto") {
     return {
-      label: "Auto reload",
-      title: "Recompiles are applied as soon as they land — click to turn live reload off",
-      className: "text-emerald-600 dark:text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20",
-      action: "cycle",
-      icon: true,
+      icon: <Zap size={12} className="text-emerald-600 dark:text-emerald-500" />,
+      title: "Auto reload: recompiles are applied as soon as they land",
+    };
+  }
+  if (mode === "prompt") {
+    return {
+      icon: <WatchDot tone="green" pulse />,
+      title: "Watching this deck's file for recompiles, and asking before swapping",
     };
   }
   return {
-    label: "Watching",
-    title:
-      "Watching this deck's file for recompiles, and asking before swapping — click to apply them automatically",
-    className: "text-emerald-600 dark:text-emerald-500 hover:bg-emerald-500/10",
-    action: "cycle" as const,
+    icon: <WatchDot tone="muted" />,
+    title: "Not watching the deck file for recompiles",
   };
 }
 
@@ -86,7 +106,7 @@ export function DeckControl({
   remoteUpdate = false,
   onReplace,
   onDropDeck,
-  onCycleMode,
+  onSetMode,
   onResume,
   onApply,
   onRemoteApply,
@@ -98,13 +118,13 @@ export function DeckControl({
   status: DeckWatchStatus | null;
   /** A URL-backed deck's source PDF was republished. Reported by the server-side
    *  poller rather than the file watcher, but it means the same thing to the
-   *  presenter, so it reads as the same chip. */
+   *  presenter, so it reads as the same button. */
   remoteUpdate?: boolean;
   onReplace: () => void;
   /** A PDF was dropped on the filename. The handle rides along where the
    *  platform offers one, so a dropped deck stays watchable. */
   onDropDeck?: (file: File, handle?: FileSystemFileHandle) => void;
-  onCycleMode: () => void;
+  onSetMode: (mode: DeckWatchMode) => void;
   onResume: () => void;
   onApply: () => void;
   onRemoteApply?: () => void;
@@ -149,18 +169,14 @@ export function DeckControl({
   // it back, because ".pdf" is what makes this read as the file on disk.
   const label = filename ? (/\.pdf$/i.test(filename) ? filename : `${filename}.pdf`) : "Untitled deck";
 
-  const chip: Chip | null = remoteUpdate
-    ? {
-        label: "Deck updated",
-        title: "A newer version of this deck was published at its source URL — click to show it to everyone",
-        className: "text-primary bg-primary/10 hover:bg-primary/20",
-        action: "remote",
-      }
-    : mode
-      ? modeChip(mode, status)
-      : null;
+  // A watched recompile and a republished URL are different sources with the
+  // same answer for the presenter, so they share one button.
+  const pending = remoteUpdate || status === "updated";
+  const applyPending = remoteUpdate ? onRemoteApply : onApply;
+  const light = mode ? watchLight(mode, status) : null;
+
   return (
-    <span className="flex min-w-0 items-center gap-1.5">
+    <ButtonGroup className="min-w-0">
       <button
         type="button"
         onClick={onReplace}
@@ -181,30 +197,64 @@ export function DeckControl({
         <FileText size={12} className="shrink-0" />
         <span className="truncate">{label}</span>
       </button>
-      {chip &&
-        (chip.action === "none" ? (
-          <span title={chip.title} className={`${chipBase} ${chip.className}`}>
-            {chip.label}
-          </span>
-        ) : (
-          <button
-            type="button"
-            title={chip.title}
-            onClick={
-              chip.action === "resume"
-                ? onResume
-                : chip.action === "apply"
-                  ? onApply
-                  : chip.action === "remote"
-                    ? onRemoteApply
-                    : onCycleMode
-            }
-            className={`${chipBase} ${chip.className} inline-flex items-center gap-1`}
-          >
-            {chip.icon && <Zap size={11} />}
-            {chip.label}
-          </button>
-        ))}
-    </span>
+
+      {pending && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={applyPending}
+          title={
+            remoteUpdate
+              ? "A newer version of this deck was published at its source URL — click to show it to everyone"
+              : "A recompiled version of this deck is ready — click to show it to everyone"
+          }
+          className="h-8 border-primary/30 bg-primary/10 text-xs font-medium text-primary hover:bg-primary/20 hover:text-primary"
+        >
+          Deck updated
+        </Button>
+      )}
+
+      {light && mode && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              title={`${light.title} — click to change`}
+              className="h-8 gap-1 px-2 text-muted-foreground hover:text-foreground"
+            >
+              {light.icon}
+              <ChevronDown size={12} className="opacity-60" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-60">
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+              {light.note ?? "Live reload"}
+            </DropdownMenuLabel>
+            {status === "needs-permission" && (
+              <>
+                <DropdownMenuItem onSelect={onResume}>Resume watching</DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
+            <DropdownMenuRadioGroup
+              value={mode}
+              onValueChange={(value) => onSetMode(value as DeckWatchMode)}
+            >
+              {MODES.map((m) => (
+                <DropdownMenuRadioItem key={m.value} value={m.value} className="items-start">
+                  <span className="flex flex-col gap-0.5">
+                    <span>{m.label}</span>
+                    <span className="text-xs text-muted-foreground">{m.hint}</span>
+                  </span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </ButtonGroup>
   );
 }

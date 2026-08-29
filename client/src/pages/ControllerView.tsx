@@ -90,7 +90,7 @@ interface ControllerViewProps {
   /** Live-reload preference, or null when this deck can't be watched. */
   deckWatchMode: DeckWatchMode | null;
   deckWatchStatus: DeckWatchStatus | null;
-  onDeckWatchCycle: () => void;
+  onDeckWatchModeChange: (mode: DeckWatchMode) => void;
   onDeckWatchApply: () => void;
   onDeckWatchResume: () => void;
   /** A URL-backed deck's source PDF was republished (see Presentation). */
@@ -130,7 +130,7 @@ export function ControllerView({
   filename,
   deckWatchMode,
   deckWatchStatus,
-  onDeckWatchCycle,
+  onDeckWatchModeChange,
   onDeckWatchApply,
   onDeckWatchResume,
   remoteDeckUpdate,
@@ -542,7 +542,7 @@ export function ControllerView({
         deckWatchStatus={deckWatchStatus}
         onReplaceDeck={openReplacePicker}
         onDropDeck={onDeckDropped}
-        onDeckWatchCycle={onDeckWatchCycle}
+        onDeckWatchModeChange={onDeckWatchModeChange}
         onDeckWatchApply={onDeckWatchApply}
         onDeckWatchResume={onDeckWatchResume}
         remoteDeckUpdate={remoteDeckUpdate}
