@@ -41,7 +41,7 @@ export function CodeBlock({ code, lang = "typst" }: CodeBlockProps) {
 
   return (
     <div
-      className="text-xs rounded-md overflow-x-auto border border-border dark:border-transparent [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-x-auto"
+      className="text-xs rounded-md overflow-x-auto border border-border [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-x-auto"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

@@ -941,9 +941,8 @@ export default function Home() {
                 <div className="mb-3 flex items-start gap-2 rounded-lg border border-muted-foreground/20 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
                   <Zap size={14} className="mt-px shrink-0 text-(--home2-accent)" />
                   <p>
-                    <span className="font-medium text-foreground">Writing your talk?</span> In
-                    Chrome, Edge or another Chromium browser, Presio can watch this PDF on disk and
-                    offer the new slides each time you recompile.
+                    <span className="font-medium text-foreground">Writing your talk?</span> Use
+                    Chrome to enable live hot reload when the slides change on disk.
                   </p>
                 </div>
               )}
@@ -996,7 +995,10 @@ export default function Home() {
               {/* Outside the drop zone: a click in here must not open the
                   file picker. */}
               {watchSupported && (
-                <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
+                <label
+                  className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-muted-foreground"
+                  title="Live reload — watch this file and offer the new slides when you recompile. You're always asked before anything changes on screen; switch it off any time from the controller."
+                >
                   <input
                     type="checkbox"
                     checked={hotReload}
@@ -1004,9 +1006,8 @@ export default function Home() {
                     className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-(--home2-accent)"
                   />
                   <span>
-                    <span className="font-medium text-foreground">Live reload</span> — watch this
-                    file and offer the new slides when you recompile. You&apos;re always asked
-                    before anything changes on screen; switch it off any time from the controller.
+                    <span className="font-medium text-foreground">Hot reload</span> — update
+                    presentation if file changes on disk.
                   </span>
                 </label>
               )}
