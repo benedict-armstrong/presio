@@ -5,11 +5,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { nanoid } from "nanoid";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { isValidHttpsUrl, isValidTotalSlides, MAX_TOTAL_SLIDES } from "../validation.js";
-import { getBearerToken, resolveOptionalUserId, safeEqual } from "../auth.js";
+import { getBearerToken, requireUser, resolveOptionalUserId, safeEqual } from "../auth.js";
 import { isLocalMode } from "../local/mode.js";
 import { clearSessionState, type SocketState } from "../socket.js";
 import { baseUrl } from "../lib/baseUrl.js";
-import { createPresentHandoff, handoffTokenFrom } from "../lib/presentHandoff.js";
+import { fetchRemotePdfMeta } from "../lib/remotePdf.js";
+import { createPresentHandoff, handoffTokenFrom, updatePresentDeck } from "../lib/presentHandoff.js";
 import { generatePassphrase, insertSession, ownedExpiry } from "../lib/sessionRows.js";
 
 export interface RouteDeps {
@@ -22,6 +23,19 @@ export interface RouteDeps {
 // expire (and are marked 'expired' on end), so this caps concurrent —
 // not lifetime — presentations.
 export const MAX_CONCURRENT_PRESENTATIONS = 3;
+
+/**
+ * Read a multipart text field that may legitimately appear at most once.
+ * Multer hands a repeated field back as an array, which a bare
+ * `typeof x === "string"` check silently reads as "absent" — on /api/present
+ * that turned a duplicated `session_id` into a brand new presentation, burning
+ * a concurrent slot and handing back a fresh link. `null` means "sent more than
+ * once" so callers can reject instead of guessing which copy was meant.
+ */
+function singleField(value: unknown): string | null {
+  if (value === undefined) return "";
+  return typeof value === "string" ? value : null;
+}
 
 export function registerSessionRoutes(app: express.Express, { supabase, io, socketState }: RouteDeps) {
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -56,6 +70,11 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
    *
    *   curl -s -F file=@deck.pdf https://presio.xyz/api/present
    *   # open the returned url
+   *
+   * Update mode: pass `session_id` (multipart field) plus its controller token
+   * (`controller_token` field or `x-controller-token` header) to replace an
+   * existing presentation's deck instead of creating one — the response keeps
+   * the same id/link and no extra concurrent slot is used.
    */
   app.post("/api/present", uploadField("file"), async (req, res) => {
     try {
@@ -66,6 +85,51 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       }
       if (file.mimetype !== "application/pdf" && !file.originalname.toLowerCase().endsWith(".pdf")) {
         res.status(400).json({ error: "File must be a PDF" });
+        return;
+      }
+
+      const rawSessionId = singleField(req.body.session_id);
+      const rawToken = singleField(req.body.controller_token);
+      if (rawSessionId === null || rawToken === null) {
+        res.status(400).json({
+          error: 'Send "session_id" and "controller_token" at most once each',
+        });
+        return;
+      }
+
+      const sessionId = rawSessionId.trim();
+      if (sessionId) {
+        // The token is compared byte-for-byte, so it is never trimmed.
+        const token = rawToken || req.get("x-controller-token") || "";
+        if (!token) {
+          // Reject rather than falling back to create: silently minting a new
+          // presentation would hand the agent a fresh link and consume a slot.
+          res.status(401).json({
+            error: 'A controller token is required to update an existing presentation ("controller_token" field or "x-controller-token" header)',
+          });
+          return;
+        }
+        const result = await updatePresentDeck(supabase, {
+          sessionId,
+          token,
+          buffer: file.buffer,
+          originalName: file.originalname,
+          baseUrl: baseUrl(req),
+          io,
+          socketState,
+        });
+        if (!result.ok) {
+          res.status(result.status).json({ error: result.error });
+          return;
+        }
+        res.json({
+          id: result.id,
+          url: result.url,
+          filename: result.filename,
+          totalSlides: result.totalSlides,
+          next: result.next,
+          updated: true,
+        });
         return;
       }
 
@@ -92,6 +156,55 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       res.status(500).json({ error: "Internal server error" });
     }
   });
+
+  /**
+   * GET /api/sessions/mine — the signed-in account's live synced presentations,
+   * newest first. The home screen asks this on any device the user signs in on:
+   * local decks are device-bound IndexedDB, but synced ones belong to the
+   * account, so a new device needs this list (plus each deck's controller
+   * token — the owner is entitled to it, and without it the device could never
+   * open the controller). Local handoff rows are excluded: their PDF only ever
+   * belongs in the creating browser.
+   */
+  if (!isLocalMode) {
+    app.get("/api/sessions/mine", async (req, res) => {
+      try {
+        const user = await requireUser(supabase, req);
+        if (!user) {
+          res.status(401).json({ error: "Authentication required" });
+          return;
+        }
+        // The filter comes from the verified token only — a client-supplied id
+        // is never trusted, so no account can see another's rows.
+        const { data, error } = await supabase
+          .from("sessions")
+          .select("id, filename, total_slides, created_at, expires_at, controller_token")
+          .eq("user_id", user.id)
+          .eq("local", false)
+          .neq("status", "expired")
+          .gt("expires_at", new Date().toISOString())
+          .order("created_at", { ascending: false });
+        if (error) {
+          res.status(500).json({ error: "Failed to list presentations" });
+          return;
+        }
+        // Whitelist the response fields; only controller_token is renamed.
+        res.json(
+          (data ?? []).map((row) => ({
+            id: row.id,
+            filename: row.filename,
+            total_slides: row.total_slides,
+            created_at: row.created_at,
+            expires_at: row.expires_at,
+            controllerToken: row.controller_token,
+          }))
+        );
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+  }
 
   // Download a staged handoff PDF (token required). Does not delete yet.
   app.get("/api/sessions/:id/handoff", async (req, res) => {
@@ -507,6 +620,124 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
     }
   });
 
+  // GET /api/sessions/:id/remote-version — cheap republish detection for a
+  // URL-backed deck. Answers with the remote PDF's validator tuple (ETag /
+  // Last-Modified / Content-Length, as available) so the controller can tell,
+  // without downloading anything, whether the file at `pdf_url` has changed
+  // since the previous poll. Authorized like the /pdf route (controller token
+  // or the logged-in owner): the values themselves are opaque strings, but
+  // there is no reason to let arbitrary visitors probe them.
+  //
+  //   - 404 when the session is unknown/expired or not URL-backed (local and
+  //     server-hosted decks have no pdf_url) — the client reads this as
+  //     "nothing to watch" and stops polling.
+  //   - 502 when the remote host is unreachable or errors — the client backs
+  //     off and keeps today's behaviour; nothing surfaces to the presenter.
+  app.get("/api/sessions/:id/remote-version", async (req, res) => {
+    try {
+      const user = isLocalMode ? null : await resolveOptionalUserId(supabase, req);
+
+      const { data: row, error: rowError } = await supabase
+        .from("sessions")
+        .select("id, local, pdf_url, user_id, controller_token")
+        .eq("id", req.params.id)
+        .neq("status", "expired")
+        .single();
+      if (rowError || !row) {
+        res.status(404).json({ error: "Session not found" });
+        return;
+      }
+      const authorized =
+        safeEqual(req.get("x-controller-token") || "", row.controller_token) ||
+        (!isLocalMode && !!user && row.user_id === user);
+      if (!authorized) {
+        res.status(403).json({ error: "Not authorized" });
+        return;
+      }
+      if (row.local || !row.pdf_url) {
+        res.status(404).json({ error: "This presentation is not backed by an external URL" });
+        return;
+      }
+
+      const meta = await fetchRemotePdfMeta(row.pdf_url);
+      if (!meta) {
+        res.status(502).json({ error: "The remote host could not be reached" });
+        return;
+      }
+      res.json(meta);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /api/sessions/:id/deck-refreshed — the controller noticed (via
+  // remote-version polling) that a URL-backed deck was republished at its
+  // source and the presenter accepted the new version. Unlike /pdf there are
+  // no bytes to store — pdf_url decks keep no server copy — so this only
+  // records the new page count, clamps the current slide into range, drops
+  // the stored drawings (keyed by slide number) and announces the swap to the
+  // room; every client re-fetches the URL itself. The filename is unchanged:
+  // a republish replaces the content, not the presentation's title.
+  //
+  // Unlike /pdf, the page count is asserted by the client rather than parsed
+  // here — there are no bytes on this side to count. That is safe because only
+  // the controller can call this, and because isValidTotalSlides bounds the
+  // value: total_slides scales the per-session annotation caps and gates slide
+  // numbers, so an unbounded one would be a memory lever, but a wrong-but-bounded
+  // one only mis-clamps the presenter's own deck until the next real update.
+  app.post("/api/sessions/:id/deck-refreshed", async (req, res) => {
+    try {
+      const user = isLocalMode ? null : await resolveOptionalUserId(supabase, req);
+
+      const totalSlides = parseInt(req.body.total_slides, 10);
+      if (!isValidTotalSlides(totalSlides)) {
+        res.status(400).json({ error: "A valid total_slides is required" });
+        return;
+      }
+
+      const { data: row, error: rowError } = await supabase
+        .from("sessions")
+        .select("id, local, pdf_url, user_id, controller_token, filename, current_slide")
+        .eq("id", req.params.id)
+        .neq("status", "expired")
+        .single();
+      if (rowError || !row) {
+        res.status(404).json({ error: "Session not found" });
+        return;
+      }
+      const authorized =
+        safeEqual(req.get("x-controller-token") || "", row.controller_token) ||
+        (!isLocalMode && !!user && row.user_id === user);
+      if (!authorized) {
+        res.status(403).json({ error: "Not authorized" });
+        return;
+      }
+      if (row.local || !row.pdf_url) {
+        res.status(400).json({ error: "This presentation is not backed by an external URL" });
+        return;
+      }
+
+      const clampedSlide = Math.min(Math.max(row.current_slide ?? 1, 1), totalSlides);
+      const { error: updateError } = await supabase
+        .from("sessions")
+        .update({ total_slides: totalSlides, current_slide: clampedSlide })
+        .eq("id", row.id);
+      if (updateError) {
+        res.status(500).json({ error: "Failed to update session" });
+        return;
+      }
+
+      socketState?.annotations.delete(String(req.params.id));
+      io.to(req.params.id).emit("deck_updated", { filename: row.filename, totalSlides });
+
+      res.json({ ok: true, totalSlides, filename: row.filename });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   app.get("/api/sessions/:id", async (req, res) => {
     const { data, error } = await supabase
       .from("sessions")
@@ -540,6 +771,11 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       current_slide: data.current_slide,
       local: data.local,
       pdfUrl,
+      // Whether pdfUrl points at someone else's host rather than our storage.
+      // The client needs this to re-fetch a changed deck correctly: our own
+      // object URLs take a cache-busting query parameter, but an external one
+      // may be presigned, where an extra parameter invalidates the signature.
+      external: !!data.pdf_url,
     });
   });
 

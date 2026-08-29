@@ -2,7 +2,7 @@
 title: Presio agent brief
 description: What AI agents can do with Presio — capabilities, setup, limits, and examples.
 canonical: BASE/AGENTS.md
-last_updated: 2026-07-15
+last_updated: 2026-08-27
 ---
 
 # Presio agent brief
@@ -10,7 +10,8 @@ last_updated: 2026-07-15
 ## What you can do
 
 1. **Start a local presentation** from a PDF via `POST /api/present` or MCP tool `present_pdf`.
-2. **Validate** Presio notes/media sidecars via `POST /api/check` or MCP tool `check_pdf`.
+2. **Update a presentation you already created** by repeating the present call with its `session_id` + `controller_token` (the `t=` parameter of the returned url) — the deck is replaced in place and the same link keeps working.
+3. **Validate** Presio notes/media sidecars via `POST /api/check` or MCP tool `check_pdf`.
 
 ## Preferred workflow
 
@@ -41,6 +42,10 @@ No API key or configuration required. Optional: send `Authorization: Bearer <tok
 ```bash
 # Start a local presentation — returns a handoff URL to open in a browser
 curl -s -F file=@deck.pdf BASE/api/present
+
+# Replace an existing presentation's deck (same id/link, no extra slot);
+# TOKEN is the t= parameter of the url from the original create response
+curl -s -F file=@deck-v2.pdf -F session_id=ABC123 -F controller_token=$TOKEN BASE/api/present
 
 # Validate notes/media sidecar attachments
 curl -s -F file=@deck.pdf BASE/api/check

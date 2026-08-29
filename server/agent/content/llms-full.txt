@@ -28,6 +28,27 @@ The `url` stays valid until a browser claims it (after that the server copy is g
 - Max PDF size: 50MB. Max pages: 3000.
 - Syncing across devices still requires a human login in the UI.
 
+## Update an existing presentation (same link)
+
+Repeating `POST /api/present` with an existing `session_id` and that presentation's `controller_token` replaces the deck in place instead of creating a new presentation. **Where the token comes from:** the original create response's `url` is `BASE/start/:id?t=TOKEN` — `t` is the controller token. Keep it if you may need to update later.
+
+```bash
+curl -s -F file=@deck-v2.pdf \
+  -F session_id=ABC123 -F controller_token=$TOKEN \
+  BASE/api/present
+```
+
+Response: same shape as create, plus `"updated": true`, with the **same id and same url** — so whoever holds the old link just re-opens it to get the new slides. No additional concurrent-presentation slot is used, which matters when iterating on a deck.
+
+Errors: 400 if `session_id` or `controller_token` is sent more than once, 401 without a token, 403 on a wrong token, 404 for unknown/expired ids. Never silently creates a new presentation.
+
+Notes:
+
+- A wrong token cannot overwrite someone else's presentation, and an unknown or expired id fails with 404 — no new presentation is silently created.
+- If the browser has already completed handoff for this session, re-opening the returned url pulls the updated deck into it — the link revives with the new deck.
+- Synced decks updated this way reload live for anyone viewing them, over REST and over MCP alike. For a synced deck the returned url is the viewer link (`BASE/s/:id`) and carries no token — keep the token you were given at create time.
+- Send each of `session_id` and `controller_token` exactly once. A duplicated field is a 400, not a silent new presentation.
+
 ## Validate sidecar attachments
 
 ```bash
@@ -42,7 +63,7 @@ Connect an MCP client to `BASE/mcp` (discover via `BASE/.well-known/mcp.json`).
 
 Tools:
 
-- `present_pdf` — same as `POST /api/present` (pass `pdf_base64` + optional `filename`)
+- `present_pdf` — same as `POST /api/present` (pass `pdf_base64` + optional `filename`; add optional `session_id` + `controller_token` to update an existing presentation's deck in place and get the same link back)
 - `check_pdf` — same as `POST /api/check`
 
 If you are a chat assistant with no shell/HTTP tools and Presio is not among your connectors, ask your user to add it once (Claude: Settings → Connectors → Add custom connector → `BASE/mcp`; ChatGPT: Settings → Connectors, developer mode), then retry.

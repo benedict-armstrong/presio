@@ -39,6 +39,39 @@ export async function loadPdfData(data: Uint8Array): Promise<PDFDocumentProxy> {
   return getDocument({ data }).promise;
 }
 
+/**
+ * A URL that fetches a synced deck's *current* bytes.
+ *
+ * A replace rewrites the stored object in place, so the deck's URL never
+ * changes — and a browser (or the CDN in front of it) that already has the old
+ * copy will happily serve it again. Keyed by something that changes when the
+ * bytes do. Only for URLs we mint ourselves: see loadLatestPdf.
+ */
+export function freshPdfUrl(url: string, version: string | number): string {
+  return `${url}${url.includes("?") ? "&" : "?"}v=${version}`;
+}
+
+/**
+ * Load a synced deck's current bytes, whichever kind of URL it lives at.
+ *
+ * Our own storage URLs sit behind a CDN that keys on the full URL, so a version
+ * parameter is what actually defeats it. An `external` URL belongs to whoever
+ * published the deck and may be presigned, where an unknown parameter
+ * invalidates the signature outright — there, `cache: "reload"` gets fresh
+ * bytes without touching the URL, and needs no CORS preflight the way a
+ * Cache-Control request header would.
+ */
+export async function loadLatestPdf(
+  url: string,
+  { external, version }: { external: boolean; version: string | number }
+): Promise<PDFDocumentProxy> {
+  if (!external) return loadPdf(freshPdfUrl(url, version));
+  // One GET for the whole file, matching loadPdf's reasons for not ranging.
+  const res = await fetch(url, { cache: "reload" });
+  if (!res.ok) throw new Error(`Failed to fetch the PDF (${res.status})`);
+  return loadPdfData(new Uint8Array(await res.arrayBuffer()));
+}
+
 // Cap the rendered canvas width (device pixels). Beyond ~4K wide there's no
 // visible gain and we risk hitting browser canvas-size limits / memory.
 const MAX_CANVAS_WIDTH = 4096;

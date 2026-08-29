@@ -22,7 +22,7 @@ These are served live by the Express app (not static files):
 | `/api.md` / `/openapi.json` | API docs |
 | `/robots.txt` / `/sitemap.xml` | Crawl discovery |
 | `/.well-known/mcp.json` / `/mcp` | MCP tools `present_pdf`, `check_pdf` |
-| `POST /api/present` | Upload PDF → local handoff URL |
+| `POST /api/present` | Upload PDF → local handoff URL (update in place with `session_id` + controller token) |
 | `POST /api/check` | Sidecar validity report |
 
 Sources: `server/agent/content/`, `server/routes/agentDocs.ts`, `server/routes/mcp.ts`, `server/lib/presentHandoff.ts`.

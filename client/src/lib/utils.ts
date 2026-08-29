@@ -20,11 +20,14 @@ export function setSessionAuth(id: string, auth: SessionAuth) {
 }
 
 // Ends (deletes) a synced presentation. The server requires the controller
-// token, so send the one stored for this session.
-export function endSession(id: string): Promise<Response> {
+// token, so send the one stored for this session — or `fallbackToken` when this
+// device never held the credential (an account-synced deck opened from
+// /api/sessions/mine carries its token with the row).
+export function endSession(id: string, fallbackToken?: string): Promise<Response> {
   const { controllerToken } = getSessionAuth(id);
+  const token = controllerToken ?? fallbackToken;
   return fetch(`/api/sessions/${id}`, {
     method: "DELETE",
-    headers: controllerToken ? { "x-controller-token": controllerToken } : {},
+    headers: token ? { "x-controller-token": token } : {},
   });
 }

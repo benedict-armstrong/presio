@@ -1,9 +1,15 @@
 // Pure validation/sanitization helpers, factored out of the request/socket
 // handlers so they can be unit-tested without a server or Supabase.
 
-// Validate a user-supplied external PDF URL. We only ever hand this back to the
-// client to fetch (the server never requests it), so the bar is simply that it
-// be a well-formed https URL — rejecting http:/data:/javascript: and garbage.
+// Validate a user-supplied external PDF URL. This is a syntactic check only —
+// scheme and shape — and deliberately says nothing about where the URL points.
+//
+// The value is mainly handed back to the client to fetch. It is also probed by
+// the server for change detection (GET /api/sessions/:id/remote-version), and
+// that path must NOT rely on this function for safety: dereferencing a
+// visitor-supplied URL needs address-level checks, which live in
+// lib/remotePdf.ts (isSafeRemoteUrl). Anything new that fetches a pdf_url
+// server-side belongs behind that helper too.
 export function isValidHttpsUrl(value: unknown): value is string {
   if (typeof value !== "string" || !value) return false;
   try {

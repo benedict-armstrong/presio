@@ -130,7 +130,7 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   // Local/dev only: lets share surfaces resolve this machine's LAN address
   // instead of asking the presenter to type it (see lib/lanAddress.ts).
   registerLanAddressRoute(app, { enabled: devOrLocal });
-  registerMcpRoutes(app, supabase);
+  registerMcpRoutes(app, supabase, { io, socketState });
 
   // Unknown API paths must 404 as JSON — falling through to the SPA catch-all
   // returns index.html with a 200, which masks client bugs as parse errors.

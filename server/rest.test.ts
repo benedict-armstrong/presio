@@ -8,8 +8,16 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createApp } from "./app.js";
 import { FakeSupabase, type SessionRow } from "./test/fakeSupabase.js";
 
-// A no-op io stand-in: the DELETE route only calls io.in(id).fetchSockets().
-const fakeIo = { in: () => ({ fetchSockets: async () => [] }) } as unknown as Server;
+// A no-op io stand-in: the DELETE route only calls io.in(id).fetchSockets(),
+// and the deck-update path broadcasts via io.to(id).emit(). Emissions are
+// recorded so tests can assert viewers were told to reload.
+const fakeEmissions: { room: string; event: string; payload: unknown }[] = [];
+const fakeIo = {
+  in: () => ({ fetchSockets: async () => [] }),
+  to: (room: string) => ({
+    emit: (event: string, payload?: unknown) => fakeEmissions.push({ room, event, payload }),
+  }),
+} as unknown as Server;
 
 function appWith(fake: FakeSupabase) {
   return createApp({ supabase: fake as unknown as SupabaseClient, io: fakeIo });
@@ -207,5 +215,294 @@ describe("POST /api/sessions/external (validation)", () => {
     expect(res.body.id).toMatch(/^[A-Z0-9]{6}$/);
     expect(res.body).toHaveProperty("controllerToken");
     expect(fake.rows).toHaveLength(1);
+  });
+});
+
+// A local handoff session, as minted by POST /api/present.
+const handoffRow = (over: Partial<SessionRow> = {}): SessionRow => ({
+  id: "HND001",
+  pdf_path: "handoff/old.pdf",
+  filename: "Old deck",
+  total_slides: 5,
+  current_slide: 2,
+  local: true,
+  controller_token: "handoff-token",
+  passphrase: "PASS1234",
+  user_id: null,
+  expires_at: future(),
+  ...over,
+});
+
+describe("POST /api/present (create)", () => {
+  it("keeps today's create behaviour when no session_id is given", async () => {
+    const fake = new FakeSupabase([]);
+    const app = appWith(fake);
+    const res = await request(app).post("/api/present").attach("file", realPdf, {
+      filename: "deck.pdf",
+      contentType: "application/pdf",
+    });
+
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body).sort()).toEqual(["filename", "id", "next", "totalSlides", "url"].sort());
+    expect(res.body.url).toMatch(/^http:\/\/.+\/start\/[A-Z0-9]{6}\?t=/);
+    expect(fake.rows).toHaveLength(1);
+    expect(fake.rows[0].local).toBe(true);
+  });
+});
+
+describe("POST /api/present (update in place)", () => {
+  it("replaces a local handoff deck and returns the same link and token", async () => {
+    const fake = new FakeSupabase([handoffRow({})]);
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "HND001")
+      .field("controller_token", "handoff-token")
+      .attach("file", realPdf, { filename: "new-deck.PDF", contentType: "application/pdf" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.updated).toBe(true);
+    // Same presentation → same id and same link/token as the original create.
+    expect(res.body.id).toBe("HND001");
+    expect(res.body.url).toMatch(/^http:\/\/[^/]+\/start\/HND001\?t=handoff-token$/);
+    expect(res.body.totalSlides).toBeGreaterThan(0);
+
+    // The row is reused, not duplicated — no extra concurrent slot.
+    expect(fake.rows).toHaveLength(1);
+    expect(fake.rows[0].local).toBe(true);
+    expect(fake.rows[0].controller_token).toBe("handoff-token");
+    expect(fake.rows[0].filename).toBe("new-deck");
+    expect(fake.rows[0].pdf_path).toBe("handoff/old.pdf");
+    expect(fake.uploaded.get("handoff/old.pdf")?.length).toBe(realPdf.length);
+  });
+
+  it("accepts the token via the x-controller-token header too", async () => {
+    const fake = new FakeSupabase([handoffRow({ pdf_path: "" })]); // handoff already completed
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .set("x-controller-token", "handoff-token")
+      .field("session_id", "HND001")
+      .attach("file", realPdf, { filename: "v2.pdf", contentType: "application/pdf" });
+
+    expect(res.status).toBe(200);
+    // Server copy was cleared by a prior handoff; the update restages it so
+    // the link revives.
+    expect(fake.rows[0].pdf_path).not.toBe("");
+    expect(fake.uploaded.get(fake.rows[0].pdf_path!)).toBeDefined();
+  });
+
+  it("403s on a wrong token and leaves the row untouched", async () => {
+    const fake = new FakeSupabase([handoffRow({})]);
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "HND001")
+      .field("controller_token", "wrong-token")
+      .attach("file", realPdf, { filename: "evil.pdf", contentType: "application/pdf" });
+
+    expect(res.status).toBe(403);
+    expect(fake.rows).toHaveLength(1);
+    expect(fake.rows[0].filename).toBe("Old deck");
+    expect(fake.uploaded.size).toBe(0);
+  });
+
+  it("401s when session_id is given without any controller token", async () => {
+    const fake = new FakeSupabase([handoffRow({})]);
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "HND001")
+      .attach("file", realPdf, { filename: "deck.pdf", contentType: "application/pdf" });
+
+    expect(res.status).toBe(401);
+    expect(fake.rows).toHaveLength(1);
+  });
+
+  it("404s on an unknown session instead of creating a new one", async () => {
+    const fake = new FakeSupabase([]);
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "NOPE01")
+      .field("controller_token", "whatever")
+      .attach("file", realPdf, { filename: "deck.pdf", contentType: "application/pdf" });
+
+    expect(res.status).toBe(404);
+    expect(JSON.parse(JSON.stringify(res.body)).error).toMatch(/not found or expired/i);
+    expect(fake.rows).toHaveLength(0); // no silent create
+  });
+
+  it("404s on an expired session", async () => {
+    const fake = new FakeSupabase([handoffRow({ status: "expired" })]);
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "HND001")
+      .field("controller_token", "handoff-token")
+      .attach("file", realPdf, { filename: "deck.pdf", contentType: "application/pdf" });
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns exactly the documented response shape", async () => {
+    const fake = new FakeSupabase([handoffRow({})]);
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "HND001")
+      .field("controller_token", "handoff-token")
+      .attach("file", realPdf, { filename: "v2.pdf", contentType: "application/pdf" });
+
+    expect(res.status).toBe(200);
+    // `ok` is an internal discriminant on PresentUpdateResult — it must not
+    // leak into the response, which create whitelists and the docs pin down.
+    expect(Object.keys(res.body).sort()).toEqual(
+      ["filename", "id", "next", "totalSlides", "updated", "url"].sort()
+    );
+  });
+
+  it("400s when session_id is sent twice instead of silently creating", async () => {
+    const fake = new FakeSupabase([handoffRow({})]);
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "HND001")
+      .field("session_id", "HND001")
+      .field("controller_token", "handoff-token")
+      .attach("file", realPdf, { filename: "v2.pdf", contentType: "application/pdf" });
+
+    // Multer hands a repeated field back as an array; reading that as "absent"
+    // used to fall through to create — a new id, a new token and a burnt slot.
+    expect(res.status).toBe(400);
+    expect(fake.rows).toHaveLength(1);
+    expect(fake.rows[0].filename).toBe("Old deck");
+  });
+
+  it("400s when controller_token is sent twice", async () => {
+    const fake = new FakeSupabase([handoffRow({})]);
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "HND001")
+      .field("controller_token", "handoff-token")
+      .field("controller_token", "handoff-token")
+      .attach("file", realPdf, { filename: "v2.pdf", contentType: "application/pdf" });
+
+    expect(res.status).toBe(400);
+    expect(fake.rows).toHaveLength(1);
+  });
+
+  it("404s on a session past expires_at that the sweeper has not marked yet", async () => {
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    const fake = new FakeSupabase([handoffRow({ expires_at: past })]);
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "HND001")
+      .field("controller_token", "handoff-token")
+      .attach("file", realPdf, { filename: "v2.pdf", contentType: "application/pdf" });
+
+    // status is only reconciled hourly, so an expired row can still read active.
+    expect(res.status).toBe(404);
+    expect(fake.uploaded.size).toBe(0);
+  });
+
+  it("updates a synced hosted deck and broadcasts deck_updated", async () => {
+    const fake = new FakeSupabase([
+      baseRow({ current_slide: 50 }), // clamp into range
+    ]);
+    fakeEmissions.length = 0;
+    const app = appWith(fake);
+    const res = await request(app)
+      .post("/api/present")
+      .field("session_id", "ABC123")
+      .field("controller_token", "secret-token")
+      .attach("file", realPdf, { filename: "talk-v2.pdf", contentType: "application/pdf" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe("ABC123");
+    expect(res.body.url).toMatch(/^http:\/\/[^/]+\/s\/ABC123$/);
+    expect(fake.rows).toHaveLength(1); // still one slot in use
+    expect(fake.rows[0].total_slides).toBeGreaterThan(0);
+    expect(fake.rows[0].current_slide).toBeGreaterThan(0);
+    expect(fakeEmissions).toContainEqual(
+      expect.objectContaining({ room: "ABC123", event: "deck_updated" })
+    );
+    // A synced deck has no handoff step, so it must not be told to open a
+    // handoff link — viewers already reloaded.
+    expect(res.body.next).not.toMatch(/hand off/i);
+  });
+});
+
+describe("GET /api/sessions/mine (account list)", () => {
+  const owned = (over: Partial<SessionRow>): SessionRow =>
+    baseRow({ user_id: "user-1", created_at: "2026-08-01T00:00:00.000Z", ...over });
+
+  it("401s without a bearer token", async () => {
+    const app = appWith(new FakeSupabase([owned({})]));
+    const res = await request(app).get("/api/sessions/mine");
+    expect(res.status).toBe(401);
+  });
+
+  it("401s on an unrecognised bearer token", async () => {
+    const app = appWith(new FakeSupabase([owned({})]).addToken("good", "user-1"));
+    const res = await request(app)
+      .get("/api/sessions/mine")
+      .set("Authorization", "Bearer nope");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns only the caller's rows, never another account's", async () => {
+    const fake = new FakeSupabase([
+      owned({ id: "MINE01" }),
+      owned({ id: "THEIR1", user_id: "user-2" }),
+    ]).addToken("tok", "user-1");
+    const res = await request(appWith(fake))
+      .get("/api/sessions/mine")
+      .set("Authorization", "Bearer tok");
+    expect(res.status).toBe(200);
+    expect(res.body.map((r: { id: string }) => r.id)).toEqual(["MINE01"]);
+  });
+
+  it("excludes local, expired and past-expiry rows", async () => {
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    const fake = new FakeSupabase([
+      owned({ id: "LIVE01" }),
+      owned({ id: "LOCAL1", local: true }),
+      owned({ id: "ENDED1", status: "expired" }),
+      owned({ id: "STALE1", expires_at: past }),
+    ]).addToken("tok", "user-1");
+    const res = await request(appWith(fake))
+      .get("/api/sessions/mine")
+      .set("Authorization", "Bearer tok");
+    expect(res.status).toBe(200);
+    expect(res.body.map((r: { id: string }) => r.id)).toEqual(["LIVE01"]);
+  });
+
+  it("orders newest first", async () => {
+    const fake = new FakeSupabase([
+      owned({ id: "OLD001", created_at: "2026-01-01T00:00:00.000Z" }),
+      owned({ id: "NEW001", created_at: "2026-08-20T00:00:00.000Z" }),
+      owned({ id: "MID001", created_at: "2026-05-05T00:00:00.000Z" }),
+    ]).addToken("tok", "user-1");
+    const res = await request(appWith(fake))
+      .get("/api/sessions/mine")
+      .set("Authorization", "Bearer tok");
+    expect(res.body.map((r: { id: string }) => r.id)).toEqual(["NEW001", "MID001", "OLD001"]);
+  });
+
+  it("returns the whitelisted fields — the controller token, and no passphrase", async () => {
+    const fake = new FakeSupabase([owned({})]).addToken("tok", "user-1");
+    const res = await request(appWith(fake))
+      .get("/api/sessions/mine")
+      .set("Authorization", "Bearer tok");
+    expect(res.body).toHaveLength(1);
+    // The owner is entitled to the controller token: it's what lets a device
+    // they've just signed in on open the presentation as its controller.
+    expect(res.body[0].controllerToken).toBe("secret-token");
+    expect(Object.keys(res.body[0]).sort()).toEqual(
+      ["controllerToken", "created_at", "expires_at", "filename", "id", "total_slides"]
+    );
   });
 });
