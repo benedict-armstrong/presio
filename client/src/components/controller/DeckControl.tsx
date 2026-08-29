@@ -1,11 +1,14 @@
+import { useCallback, useState, type DragEvent } from "react";
 import { FileText, Zap } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { DeckWatchMode, DeckWatchStatus } from "@/lib/deckWatcher";
 
 // The controller header's deck cluster: what is being presented, and — where
 // the browser can watch a file on disk — what happens when it changes.
 //
 // Two controls, because they're two different questions:
-//   • the filename swaps the deck by hand (click to pick a new PDF)
+//   • the filename swaps the deck by hand (click to pick a new PDF, or drop
+//     one straight onto it)
 //   • the chip beside it is live reload: off -> watching -> auto -> off
 //
 // Everything here is local-deck only; a synced deck has no file on this
@@ -82,6 +85,7 @@ export function DeckControl({
   status,
   remoteUpdate = false,
   onReplace,
+  onDropDeck,
   onCycleMode,
   onResume,
   onApply,
@@ -97,11 +101,54 @@ export function DeckControl({
    *  presenter, so it reads as the same chip. */
   remoteUpdate?: boolean;
   onReplace: () => void;
+  /** A PDF was dropped on the filename. The handle rides along where the
+   *  platform offers one, so a dropped deck stays watchable. */
+  onDropDeck?: (file: File, handle?: FileSystemFileHandle) => void;
   onCycleMode: () => void;
   onResume: () => void;
   onApply: () => void;
   onRemoteApply?: () => void;
 }) {
+  // Dragging a recompiled PDF onto the deck name is the same swap as clicking
+  // it, minus the picker. Only armed when a drop handler is wired.
+  const [dragging, setDragging] = useState(false);
+  const onDragOver = useCallback(
+    (e: DragEvent<HTMLButtonElement>) => {
+      if (!onDropDeck) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      setDragging(true);
+    },
+    [onDropDeck]
+  );
+  const onDrop = useCallback(
+    (e: DragEvent<HTMLButtonElement>) => {
+      if (!onDropDeck) return;
+      e.preventDefault();
+      setDragging(false);
+      const file = e.dataTransfer.files[0];
+      if (file?.type !== "application/pdf") return;
+      // Grab the File System Access handle synchronously, before the event is
+      // recycled, so a dropped deck stays watchable. Only trusted for a
+      // single-item drop: with several, items[0] may not be this file.
+      const items = e.dataTransfer.items;
+      const item = items.length === 1 ? items[0] : undefined;
+      const getHandle = item?.getAsFileSystemHandle?.bind(item);
+      if (getHandle) {
+        getHandle()
+          .then((h) => onDropDeck(file, h?.kind === "file" ? (h as FileSystemFileHandle) : undefined))
+          .catch(() => onDropDeck(file));
+      } else {
+        onDropDeck(file);
+      }
+    },
+    [onDropDeck]
+  );
+
+  // Stored names drop the extension (see Home's upload path); the header shows
+  // it back, because ".pdf" is what makes this read as the file on disk.
+  const label = filename ? (/\.pdf$/i.test(filename) ? filename : `${filename}.pdf`) : "Untitled deck";
+
   const chip: Chip | null = remoteUpdate
     ? {
         label: "Deck updated",
@@ -117,11 +164,22 @@ export function DeckControl({
       <button
         type="button"
         onClick={onReplace}
-        title={`${filename || "This deck"} — click to swap in a different PDF`}
-        className="flex min-w-0 max-w-[14rem] items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        onDragOver={onDragOver}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        title={`${label} — click to swap in a different PDF${onDropDeck ? ", or drop one here" : ""}`}
+        className={cn(
+          // h-8 and px-2.5 match the header buttons; md and up widens the
+          // padding so the drop target reads as a target, not just another
+          // button.
+          "flex h-8 min-w-0 max-w-[16rem] items-center gap-1.5 rounded-md border border-dashed px-2.5 text-xs transition-colors md:px-4",
+          dragging
+            ? "border-primary/60 bg-primary/10 text-foreground"
+            : "border-border bg-muted/30 text-muted-foreground hover:bg-muted hover:text-foreground"
+        )}
       >
         <FileText size={12} className="shrink-0" />
-        <span className="truncate">{filename || "Untitled deck"}</span>
+        <span className="truncate">{label}</span>
       </button>
       {chip &&
         (chip.action === "none" ? (

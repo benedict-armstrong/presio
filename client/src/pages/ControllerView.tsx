@@ -232,6 +232,12 @@ export function ControllerView({
   const onReplacePicked = useCallback((file: File | undefined) => {
     if (file) setReplaceCandidate(file);
   }, []);
+  // Dropped onto the deck name in the header: same confirmation as a picked
+  // replacement, and the handle (Chromium only) keeps the new deck watchable.
+  const onDeckDropped = useCallback((file: File, handle?: FileSystemFileHandle) => {
+    replaceHandleRef.current = handle ?? null;
+    setReplaceCandidate(file);
+  }, []);
   // Chromium picks via showOpenFilePicker so the replacement keeps a watchable
   // handle; other browsers fall back to the plain input (no watching).
   const openReplacePicker = useCallback(() => {
@@ -535,6 +541,7 @@ export function ControllerView({
         deckWatchMode={deckWatchMode}
         deckWatchStatus={deckWatchStatus}
         onReplaceDeck={openReplacePicker}
+        onDropDeck={onDeckDropped}
         onDeckWatchCycle={onDeckWatchCycle}
         onDeckWatchApply={onDeckWatchApply}
         onDeckWatchResume={onDeckWatchResume}
