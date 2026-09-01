@@ -27,7 +27,6 @@ Media: `media-slide-{N}-{id}.json` plus optional binary `media-*.{gif,mp4,webm}`
 ## Sitemap
 
 - [Home](BASE/)
-- [About](BASE/about)
 - [Checker](BASE/check)
 - [Glossary](BASE/glossary.md)
 - [Full index](BASE/sitemap.md)

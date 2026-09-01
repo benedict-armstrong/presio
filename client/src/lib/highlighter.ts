@@ -1,4 +1,4 @@
-// Fine-grained Shiki bundle: only the languages/themes the About page needs,
+// Fine-grained Shiki bundle: only the languages/themes the code samples need,
 // so we don't pull in Shiki's full grammar/theme set.
 import { createHighlighterCore, type HighlighterCore } from "shiki/core";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";

@@ -165,7 +165,6 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   // Pages with a markdown mirror advertise it via rel="alternate".
   const MD_MIRRORS: Record<string, string> = {
     "/": "/index.md",
-    "/about": "/about.md",
     "/check": "/check.md",
   };
 
