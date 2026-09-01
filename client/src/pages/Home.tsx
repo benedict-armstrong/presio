@@ -12,6 +12,7 @@ import { ConfirmReplaceDialog } from "@/components/controller/ConfirmReplaceDial
 import { ConfirmReuploadDialog } from "@/components/controller/ConfirmReuploadDialog";
 import { ConfirmEndDialog } from "@/components/controller/ConfirmEndDialog";
 import { idbPut, idbGet, idbList, idbDelete } from "@/lib/localStore";
+import { newLocalDeckId } from "@/lib/localId";
 import { isDeckWatchSupported, PDF_PICKER_OPTIONS } from "@/lib/deckWatcher";
 import { getSessionAuth, setSessionAuth, endSession } from "@/lib/utils";
 import { lsRemove, lsSetString, annotationsKey, sessionKey, deckWatchKey } from "@/lib/storage";
@@ -275,6 +276,11 @@ interface ReuploadPrompt {
 }
 
 async function listControlledSynced(): Promise<RecentDeck[]> {
+  // Every probe below has to time out before the next one starts, so offline
+  // this scan turns a page that has all its local decks in hand into a page
+  // that sits there. The decks it finds are server-hosted and unreachable
+  // anyway, so skip it rather than wait it out.
+  if (!navigator.onLine) return [];
   const ids: string[] = [];
   try {
     for (let i = 0; i < localStorage.length; i++) {
@@ -317,6 +323,9 @@ async function listControlledSynced(): Promise<RecentDeck[]> {
 // zero extra network round-trips, so the fetch is skipped entirely when no
 // session token exists — signing out drops the list back to local-only for free.
 async function listAccountSynced(): Promise<RecentDeck[]> {
+  // Same reasoning as above, plus getSession() itself auto-refreshes a
+  // near-expiry token — a network round trip before the fetch even starts.
+  if (!navigator.onLine) return [];
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) return [];
@@ -619,7 +628,12 @@ export default function Home() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  // The plain create path: mint a session, store the deck locally, open share.
+  // The plain create path: store the deck locally under an id minted here, and
+  // open share. Nothing on this path touches the network — the deck's bytes,
+  // its id and everything keyed by it are local to this browser, so a PDF can
+  // be imported and presented with no connection at all. The join code (and the
+  // `sessions` row behind it) is created later, server-side, if and when the
+  // presenter shares the deck.
   const createDeck = useCallback(
     async (p: {
       file: File;
@@ -629,17 +643,7 @@ export default function Home() {
       totalSlides: number;
       handle?: FileSystemFileHandle;
     }) => {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (sessionData.session) headers.Authorization = `Bearer ${sessionData.session.access_token}`;
-      const res = await fetch("/api/sessions/local", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ filename: p.filename, total_slides: p.totalSlides }),
-      });
-      if (!res.ok) throw new Error("Failed to create session");
-      const { id, controllerToken, passphrase } = await res.json();
-      if (controllerToken) setSessionAuth(id, { controllerToken, passphrase });
+      const id = newLocalDeckId();
       try {
         await idbPut({
           id,

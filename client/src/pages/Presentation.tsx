@@ -22,6 +22,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { authEnabled } from "@/lib/authMode";
 import { getSessionAuth, endSession } from "@/lib/utils";
 import { idbGet, idbPut, idbDelete } from "@/lib/localStore";
+import { isLocalDeckId } from "@/lib/localId";
 import {
   DeckWatcher,
   isDeckWatchSupported,
@@ -333,6 +334,13 @@ export default function Presentation() {
           return;
         }
 
+        // A browser-local deck has no server row, so an id of that shape with
+        // no record means the deck isn't here — not that the server might know
+        // better. Say so instead of waiting out a lookup that can't succeed
+        // (and, offline, can't even be attempted).
+        if (isLocalDeckId(id!)) {
+          throw new Error("This presentation is only available in the same browser on the device it was created on");
+        }
         const res = await fetch(`/api/sessions/${id}`);
         if (!res.ok) throw new Error("Session not found");
         const session = await res.json();
@@ -426,6 +434,13 @@ export default function Presentation() {
       else if (type === "annotations_state") setAnnotations(payload);
       else if (type === "deck_update") applyDeckUpdate(payload);
       else if (type === "session_ended") navigate("/", { replace: true });
+      else if (type === "rekeyed") {
+        // The presenter shared this deck from another window. Its local record
+        // is gone and the code the server minted is where it lives now, so
+        // follow it — the alternative is a viewer left on an id that no longer
+        // resolves to anything.
+        navigate(`/s/${payload.id}?role=${requestedRole}`, { replace: true });
+      }
       else if (type === "state_request") {
         // Controller is the source of truth for a local session; reply so a
         // newly opened or reloaded window can catch up.

@@ -12,7 +12,7 @@ export function ControllerMenu({
   onOpen,
   onClose,
   deck,
-  hasPassphrase,
+  canSharePassphrase,
   canShowCode,
   showingCode,
   onShare,
@@ -26,7 +26,9 @@ export function ControllerMenu({
   onOpen: () => void;
   onClose: () => void;
   deck: Deck;
-  hasPassphrase: boolean;
+  /** Whether shared control can be handed out (synced sessions only — a local
+   *  deck is same-device, so there is nobody remote to grant control to). */
+  canSharePassphrase: boolean;
   /** Whether the "show join code on viewers" toggle applies (synced sessions only). */
   canShowCode: boolean;
   showingCode: boolean;
@@ -71,7 +73,7 @@ export function ControllerMenu({
                   {showingCode ? "Hide Join Code" : "Show Join Code"}
                 </Button>
               )}
-              {hasPassphrase && (
+              {canSharePassphrase && (
                 <Button variant="ghost" className="justify-start" onClick={act(onShowPassphrase)}>
                   Passphrase
                 </Button>

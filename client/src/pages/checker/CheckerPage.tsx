@@ -6,7 +6,7 @@ import { setSlideNotes } from "@/lib/notesAttach";
 import { removeAttachments } from "@/lib/removeAttachments";
 import { inspectAttachments, type DeckReport } from "@/lib/inspectAttachments";
 import { idbPut } from "@/lib/localStore";
-import { supabase } from "@/lib/supabaseClient";
+import { newLocalDeckId } from "@/lib/localId";
 import { PresioLogo } from "@/components/PresioLogo";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ValidityBadge, ValidityDot } from "./ValidityBadge";
@@ -192,20 +192,10 @@ export default function CheckerPage() {
       }
 
       const name = filename.replace(/\.pdf$/i, "");
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (sessionData.session) headers.Authorization = `Bearer ${sessionData.session.access_token}`;
-
-      const res = await fetch("/api/sessions/local", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ filename: name, total_slides: report.pageCount }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? `Server error ${res.status} — the database may be unavailable`);
-      }
-      const { id } = await res.json();
+      // Same as the home screen's import: the deck is stored under an id minted
+      // here and never leaves the browser, so this works with no connection.
+      // Its join code is created only if the presenter later shares it.
+      const id = newLocalDeckId();
 
       await idbPut({ id, filename: name, totalSlides: report.pageCount, blob: new Blob([bytes.slice()], { type: "application/pdf" }), createdAt: Date.now() });
       navigate(`/s/${id}/share`);

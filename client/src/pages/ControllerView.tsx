@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { cn, getSessionAuth } from "@/lib/utils";
+import { cn, getSessionAuth, setSessionAuth } from "@/lib/utils";
 import { Settings, Check, Option, Plus, Share2, ExternalLink, QrCode, Save, FolderOpen, PenLine, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -18,6 +18,7 @@ import { DownloadButton } from "@/components/DownloadButton";
 import { hasCompletedControllerOnboarding } from "@/lib/onboarding";
 import { useAuth } from "@/lib/useAuth";
 import { authEnabled } from "@/lib/authMode";
+import { supabase } from "@/lib/supabaseClient";
 import { useClaim } from "@/lib/useClaim";
 import { CurrentSlideCard } from "@/components/controller/CurrentSlideCard";
 import { NextSlideCard } from "@/components/controller/NextSlideCard";
@@ -285,8 +286,15 @@ export function ControllerView({
   // the first-run tutorial to be out of the way.
   const newsletter = useNewsletterPrompt(!onboardingOpen);
 
+  // Sharing a deck that only ever lived in this browser creates its session
+  // row server-side, and that is where its join code is minted — so the deck
+  // is re-keyed and this window has to follow it to the new id. A deck that
+  // already had a code (a POST /api/present handoff) keeps it and stays put.
   const syncOnline = async () => {
-    if (await sync(currentSlide)) onSynced();
+    const shared = await sync(currentSlide);
+    if (!shared) return;
+    onSynced();
+    if (shared !== id) navigate(`/s/${shared}?role=controller`, { replace: true });
   };
 
   // Rather than auto-opening the viewer (which steals the active tab), prompt
@@ -398,7 +406,47 @@ export function ControllerView({
     controllerUrl,
     viewerUrl: shareViewerUrl,
   } = useJoinUrls(id);
-  const { passphrase = "" } = getSessionAuth(id);
+  // The shared-control passphrase is minted on demand, not at import: a deck
+  // that is never co-presented never needs one, and a deck that was never
+  // shared has no session row to hold it. Fetched (and cached) the first time
+  // the presenter asks to hand out control.
+  // Tagged with the id it was read for: sharing re-keys the deck and leaves
+  // this component mounted under the new id, where the previous deck's
+  // passphrase would be wrong. Anything but a match falls back to whatever the
+  // credential for the id on screen holds.
+  const [cached, setCached] = useState(() => ({ id, value: getSessionAuth(id).passphrase ?? "" }));
+  const passphrase = cached.id === id ? cached.value : (getSessionAuth(id).passphrase ?? "");
+  const [passphraseBusy, setPassphraseBusy] = useState(false);
+  const [passphraseError, setPassphraseError] = useState("");
+  const requestPassphrase = useCallback(async () => {
+    if (passphrase || passphraseBusy) return;
+    setPassphraseBusy(true);
+    setPassphraseError("");
+    try {
+      const stored = getSessionAuth(id);
+      const headers: Record<string, string> = {};
+      if (stored.controllerToken) headers["x-controller-token"] = stored.controllerToken;
+      if (authEnabled) {
+        const { data } = await supabase.auth.getSession();
+        if (data.session) headers.Authorization = `Bearer ${data.session.access_token}`;
+      }
+      const res = await fetch(`/api/sessions/${id}/passphrase`, { method: "POST", headers });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Couldn't create a passphrase");
+      }
+      const data = await res.json();
+      setSessionAuth(id, { ...stored, passphrase: data.passphrase });
+      setCached({ id, value: data.passphrase });
+    } catch (e: unknown) {
+      setPassphraseError(e instanceof Error ? e.message : "Couldn't create a passphrase");
+    } finally {
+      setPassphraseBusy(false);
+    }
+  }, [id, passphrase, passphraseBusy]);
+  // Only a shared deck has a co-presenter to hand control to (and a row to
+  // hold the passphrase); a local one is same-device by definition.
+  const canSharePassphrase = !local;
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
   // Open the viewer in its named window (reused across opens, so no duplicates)
@@ -521,12 +569,12 @@ export function ControllerView({
       onOpen={() => setMenuOpen(true)}
       onClose={() => setMenuOpen(false)}
       deck={deck}
-      hasPassphrase={!!passphrase}
+      canSharePassphrase={canSharePassphrase}
       canShowCode={!local}
       showingCode={showCode}
       onShare={() => setShareDialogOpen(true)}
       onToggleCode={onShowCodeToggle}
-      onShowPassphrase={() => setPassphraseDialogOpen(true)}
+      onShowPassphrase={() => { setPassphraseDialogOpen(true); void requestPassphrase(); }}
       onSwitchToViewer={() => navigate(`/s/${id}?role=viewer`, { replace: true })}
       onReplaceClick={openReplacePicker}
       onEndClick={() => setConfirmEnd(true)}
@@ -763,7 +811,7 @@ export function ControllerView({
             </div>
           </section>
 
-          {passphrase && (
+          {canSharePassphrase && (
             <>
               <Separator />
               <section className="space-y-2">
@@ -771,7 +819,23 @@ export function ControllerView({
                 <p className="text-xs text-muted-foreground">
                   Share this passphrase to grant controller access
                 </p>
-                <CopyField label="" value={passphrase} />
+                {passphrase ? (
+                  <CopyField label="" value={passphrase} />
+                ) : (
+                  <div className="space-y-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={passphraseBusy}
+                      onClick={requestPassphrase}
+                    >
+                      {passphraseBusy ? "Creating…" : "Create passphrase"}
+                    </Button>
+                    {passphraseError && (
+                      <p className="text-xs text-destructive">{passphraseError}</p>
+                    )}
+                  </div>
+                )}
               </section>
             </>
           )}
@@ -836,17 +900,25 @@ export function ControllerView({
         }}
       />
 
-      {passphraseDialogOpen && passphrase && (
+      {passphraseDialogOpen && (
         <DialogOverlay onClose={() => setPassphraseDialogOpen(false)} maxWidth="max-w-xs">
           <div className="text-center space-y-3">
             <h2 className="text-lg font-semibold">Controller Passphrase</h2>
             <p className="text-xs text-muted-foreground">
               Share this passphrase to grant controller access
             </p>
-            <p className="text-2xl font-bold tracking-widest font-mono select-all">
-              {passphrase}
-            </p>
-            <CopyField label="" value={passphrase} />
+            {passphrase ? (
+              <>
+                <p className="text-2xl font-bold tracking-widest font-mono select-all">
+                  {passphrase}
+                </p>
+                <CopyField label="" value={passphrase} />
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {passphraseError || "Creating…"}
+              </p>
+            )}
           </div>
           <Button className="w-full" variant="ghost" onClick={() => setPassphraseDialogOpen(false)}>
             Close

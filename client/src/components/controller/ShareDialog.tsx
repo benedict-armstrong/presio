@@ -4,7 +4,7 @@ import { SessionQRCode } from "@/components/SessionQRCode";
 import { CopyField } from "@/components/CopyField";
 import { LanAddressField } from "@/components/LanAddressField";
 import type { LanStatus } from "@/lib/joinUrl";
-import { SyncShareOverlay } from "@/components/SyncShareOverlay";
+import { ShareEmptyState } from "@/components/ShareEmptyState";
 import { authEnabled } from "@/lib/authMode";
 
 // Share overlay shared by desktop and mobile. For a local (not-yet-synced)
@@ -56,9 +56,7 @@ export function ShareDialog({
           </p>
           <br />
           <br />
-          <SyncShareOverlay
-            id={id}
-            viewerUrl={viewerUrl}
+          <ShareEmptyState
             loggedIn={loggedIn}
             syncing={syncing}
             syncError={syncError}

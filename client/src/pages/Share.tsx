@@ -4,12 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { QRCodeSVG } from "qrcode.react";
 import { idbGet } from "@/lib/localStore";
+import { isLocalDeckId } from "@/lib/localId";
 import { useAuth } from "@/lib/useAuth";
 import { authEnabled } from "@/lib/authMode";
 import { useClaim } from "@/lib/useClaim";
 import { LoginDialog } from "@/components/LoginDialog";
 import { LanAddressField } from "@/components/LanAddressField";
-import { SyncShareOverlay } from "@/components/SyncShareOverlay";
+import { ShareEmptyState } from "@/components/ShareEmptyState";
 import { useJoinUrls } from "@/lib/joinUrl";
 
 export default function Share() {
@@ -19,7 +20,10 @@ export default function Share() {
   const loggedIn = !!user;
   const { syncing, syncError, sync } = useClaim(id!);
 
-  const [local, setLocal] = useState(false);
+  // Starts true for a browser-local id: there is no server row to ask about,
+  // so the share screen renders its no-code-yet state immediately — offline
+  // included — rather than flashing a code-shaped layout first.
+  const [local, setLocal] = useState(() => isLocalDeckId(id!));
   const [loginOpen, setLoginOpen] = useState(false);
 
   // Share URLs honor a presenter-entered LAN address (lib/joinUrl.ts) so QR
@@ -48,6 +52,9 @@ export default function Share() {
           }
           return;
         }
+        // A local id was never registered: nothing to look up, and offline the
+        // lookup is a wait with no answer at the end of it.
+        if (isLocalDeckId(id!)) return;
         const res = await fetch(`/api/sessions/${id}`);
         if (!res.ok) return;
         const session = await res.json();
@@ -66,8 +73,14 @@ export default function Share() {
     navigate(`/s/${id}?role=${role}`);
   };
 
+  // Sharing a deck that was never registered mints its code server-side, so
+  // the deck moves to a new id — follow it rather than sitting on a URL whose
+  // record has just been handed over.
   const syncOnline = async () => {
-    if (await sync()) setLocal(false);
+    const shared = await sync();
+    if (!shared) return;
+    setLocal(false);
+    if (shared !== id) navigate(`/s/${shared}/share`, { replace: true });
   };
 
   const showOverlay = local;
@@ -78,9 +91,7 @@ export default function Share() {
         <CardContent className="pt-6 space-y-6">
           <div className="text-center space-y-4">
             {showOverlay ? (
-              <SyncShareOverlay
-                id={id!}
-                viewerUrl={viewerUrl}
+              <ShareEmptyState
                 loggedIn={loggedIn}
                 syncing={syncing}
                 syncError={syncError}

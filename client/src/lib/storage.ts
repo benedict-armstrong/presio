@@ -96,3 +96,18 @@ export function lsRemove(key: string): void {
     /* ignore */
   }
 }
+
+/** Move a deck's per-session state from one id to another. Sharing a local deck
+ *  mints its real join code server-side, so the deck is re-keyed — and anything
+ *  stored under the old id would be silently lost at exactly the moment the
+ *  presenter shares. Drawings are the one that hurts; the timer and the
+ *  viewer-opened flag are moved for the same reason (a running timer resetting,
+ *  or the "open the viewer" prompt reappearing, mid-presentation). */
+export function rekeySessionStorage(oldId: string, newId: string): void {
+  if (oldId === newId) return;
+  for (const key of [annotationsKey, timerKey, viewerOpenedKey]) {
+    const value = lsGetString(key(oldId), "");
+    if (value) lsSetString(key(newId), value);
+    lsRemove(key(oldId));
+  }
+}
