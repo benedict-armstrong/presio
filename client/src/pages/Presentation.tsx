@@ -253,14 +253,27 @@ export default function Presentation() {
     setAnnotations((prev) => (prev[slide]?.length ? { ...prev, [slide]: [] } : prev));
   }, []);
 
-  // Swap in a replacement deck that arrived over the wire — socket
-  // `deck_updated` for synced sessions or a BroadcastChannel `deck_update`
-  // for local ones. Drawings are dropped wholesale: they are keyed by slide
-  // number and the new document renumbers every slide after an insertion.
-  // Slide clamping needs no extra work here: the deckInfo effect adopts the
-  // new document's page count once it loads.
+  // The deck swap currently being loaded, if any. A replacement uploaded from
+  // this window is announced to it twice — by the upload's own response and by
+  // the server's `deck_updated` broadcast, the one every viewer acts on — and
+  // both describe the same document. Keyed on that description so whichever
+  // announcement lands first starts the swap and the other joins it rather
+  // than downloading the same deck a second time. Cleared once the swap
+  // settles, so a later announcement is never mistaken for this one.
+  const deckSwapRef = useRef<{ key: string; done: Promise<void> } | null>(null);
+
+  // Swap in a replacement deck: announced over the wire (socket `deck_updated`
+  // for synced sessions, a BroadcastChannel `deck_update` for local ones) or by
+  // the reply to this window's own replace. Drawings are dropped wholesale:
+  // they are keyed by slide number and the new document renumbers every slide
+  // after an insertion. Slide clamping needs no extra work here: the deckInfo
+  // effect adopts the new document's page count once it loads.
   const applyDeckUpdate = useCallback(
-    ({ filename, totalSlides }: { filename: string; totalSlides: number }) => {
+    ({ filename, totalSlides }: { filename: string; totalSlides: number }): Promise<void> => {
+      const key = `${totalSlides}:${filename}`;
+      const inFlight = deckSwapRef.current;
+      if (inFlight?.key === key) return inFlight.done;
+
       setFilename(filename);
       setAnnotations({});
       lsRemove(annotationsKey(id!));
@@ -268,7 +281,7 @@ export default function Presentation() {
       setNotesEdited(false);
       setTotalSlides(totalSlides);
       setCurrentSlide((slide) => Math.min(Math.max(slide, 1), totalSlides));
-      (async () => {
+      const done = (async () => {
         try {
           if (local) {
             // Same-browser windows read the fresh record straight from IndexedDB.
@@ -305,6 +318,11 @@ export default function Presentation() {
           // stored row already describes the new one and a reload recovers.
         }
       })();
+      deckSwapRef.current = { key, done };
+      void done.finally(() => {
+        if (deckSwapRef.current?.done === done) deckSwapRef.current = null;
+      });
+      return done;
     },
     [local, id]
   );
@@ -424,7 +442,7 @@ export default function Presentation() {
       else if (type === "stroke_undo") applyUndo(payload.slide);
       else if (type === "annotations_clear") applyClear(payload.slide);
       else if (type === "annotations_state") setAnnotations(payload);
-      else if (type === "deck_update") applyDeckUpdate(payload);
+      else if (type === "deck_update") void applyDeckUpdate(payload);
       else if (type === "session_ended") navigate("/", { replace: true });
       else if (type === "state_request") {
         // Controller is the source of truth for a local session; reply so a
@@ -595,9 +613,11 @@ export default function Presentation() {
     });
 
     // The controller replaced the deck (server broadcast from the replace
-    // endpoint); reload the new document under the same session.
+    // endpoint); reload the new document under the same session. The window
+    // that performed the replace has usually applied it already, straight from
+    // the reply to its own upload — this then coalesces into that swap.
     socket.on("deck_updated", (payload: { filename: string; totalSlides: number }) => {
-      applyDeckUpdate(payload);
+      void applyDeckUpdate(payload);
     });
 
     // Another window took controllership (same token, e.g. a second tab).
@@ -1054,10 +1074,25 @@ export default function Presentation() {
           headers: authHeaders,
           body: form,
         });
+        const body = await res.json().catch(() => ({}));
         if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
           throw new Error(body.error || "Failed to replace the PDF");
         }
+        // Swap the new deck in from this reply rather than waiting for the
+        // server's `deck_updated` broadcast to come back around to us. That
+        // broadcast is what moves the viewers, and it usually moves this
+        // window too — but it is a single fire-and-forget message to the one
+        // socket that just spent the upload saturating its connection, and a
+        // missed one has no recovery: nothing re-announces a deck, so the
+        // presenter stayed on the old slides until a manual reload while every
+        // viewer had already moved on. Applying here needs no socket at all,
+        // and the broadcast, when it does arrive, joins this same swap.
+        await applyDeckUpdate({
+          // The server's spelling of both, so the broadcast describing this
+          // replace produces the identical key and coalesces with it.
+          filename: typeof body.filename === "string" && body.filename ? body.filename : filename,
+          totalSlides: typeof body.totalSlides === "number" ? body.totalSlides : totalSlides,
+        });
       }
 
       track("deck-replace", {
