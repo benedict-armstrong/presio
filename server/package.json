@@ -10,18 +10,18 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@sentry/node": "^10.70.0",
-    "@supabase/supabase-js": "^2.112.3",
+    "@sentry/node": "^10.72.0",
+    "@supabase/supabase-js": "^2.112.4",
     "better-sqlite3": "^13.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "helmet": "^8.3.0",
-    "multer": "^2.1.1",
+    "multer": "^2.3.0",
     "nanoid": "^6.0.1",
     "pdfjs-dist": "^5.5.207",
     "socket.io": "^4.8.3",
-    "zod": "^4.4.3"
+    "zod": "^4.5.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
