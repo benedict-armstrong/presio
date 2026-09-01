@@ -24,7 +24,6 @@ export default defineConfig({
       "/api.md": "http://localhost:3001",
       "/openapi.json": "http://localhost:3001",
       "/index.md": "http://localhost:3001",
-      "/about.md": "http://localhost:3001",
       "/check.md": "http://localhost:3001",
       "/schema": "http://localhost:3001",
       "/socket.io": {

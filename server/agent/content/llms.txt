@@ -14,7 +14,6 @@ Presio is a PDF presentation tool: controller + viewer windows, speaker notes, e
 
 ## Docs
 
-- [About](BASE/about.md): how Presio works
 - [Checker](BASE/check.md): validate notes/media sidecars
 - [Home](BASE/index.md): product overview
 

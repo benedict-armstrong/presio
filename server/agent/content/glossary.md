@@ -15,11 +15,10 @@ last_updated: 2026-07-15
 - **Sidecar** — a JSON (and optionally binary media) attachment embedded in the PDF that carries speaker notes (`notes-slide-{N}.json`) or media (`media-slide-{N}-{id}.json`) for a slide. Validate with the [checker](BASE/check.md).
 - **Handoff** — the flow behind `POST /api/present`: the PDF is staged on the server, the returned URL is opened in a browser, the browser downloads the PDF into a local session, and the server copy is deleted.
 - **Controller token** — a secret held by the presenter's browser that authorizes controlling a session.
-- **Markdown mirror** — a plain-markdown version of an HTML page (e.g. `/about` → `/about.md`), for agents and crawlers.
+- **Markdown mirror** — a plain-markdown version of an HTML page (e.g. `/check` → `/check.md`), for agents and crawlers.
 
 ## Sitemap
 
 - [Home](BASE/)
-- [About](BASE/about)
 - [Checker](BASE/check)
 - [Full index](BASE/sitemap.md)

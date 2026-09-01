@@ -25,7 +25,7 @@ Upload a PDF presentation, get a short link, and control the slideshow from one 
 
 ## Adding videos and speaker notes
 
-Presio is agnostic to the typesetting engine used — any PDF works, and notes can also be embedded by hand from plain Typst or LaTeX (see the about page for details). Official packages are available for the two most common ones:
+Presio is agnostic to the typesetting engine used — any PDF works, and notes can also be embedded by hand from plain Typst or LaTeX (see [Embedding notes by hand](#embedding-notes-by-hand)). Official packages are available for the two most common ones:
 
 - **Typst** — [presio-typst-package](https://github.com/benedict-armstrong/presio-typst-package)
 - **LaTeX** — [presio-latex-package](https://github.com/benedict-armstrong/presio-latex-package)
@@ -69,6 +69,50 @@ Hello world.
 ```
 
 For LaTeX, copy `presio.sty` from the package repository next to your `.tex` file — that's the whole install.
+
+### Embedding notes by hand
+
+Prefer not to use the packages? Presio reads speaker notes from JSON files
+attached to the PDF (Typst) or from `note:` link annotations (LaTeX), and
+renders them as markdown in the controller's notes panel.
+
+Typst — define a helper and call it on each slide:
+
+```typst
+#let speaker-notes(notes) = context {
+  // Page number keeps the attachment filename unique per slide
+  let page-num = counter(page).display()
+  let filename = "notes-slide-" + page-num + ".json"
+
+  let json-string = json.encode((slide: page-num, notes: notes))
+
+  pdf.attach(
+    filename,
+    bytes(json-string),
+    description: "Speaker notes for slide " + page-num,
+    mime-type: "application/json",
+  )
+}
+
+#speaker-notes("Remember to mention the demo.")
+```
+
+LaTeX — use `hyperref` to create an invisible `note:` link:
+
+```latex
+\usepackage{hyperref}
+
+\newcommand{\speakernote}[1]{%
+  \href{note:#1}{\phantom{n}}%
+}
+
+% Usage on a slide:
+\speakernote{Remember to mention the demo.}
+```
+
+Validate what you produced at [presio.xyz/check](https://presio.xyz/check) — it
+shows per-page thumbnails and reports whether the notes and media sidecars are
+valid.
 
 ## Self-hosting
 

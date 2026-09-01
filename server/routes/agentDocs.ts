@@ -46,14 +46,12 @@ function prefersMarkdown(req: express.Request): boolean {
 // sitemap.xml lists only canonical HTML pages — listing markdown mirrors and
 // discovery files there makes crawlers judge them as pages (and fail them on
 // HTML metadata checks). The full machine-readable index is sitemap.md.
-const HTML_PAGE_PATHS = ["/", "/about", "/check"];
+const HTML_PAGE_PATHS = ["/", "/check"];
 
 const SITEMAP_PATHS = [
   "/",
-  "/about",
   "/check",
   "/index.md",
-  "/about.md",
   "/check.md",
   "/llms.txt",
   "/llms-full.txt",
@@ -79,7 +77,7 @@ export function registerAgentDocRoutes(app: express.Express) {
     sendText(res, type, withBase(readContent("llms-full.txt"), baseUrl(req)));
   });
 
-  for (const name of ["AGENTS.md", "api.md", "index.md", "about.md", "check.md", "glossary.md"] as const) {
+  for (const name of ["AGENTS.md", "api.md", "index.md", "check.md", "glossary.md"] as const) {
     app.get(`/${name}`, (req, res) => {
       const base = baseUrl(req);
       sendText(res, "text/markdown", withBase(readContent(name), base), `${base}/${name}`);
@@ -155,7 +153,6 @@ export function registerAgentDocRoutes(app: express.Express) {
   // Content negotiation: Prefer markdown mirrors when Accept says so.
   for (const [route, file] of [
     ["/", "index.md"],
-    ["/about", "about.md"],
     ["/check", "check.md"],
   ] as const) {
     app.get(route, (req, res, next) => {
