@@ -21,7 +21,7 @@
     "lucide-react": "^1.33.0",
     "marked": "^18.0.10",
     "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^5.5.207",
+    "pdfjs-dist": "^6.2.108",
     "qrcode.react": "^4.2.0",
     "radix-ui": "^1.6.7",
     "react": "^19.2.8",
