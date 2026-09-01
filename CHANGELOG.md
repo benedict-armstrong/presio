@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/benedict-armstrong/presio/compare/v1.1.0...v1.2.0) (2026-09-01)
+
+
+### Features
+
+* let local deploys rewrite share links to the machine's LAN address ([#68](https://github.com/benedict-armstrong/presio/issues/68)) ([8dac1e0](https://github.com/benedict-armstrong/presio/commit/8dac1e07ae23bc43c303a0216490d26a3db882cd))
+* move HTTP rate limiting from the app to the Cloudflare edge ([#63](https://github.com/benedict-armstrong/presio/issues/63)) ([6271725](https://github.com/benedict-armstrong/presio/commit/627172535cdfa72c0412c6f02fdcff7790d29b1f))
+
+
+### Bug Fixes
+
+* document a verification command that actually works ([#55](https://github.com/benedict-armstrong/presio/issues/55)) ([4399133](https://github.com/benedict-armstrong/presio/commit/439913397a3b6cff45e6a17f34ceed47f5f207fb))
+
 ## [1.1.0](https://github.com/benedict-armstrong/presio/compare/v1.0.0...v1.1.0) (2026-08-25)
 
 
