@@ -3,10 +3,33 @@
 // already live in IndexedDB). Deliberately conservative — API calls and
 // websockets are never intercepted, and the shell is refreshed network-first
 // so deploys are picked up on the next load.
-const CACHE = "presio-shell-v1";
+//
+// The build rewrites the two placeholders below with the real asset list and a
+// content-derived id (see `presio-sw-precache` in vite.config.ts). Precaching
+// on install rather than on demand is what makes a first-run install usable
+// offline: the pdf.js worker is a lazily fetched chunk, so an install-then-go-
+// offline would otherwise open the app fine and fail on the first PDF.
+const BUILD_ID = "__BUILD_ID__";
+const PRECACHE = "__PRECACHE_MANIFEST__";
 
-self.addEventListener("install", () => {
-  self.skipWaiting();
+// Unreplaced (an unbuilt copy) degrades to the old fetch-time caching.
+const PRECACHE_URLS = Array.isArray(PRECACHE) ? PRECACHE : [];
+const CACHE = `presio-shell-${BUILD_ID}`;
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches.open(CACHE).then(async (cache) => {
+      // One entry at a time: `cache.addAll` is all-or-nothing, and a single
+      // 404 would fail the install and leave the app with no offline support
+      // at all rather than a partial cache.
+      await Promise.all(
+        PRECACHE_URLS.map((url) =>
+          cache.add(new Request(url, { cache: "reload" })).catch(() => {})
+        )
+      );
+      await self.skipWaiting();
+    })
+  );
 });
 
 self.addEventListener("activate", (event) => {
@@ -54,5 +77,12 @@ self.addEventListener("fetch", (event) => {
         }
       })
     );
+    return;
   }
+
+  // Everything else that was precached (icons, the web manifest): serve it
+  // from the cache when the network is gone.
+  event.respondWith(
+    fetch(request).catch(async () => (await caches.match(request)) || Response.error())
+  );
 });
