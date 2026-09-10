@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { AArrowDown, AArrowUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { marked } from "marked";
@@ -27,10 +27,15 @@ export function SpeakerNotesCard({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
+  // Leaving a slide drops any open edit. Adjusted during render rather than in
+  // an effect so the new slide never paints one frame of the old slide's edit
+  // state (https://react.dev/reference/react/useState#storing-information-from-previous-renders).
+  const [lastSlide, setLastSlide] = useState(currentSlide);
+  if (lastSlide !== currentSlide) {
+    setLastSlide(currentSlide);
     setEditing(false);
     setError("");
-  }, [currentSlide]);
+  }
 
   const startEdit = () => {
     setDraft(notes);

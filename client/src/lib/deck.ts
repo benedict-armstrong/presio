@@ -5,6 +5,7 @@
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { extractSpeakerNotes, loadMediaPlacements, type MediaPlacement } from "./pdf";
+import { loadSlideLinks, type SlideLink } from "./pdfLinks";
 import type { AnnotationsBySlide } from "./annotations";
 
 /** Everything derived from the PDF itself — stable until the file changes
@@ -21,6 +22,8 @@ export interface DeckInfo {
   notes: Map<number, string>;
   /** Media placements per slide. */
   mediaBySlide: Map<number, MediaPlacement[]>;
+  /** Clickable link annotations per slide (no entry = no links). */
+  linksBySlide: Map<number, SlideLink[]>;
 }
 
 /** DeckInfo plus the live layer drawn on top during the session. */
@@ -36,9 +39,10 @@ export async function loadDeckInfo(
   filename: string
 ): Promise<DeckInfo> {
   const totalSlides = pdf.numPages;
-  const [attachments, mediaBySlide, noteTexts] = await Promise.all([
+  const [attachments, mediaBySlide, linksBySlide, noteTexts] = await Promise.all([
     pdf.getAttachments().catch(() => null),
     loadMediaPlacements(pdf).catch(() => new Map<number, MediaPlacement[]>()),
+    loadSlideLinks(pdf).catch(() => new Map<number, SlideLink[]>()),
     Promise.all(
       Array.from({ length: totalSlides }, (_, i) =>
         extractSpeakerNotes(pdf, i + 1).catch(() => "")
@@ -57,5 +61,6 @@ export async function loadDeckInfo(
     hasAttachments: !!attachments && Object.keys(attachments).length > 0,
     notes,
     mediaBySlide,
+    linksBySlide,
   };
 }

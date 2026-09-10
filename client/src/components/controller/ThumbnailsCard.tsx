@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { renderPage, type MediaPlacement } from "@/lib/pdf";
+import type { PDFDocumentProxy } from "pdfjs-dist";
+import { renderPage } from "@/lib/pdf";
 import type { Deck } from "@/lib/deck";
 import { drawStrokes, type Stroke } from "@/lib/annotations";
-import { getMediaPoster } from "@/lib/mediaPoster";
+import { MediaPoster } from "@/components/MediaPosterOverlay";
 
 export function ThumbnailsCard({
   deck,
@@ -16,13 +17,25 @@ export function ThumbnailsCard({
   const { pdf, totalSlides, mediaBySlide } = deck;
   const containerRef = useRef<HTMLDivElement>(null);
   const thumbRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const [aspectRatio, setAspectRatio] = useState<number | null>(null);
+  // The page aspect, tagged with the document it came from, so a swapped deck is
+  // never measured against the previous page shape. A null ratio means settled
+  // but unknown (page one wouldn't load), which keeps the min-width-only box.
+  const [aspect, setAspect] = useState<{ pdf: PDFDocumentProxy; ratio: number | null } | null>(null);
+  const aspectSettled = aspect?.pdf === pdf;
+  const aspectRatio = aspectSettled ? aspect.ratio : null;
 
   useEffect(() => {
-    pdf.getPage(1).then((page) => {
-      const vp = page.getViewport({ scale: 1 });
-      setAspectRatio(vp.width / vp.height);
-    });
+    let cancelled = false;
+    pdf.getPage(1)
+      .then((page) => {
+        if (cancelled) return;
+        const vp = page.getViewport({ scale: 1 });
+        setAspect({ pdf, ratio: vp.width / vp.height });
+      })
+      .catch(() => {
+        if (!cancelled) setAspect({ pdf, ratio: null });
+      });
+    return () => { cancelled = true; };
   }, [pdf]);
 
   useEffect(() => {
@@ -32,14 +45,21 @@ export function ThumbnailsCard({
     thumbRefs.current.forEach((el) => {
       el.innerHTML = "";
     });
+    // The aspect ratio decides a thumb's final width, so measuring one before
+    // it settles would size the canvas off the bare 80px placeholder box.
+    if (!aspectSettled) return;
+    const dpr = window.devicePixelRatio || 1;
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
           if (!entry.isIntersecting) return;
-          const pageNum = Number((entry.target as HTMLElement).dataset.page);
+          const el = entry.target as HTMLDivElement;
+          const pageNum = Number(el.dataset.page);
           if (!pageNum) return;
-          renderPage(pdf, pageNum, 0.5).then((canvas) => {
-            const el = entry.target as HTMLDivElement;
+          // Render at the thumb's own on-screen size rather than a fixed scale,
+          // so a tall strip or a high-DPI screen gets a sharp thumbnail.
+          const targetWidth = Math.round(el.clientWidth * dpr);
+          renderPage(pdf, pageNum, { targetWidth, minScale: 0.5 }).then((canvas) => {
             if (el.childElementCount > 0) return;
             canvas.style.width = "100%";
             canvas.style.height = "100%";
@@ -53,7 +73,7 @@ export function ThumbnailsCard({
     );
     thumbRefs.current.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, [pdf, totalSlides]);
+  }, [pdf, totalSlides, aspectSettled]);
 
   useEffect(() => {
     const el = thumbRefs.current.get(currentSlide);
@@ -115,31 +135,4 @@ function ThumbStrokes({ strokes }: { strokes?: readonly Stroke[] }) {
 
   if (!strokes?.length) return null;
   return <canvas ref={ref} className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden />;
-}
-
-// Overlays a static preview image for media that has no frame baked into the
-// PDF page (YouTube/Vimeo embeds, gifs), positioned to match the live overlay.
-function MediaPoster({ placement }: { placement: MediaPlacement }) {
-  const [src, setSrc] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    getMediaPoster(placement).then((url) => { if (!cancelled) setSrc(url); });
-    return () => { cancelled = true; };
-  }, [placement]);
-
-  if (!src) return null;
-  return (
-    <img
-      src={src}
-      alt=""
-      className="absolute object-cover pointer-events-none"
-      style={{
-        left: `${placement.xPct * 100}%`,
-        top: `${placement.yPct * 100}%`,
-        width: `${placement.wPct * 100}%`,
-        height: `${placement.hPct * 100}%`,
-      }}
-    />
-  );
 }

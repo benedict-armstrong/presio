@@ -318,6 +318,7 @@ export function ControllerView({
     if (lsGetString(viewerOpenedKey(id)) === "true") return;
     // One-time mount prompt (re-armed when onboarding finishes); the extra
     // render from setting state in the effect is intentional and harmless.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setViewerPromptOpen(true);
   }, [id, isMobile, onboardingOpen]);
 
@@ -531,6 +532,8 @@ export function ControllerView({
           ref={currentCanvasRef}
           local={local}
           mediaPlacements={mediaPlacements}
+          links={deck.linksBySlide.get(currentSlide) ?? []}
+          onGoTo={onGoTo}
           mediaState={mediaState}
           onMediaControl={onMediaControl}
           onMediaTime={onMediaTime}

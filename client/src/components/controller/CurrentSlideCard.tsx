@@ -27,10 +27,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { MediaPlacement } from "@/lib/pdf";
+import type { SlideLink } from "@/lib/pdfLinks";
+import { SlideLinkOverlay } from "@/components/SlideLinkOverlay";
 
 interface Props {
   local?: boolean;
   mediaPlacements?: MediaPlacement[];
+  /** The current slide's PDF link annotations, made clickable over the canvas. */
+  links?: SlideLink[];
+  onGoTo?: (slide: number) => void;
   mediaState?: MediaState;
   onMediaControl?: (id: string, action: "play" | "pause" | "reset") => void;
   onMediaTime?: (id: string, t: number, playing: boolean, sampledAt: number) => void;
@@ -70,6 +75,8 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
     {
       local = false,
       mediaPlacements = [],
+      links = [],
+      onGoTo,
       mediaState,
       onMediaControl,
       onMediaTime,
@@ -120,6 +127,14 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
             }}
           >
             <div ref={ref} className="absolute inset-0" />
+            {!!onGoTo && (
+              <SlideLinkOverlay
+                canvasContainerRef={ref as React.RefObject<HTMLDivElement | null>}
+                links={links}
+                onGoTo={onGoTo}
+                enabled={tool === "none"}
+              />
+            )}
             <AnnotationOverlay
               containerRef={ref as React.RefObject<HTMLDivElement | null>}
               tool={tool}

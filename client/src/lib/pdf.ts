@@ -83,6 +83,11 @@ export interface RenderOptions {
   // the canvas matches the display resolution and stays crisp. Takes
   // precedence over `scale`.
   targetWidth?: number;
+  // Floor on the derived scale. A caller that used to render at a fixed scale
+  // passes its old value here so measuring can only ever sharpen the result:
+  // on a wide page a small box's target width works out below that fixed scale,
+  // and honouring it literally would come out blurrier than before.
+  minScale?: number;
 }
 
 export async function renderPage(
@@ -101,15 +106,22 @@ export async function renderPage(
   const page = await pdf.getPage(pageNum);
   const baseWidth = page.getViewport({ scale: 1 }).width;
 
+  // Quantise to quarter steps either way, so small layout/DPR jitters reuse the
+  // cached canvas instead of re-rendering on every resize.
   let scale: number;
   if (options.targetWidth) {
-    scale = Math.min(options.targetWidth, MAX_CANVAS_WIDTH) / baseWidth;
+    // Round *up* here: a target width is the resolution the canvas needs in
+    // order to look sharp, so rounding down would guarantee the browser
+    // upscales it — the very blur this is meant to avoid.
+    scale = Math.ceil((options.targetWidth / baseWidth) * 4) / 4;
   } else {
-    scale = options.scale ?? 2;
+    // No target width yet (the box hasn't been measured): fall back to the
+    // caller's floor, which is the fixed scale it would have used anyway.
+    scale = Math.round((options.scale ?? options.minScale ?? 2) * 4) / 4;
   }
-  // Round so small layout/DPR jitters reuse the cached canvas instead of
-  // re-rendering on every resize.
-  scale = Math.max(0.25, Math.round(scale * 4) / 4);
+  if (options.minScale) scale = Math.max(scale, options.minScale);
+  // Keep the canvas within the width cap, but never below a usable minimum.
+  scale = Math.max(0.25, Math.min(scale, MAX_CANVAS_WIDTH / baseWidth));
 
   const key = `${pageNum}-${scale}`;
   const cached = pageCache.get(key);

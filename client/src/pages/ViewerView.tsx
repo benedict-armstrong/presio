@@ -65,22 +65,29 @@ export function ViewerView({
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(null);
 
-  const resetTimer = useCallback(() => {
-    setCursorVisible(true);
+  // Arming the hide timer is separate from showing the cursor: on mount the
+  // cursor is already visible, so the effect below only needs to schedule the
+  // hide — calling the full resetTimer there would set state during mount.
+  const scheduleHide = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       if (!menuOpen && !authOpen) setCursorVisible(false);
     }, 3000);
   }, [menuOpen, authOpen]);
 
+  const resetTimer = useCallback(() => {
+    setCursorVisible(true);
+    scheduleHide();
+  }, [scheduleHide]);
+
   useEffect(() => {
-    resetTimer();
+    scheduleHide();
     window.addEventListener("mousemove", resetTimer);
     return () => {
       window.removeEventListener("mousemove", resetTimer);
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [resetTimer]);
+  }, [resetTimer, scheduleHide]);
 
   useEffect(() => {
     const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);

@@ -3,6 +3,7 @@ import { useParams, useSearchParams, useNavigate, useLocation, Link } from "reac
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { getDocument } from "pdfjs-dist";
 import { loadPdf, loadPdfData, freshPdfUrl, loadLatestPdf, renderPage, clearCache } from "@/lib/pdf";
+import { useRenderTargetWidth } from "@/hooks/useRenderTargetWidth";
 import { loadDeckInfo, type Deck, type DeckInfo } from "@/lib/deck";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
@@ -80,7 +81,10 @@ export default function Presentation() {
   // In-progress stroke streamed from the controller (viewer windows).
   const [remoteDraft, setRemoteDraft] = useState<{ slide: number; stroke: Stroke | null } | null>(null);
   const annotationsRef = useRef(annotations);
-  annotationsRef.current = annotations;
+  // These "latest value" mirrors are written after render rather than during
+  // it: every reader is an async callback (socket, BroadcastChannel, watcher
+  // poll), all of which run long after effects have flushed.
+  useEffect(() => { annotationsRef.current = annotations; });
 
   // Everything extracted from the loaded PDF (notes, media, attachments…),
   // re-derived whenever the document is swapped (e.g. after a notes edit).
@@ -101,6 +105,9 @@ export default function Presentation() {
   );
 
   const currentCanvasRef = useRef<HTMLDivElement>(null);
+  // Resolution the slide canvas should be rendered at; changes on resize,
+  // fullscreen, browser zoom and DPI changes so the render effect can re-run.
+  const renderWidth = useRenderTargetWidth(currentCanvasRef, !!deckInfo);
   const channelRef = useRef<BroadcastChannel | null>(null);
   // Object URL backing a local session's PDF, swapped when notes are edited.
   const localUrlRef = useRef("");
@@ -124,12 +131,14 @@ export default function Presentation() {
   const outOfSync = isViewer && viewerSlide !== null;
   const displaySlide = outOfSync ? viewerSlide! : currentSlide;
 
-  stateRef.current = { currentSlide, totalSlides, blanked, showCode, annotations, mediaState, audioState };
+  useEffect(() => {
+    stateRef.current = { currentSlide, totalSlides, blanked, showCode, annotations, mediaState, audioState };
+  });
 
   // Mirror of pdfUrl for callbacks that must not re-subscribe the socket
   // effect when it changes (a deck replace rewrites it on local sessions).
   const pdfUrlRef = useRef("");
-  pdfUrlRef.current = pdfUrl;
+  useEffect(() => { pdfUrlRef.current = pdfUrl; });
 
   // Deck file watching (File System Access API, Chromium only). When the
   // IndexedDB record carries a handle to the deck's file on disk, the
@@ -156,7 +165,7 @@ export default function Presentation() {
     return isDeckWatchMode(stored) ? stored : "prompt";
   });
   const deckWatchModeRef = useRef(deckWatchMode);
-  deckWatchModeRef.current = deckWatchMode;
+  useEffect(() => { deckWatchModeRef.current = deckWatchMode; });
   // A detected deck change waiting on the presenter: "watch" from the file
   // watcher (prompt mode only), "remote" from the URL-republish poller. Both
   // clear drawings and Presio-edited notes, so both get the same warning.
@@ -174,7 +183,7 @@ export default function Presentation() {
   // than our own storage. Decides how a changed deck is re-fetched.
   const [externalPdf, setExternalPdf] = useState(false);
   const externalPdfRef = useRef(false);
-  externalPdfRef.current = externalPdf;
+  useEffect(() => { externalPdfRef.current = externalPdf; });
   // The republished deck, already downloaded and parsed by the poller to
   // confirm it. Handed to applyDeckUpdate so applying costs no second download.
   const prefetchedDeckRef = useRef<PDFDocumentProxy | null>(null);
@@ -183,6 +192,8 @@ export default function Presentation() {
     // The settled role, not the requested one: a second controller demoted to
     // viewer by session_state must stop watching too.
     if (!local || role !== "controller" || !isDeckWatchSupported()) {
+      // Reflects an external capability check, not derived render state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDeckWatchable(false);
       return;
     }
@@ -411,6 +422,9 @@ export default function Presentation() {
     if (!deckInfo) return;
     const docTotal = deckInfo.totalSlides;
     if (totalSlides === docTotal) return;
+    // Reconciles state with the loaded document; the guard above stops it
+    // re-running once they agree.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTotalSlides(docTotal);
     setCurrentSlide((slide) => Math.min(Math.max(slide, 1), docTotal));
     if (local) {
@@ -487,6 +501,7 @@ export default function Presentation() {
 
     // Local sessions never touch the server: no socket, sync over the channel.
     if (local) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       applyRole(requestedRole);
       channel.postMessage({ type: "state_request" });
       return () => {
@@ -701,6 +716,9 @@ export default function Presentation() {
 
   useEffect(() => {
     if (skipMediaResetRef.current) {
+      // A one-shot flag set by the state_sync handler and consumed here, so it
+      // has to be cleared inside the effect that reads it.
+      // eslint-disable-next-line react-hooks/immutability
       skipMediaResetRef.current = false;
       return;
     }
@@ -713,9 +731,11 @@ export default function Presentation() {
     const container = currentCanvasRef.current;
     // Render at the container's real pixel resolution (CSS width * DPR) so the
     // slide stays sharp on large / high-DPI displays instead of upscaling a
-    // fixed-size canvas.
-    const dpr = window.devicePixelRatio || 1;
-    const targetWidth = Math.round((container.clientWidth || 1280) * dpr);
+    // fixed-size canvas. renderWidth tracks resizes, fullscreen, browser zoom
+    // and monitor moves, re-running this effect so the canvas is re-rendered at
+    // the new resolution instead of being stretched.
+    const targetWidth =
+      renderWidth || Math.round((container.clientWidth || 1280) * (window.devicePixelRatio || 1));
     // renderPage resolves out of order (cached pages are near-instant, fresh
     // ones aren't), so a rapid slide change could leave a stale page on screen
     // — with the annotation overlay drawing the new slide's strokes over it.
@@ -732,7 +752,7 @@ export default function Presentation() {
     return () => { stale = true; };
     // deckInfo gates mounting of the view that owns the container, and refs
     // don't trigger effects — re-run once the container actually exists.
-  }, [pdf, displaySlide, role, deckInfo]);
+  }, [pdf, displaySlide, role, deckInfo, renderWidth]);
 
   // Mirror a local state change outward: always to other same-browser windows
   // (BroadcastChannel) and, for synced sessions, to the server (socket). The
@@ -1155,7 +1175,7 @@ export default function Presentation() {
       setApplyingWatch(false);
     }
   }, [replacePdf]);
-  applyDeckWatchUpdateRef.current = applyDeckWatchUpdate;
+  useEffect(() => { applyDeckWatchUpdateRef.current = applyDeckWatchUpdate; });
 
 
 
@@ -1306,6 +1326,8 @@ export default function Presentation() {
   useEffect(() => {
     if (role !== "controller") return;
     const auto = currentMedia.find((p) => p.autoplay);
+    // Drives the shared media state (an external system), not local render state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (auto) onMediaControl(auto.id, "play");
     // displaySlide drives currentMedia; re-run on slide change or once media loads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
