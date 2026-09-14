@@ -13,7 +13,7 @@
 //
 // README.md and example/example.typ are not built from TypeScript, so they
 // repeat the literal; the workflow above rewrites all three together.
-export const TYPST_PACKAGE_VERSION = "0.2.2";
+export const TYPST_PACKAGE_VERSION = "0.2.3";
 
 // The LaTeX package (benedict-armstrong/presio-latex-package) is installed by
 // copying presio.sty next to the .tex file and publishes no versioned releases,

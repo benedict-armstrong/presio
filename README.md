@@ -33,7 +33,7 @@ Presio is agnostic to the typesetting engine used — any PDF works, and notes c
 ### Typst
 
 ```typst
-#import "@preview/presio:0.2.2": media, speaker-notes
+#import "@preview/presio:0.2.3": media, speaker-notes
 
 = Introduction
 
