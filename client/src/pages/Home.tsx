@@ -117,10 +117,10 @@ function WindowFrame({
 }) {
   const dot = dense ? "h-1.5 w-1.5" : "h-2.5 w-2.5";
   return (
-    <div className={`overflow-hidden rounded-xl border bg-card ${className}`}>
+    <div className={`overflow-hidden rounded-xl bg-card ${className}`}>
       <div
         aria-hidden="true"
-        className={`flex items-center gap-1.5 border-b bg-muted/60 ${dense ? "px-2 py-1.5" : "px-3 py-2.5"}`}
+        className={`flex items-center gap-1.5 bg-muted/60 ${dense ? "px-2 py-1.5" : "px-3 py-2.5"}`}
       >
         <span className={`${dot} rounded-full bg-[#ff5f57]`} />
         <span className={`${dot} rounded-full bg-[#febc2e]`} />
@@ -244,7 +244,7 @@ function DemoReel() {
           the controller rather than covering it. On a phone there is no room to
           overlap at all, so it sits underneath instead. */}
       <div className="mt-3 sm:mt-0 sm:absolute sm:-bottom-12 sm:-right-10 sm:w-[46%] md:-bottom-14 md:-right-14">
-        <WindowFrame dense className="border-2 border-background shadow-xl">
+        <WindowFrame dense className="shadow-xl ring-4 ring-background">
           <video
             {...shared}
             ref={viewerRef}
