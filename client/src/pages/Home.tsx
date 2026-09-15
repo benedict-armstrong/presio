@@ -62,14 +62,6 @@ function PitchTicker() {
 }
 
 
-function PlayGlyph() {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4 translate-x-[1px]">
-      <path d="M8 5v14l11-7z" />
-    </svg>
-  );
-}
-
 // Official Typst logo (Simple Icons, CC0).
 function TypstMark() {
   return (
@@ -123,7 +115,7 @@ function WindowFrame({
   // and the ambient layers are kept light — a heavy one greys the page around
   // the frame and swallows the caption underneath it.
   const elevation =
-    "shadow-[0_0_0_1px_rgba(15,23,42,0.07),0_1px_2px_rgba(15,23,42,0.05),0_8px_20px_-10px_rgba(15,23,42,0.16),0_20px_40px_-24px_rgba(15,23,42,0.16)] " +
+    "shadow-[0_0_0_1px_rgba(15,23,42,0.06),0_1px_2px_rgba(15,23,42,0.03),0_6px_16px_-12px_rgba(15,23,42,0.10)] " +
     "dark:shadow-[0_0_0_1px_rgba(255,255,255,0.12),0_8px_24px_-4px_rgba(0,0,0,0.75),0_32px_72px_-16px_rgba(0,0,0,0.9)]";
   return (
     <div className={`overflow-hidden rounded-xl bg-card ${elevation} ${className}`}>
@@ -185,9 +177,9 @@ function useParallax(enabled: boolean, factor = 0.1, max = 110) {
 
 // Hero demo reel: two recordings of one session, the presenter's controller and
 // the audience's viewer, captured together and replayed overlaid. Autoplays
-// muted and loops, which is what a silent screen recording wants — but
-// prefers-reduced-motion gets the poster frames and an explicit play control
-// instead of unrequested movement.
+// muted and loops, which is what a silent screen recording wants. It plays
+// under prefers-reduced-motion too, by request — the scroll parallax still
+// honours that setting, but the reel itself is the page's main content.
 //
 // The clips are trimmed to a shared origin at record time, so they start
 // aligned; this only has to correct the drift that accumulates from two
@@ -198,7 +190,6 @@ function DemoReel() {
   const reducedMotion =
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const [playing, setPlaying] = useState(!reducedMotion);
 
   // Each theme has its own pair of recordings. Swapping src reloads the video
   // from zero, so the position is carried across the switch.
@@ -229,14 +220,8 @@ function DemoReel() {
       }
     };
 
-    const play = () => {
-      void follow.play().catch(() => {});
-      setPlaying(true);
-    };
-    const pause = () => {
-      follow.pause();
-      setPlaying(false);
-    };
+    const play = () => void follow.play().catch(() => {});
+    const pause = () => follow.pause();
 
     lead.addEventListener("timeupdate", resync);
     lead.addEventListener("play", play);
@@ -251,8 +236,8 @@ function DemoReel() {
   }, []);
 
   const shared = {
-    preload: reducedMotion ? ("none" as const) : ("auto" as const),
-    autoPlay: !reducedMotion,
+    preload: "auto" as const,
+    autoPlay: true,
     loop: true,
     muted: true,
     playsInline: true,
@@ -301,19 +286,6 @@ function DemoReel() {
           What the audience sees
         </span>
       </div>
-
-      {reducedMotion && !playing && (
-        <button
-          type="button"
-          onClick={() => void controllerRef.current?.play()}
-          className="absolute inset-0 flex items-center justify-center rounded-xl"
-          aria-label="Play the Presio demo"
-        >
-          <span className="flex h-14 w-14 items-center justify-center rounded-full border bg-card text-muted-foreground shadow-sm transition-colors hover:border-[var(--home2-accent)] hover:text-[var(--home2-accent)]">
-            <PlayGlyph />
-          </span>
-        </button>
-      )}
     </div>
   );
 }
