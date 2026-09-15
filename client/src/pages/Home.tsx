@@ -119,8 +119,11 @@ function WindowFrame({
   // Without an outline a near-white window disappears into a near-white page,
   // so the frame is lifted instead: a layered drop shadow in light, and in dark
   // — where a drop shadow is invisible — a faint light glow doing the same job.
+  // On white it is the hairline that actually defines the edge, so that stays
+  // and the ambient layers are kept light — a heavy one greys the page around
+  // the frame and swallows the caption underneath it.
   const elevation =
-    "shadow-[0_0_0_1px_rgba(15,23,42,0.07),0_2px_4px_rgba(15,23,42,0.10),0_12px_28px_-6px_rgba(15,23,42,0.28),0_36px_72px_-20px_rgba(15,23,42,0.30)] " +
+    "shadow-[0_0_0_1px_rgba(15,23,42,0.07),0_1px_2px_rgba(15,23,42,0.05),0_8px_20px_-10px_rgba(15,23,42,0.16),0_20px_40px_-24px_rgba(15,23,42,0.16)] " +
     "dark:shadow-[0_0_0_1px_rgba(255,255,255,0.12),0_8px_24px_-4px_rgba(0,0,0,0.75),0_32px_72px_-16px_rgba(0,0,0,0.9)]";
   return (
     <div className={`overflow-hidden rounded-xl bg-card ${elevation} ${className}`}>
@@ -154,6 +157,32 @@ function useIsDark() {
   return dark;
 }
 
+// Drift for the front window as the page scrolls: nearer things travel further,
+// so the inset rises a little faster than the frame behind it. Capped, because
+// past the hero the effect has nothing left to say. Returns 0 under
+// prefers-reduced-motion — parallax is exactly the motion that setting is about.
+function useParallax(enabled: boolean, factor = 0.1, max = 110) {
+  const [offset, setOffset] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    let raf = 0;
+    const read = () => {
+      raf = 0;
+      setOffset(-Math.min(window.scrollY * factor, max));
+    };
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(read);
+    };
+    read();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [enabled, factor, max]);
+  return offset;
+}
+
 // Hero demo reel: two recordings of one session, the presenter's controller and
 // the audience's viewer, captured together and replayed overlaid. Autoplays
 // muted and loops, which is what a silent screen recording wants — but
@@ -175,6 +204,7 @@ function DemoReel() {
   // from zero, so the position is carried across the switch.
   const dark = useIsDark();
   const theme = dark ? "dark" : "light";
+  const parallax = useParallax(!reducedMotion);
   const resumeAt = useRef(0);
   const resume = (el: HTMLVideoElement) => {
     if (resumeAt.current > 0 && resumeAt.current < el.duration) {
@@ -231,7 +261,7 @@ function DemoReel() {
   return (
     <div className="relative mx-auto w-full max-w-115 md:mx-0 md:max-w-none">
       {/* Presenter's controller: the deck, next slide, notes and timer. */}
-      <span className="mb-1.5 block text-center text-xs text-muted-foreground sm:text-left">
+      <span className="mb-2 block text-center text-xs font-medium text-foreground/70 sm:text-left">
         What you see
       </span>
       <WindowFrame>
@@ -249,7 +279,10 @@ function DemoReel() {
       {/* What the audience sees, hung off the bottom-right corner so it clips
           the controller rather than covering it. On a phone there is no room to
           overlap at all, so it sits underneath instead. */}
-      <div className="mt-3 sm:mt-0 sm:absolute sm:-bottom-12 sm:-right-10 sm:w-[46%] md:-bottom-14 md:-right-14">
+      <div
+        className="mt-3 sm:mt-0 sm:absolute sm:-bottom-12 sm:-right-10 sm:w-[46%] md:-bottom-14 md:-right-14"
+        style={parallax ? { transform: `translate3d(0, ${parallax}px, 0)`, willChange: "transform" } : undefined}
+      >
         <WindowFrame dense className="ring-4 ring-background dark:ring-0">
           <video
             {...shared}
@@ -262,7 +295,9 @@ function DemoReel() {
             tabIndex={-1}
           />
         </WindowFrame>
-        <span className="mt-1.5 block text-center text-xs text-muted-foreground sm:text-left">
+        {/* Sits over the frame's shadow, so it needs more contrast than the
+            muted grey the rest of the page uses for captions. */}
+        <span className="relative mt-2.5 block text-center text-xs font-medium text-foreground/70 sm:text-left">
           What the audience sees
         </span>
       </div>
