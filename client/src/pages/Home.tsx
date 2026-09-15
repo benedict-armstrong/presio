@@ -31,71 +31,50 @@ const LATEX_PACKAGE_URL = "https://github.com/benedict-armstrong/presio-latex-pa
 const OVERLEAF_EXAMPLE_URL =
   "https://www.overleaf.com/docs?snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/main.tex&snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/presio.sty&snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/clip.gif&snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/poster.png&snip_name[]=main.tex&snip_name[]=presio.sty&snip_name[]=clip.gif&snip_name[]=poster.png&engine=pdflatex";
 
+const FEATURES = [
+  {
+    title: "Local by default",
+    body: "Decks are decoded and stored in this browser. Nothing is uploaded unless you choose to share.",
+  },
+  {
+    title: "No account, no install",
+    body: "Drop a PDF and present. Signing in to sync decks across devices and with viewers.",
+  },
+  {
+    title: "Speaker notes",
+    body: "Written straight into your Typst or LaTeX source and read back out of the PDF.",
+  },
+  {
+    title: "Embedded media",
+    body: "GIFs, MP4s and YouTube or Vimeo links play in place, inside the slide.",
+  },
+  {
+    title: "Drawing and laser pointer",
+    body: "Annotate slides from the controller",
+  },
+  {
+    title: "Presenter view",
+    body: "Current slide, next slide, notes and a running timer, on your screen only.",
+  },
+  {
+    title: "Share by code",
+    body: "One short code joins any screen. A second window, a projector, or a phone. Unlimited number of viewers.",
+  },
+  {
+    title: "Hot reload",
+    body: "Recompile the deck and Presio picks the new file up without losing your place.",
+  },
+  {
+    title: "Works offline",
+    body: "Install it as an app and present with no connection at all.",
+  },
+];
+
 const TYPST_EXAMPLE_PDF_URL =
   "https://raw.githubusercontent.com/benedict-armstrong/presio-typst-package/main/examples/plain/example.pdf";
 const LATEX_EXAMPLE_PDF_URL =
   "https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/main.pdf";
 
-const PITCH = [
-  "No account, no install",
-  "Speaker Notes & youtube/vimeo/gifs",
-  "Local by default - PDFs stay on device",
-  "Drawing and Annotations",
-  "Easy Sharing",
-];
-
-function PitchTicker() {
-  return (
-    <div className="mb-4 overflow-hidden">
-      <div className="animate-marquee flex w-max items-center">
-        {[...PITCH, ...PITCH].map((statement, i) => (
-          <span
-            key={i}
-            className="inline-flex shrink-0 items-center gap-2 pr-6 font-mono text-xs font-semibold uppercase tracking-wide text-[var(--home2-accent)]"
-          >
-            {statement}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-const CUES = [
-  {
-    label: "Local by default",
-    title: "Nothing leaves your browser.",
-    body: "Your deck is decoded locally and stored in this browser only. It works offline, opens instantly, and there's nothing to upload unless you choose to share it.",
-    gif: "cue-01-local.mp4",
-  },
-  {
-    label: "One code, any screen",
-    title: "Share a code, present everywhere.",
-    body: "Log in to sync a deck online and hand out a 6-character code. Anyone who enters it watches your slides change live — no app, no sign-up.",
-    gif: "cue-02-sync.mp4",
-  },
-  {
-    label: "Notes & media, built in",
-    title: "Speaker notes and video that just play.",
-    body: "Write in Typst or LaTeX, attach notes and media with one line, and Presio reads them automatically. Embedded video and GIFs stay in sync across every viewer.",
-    gif: "cue-03-notes.mp4",
-  },
-  {
-    label: "Built for the podium",
-    title: "A controller that stays out of the way.",
-    body: "A presentation timer, remappable keyboard shortcuts, and a layout you can rearrange — so driving the deck never competes with presenting it.",
-    gif: "cue-04-controller.mp4",
-  },
-];
-
-
-function PlayGlyph() {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4 translate-x-[1px]">
-      <path d="M8 5v14l11-7z" />
-    </svg>
-  );
-}
 
 // Official Typst logo (Simple Icons, CC0).
 function TypstMark() {
@@ -131,31 +110,231 @@ function LatexMark() {
   );
 }
 
-function CueMedia({ gif }: { gif: string }) {
+// Mac-style chrome for the demo frames, so each recording reads as its own
+// window instead of a bare video. Decorative: the dots are not controls.
+function WindowFrame({
+  children,
+  dense = false,
+  className = "",
+}: {
+  children: React.ReactNode;
+  dense?: boolean;
+  className?: string;
+}) {
+  const dot = dense ? "h-1.5 w-1.5" : "h-2.5 w-2.5";
+  // Without an outline a near-white window disappears into a near-white page,
+  // so the frame is lifted instead: a layered drop shadow in light, and in dark
+  // — where a drop shadow is invisible — a faint light glow doing the same job.
+  // On white it is the hairline that actually defines the edge, so that stays
+  // and the ambient layers are kept light — a heavy one greys the page around
+  // the frame and swallows the caption underneath it.
+  const elevation =
+    "shadow-[0_0_0_1px_rgba(15,23,42,0.06),0_1px_2px_rgba(15,23,42,0.03),0_6px_16px_-12px_rgba(15,23,42,0.10)] " +
+    "dark:shadow-[0_0_0_1px_rgba(255,255,255,0.12),0_8px_24px_-4px_rgba(0,0,0,0.75),0_32px_72px_-16px_rgba(0,0,0,0.9)]";
   return (
-    <div
-      className="group relative aspect-video overflow-hidden rounded-2xl border shadow-sm"
-      style={{
-        backgroundImage:
-          "repeating-linear-gradient(45deg, var(--home2-grid) 0 1px, transparent 1px 14px)",
-        backgroundColor: "var(--card)",
-      }}
-    >
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div className="flex h-11 w-11 items-center justify-center rounded-full border bg-card text-muted-foreground transition-colors group-hover:text-[var(--home2-accent)] group-hover:border-[var(--home2-accent)]">
-          <PlayGlyph />
-        </div>
+    <div className={`overflow-hidden rounded-xl bg-card ${elevation} ${className}`}>
+      <div
+        aria-hidden="true"
+        className={`flex items-center gap-1.5 bg-muted/60 ${dense ? "px-2 py-1.5" : "px-3 py-2.5"}`}
+      >
+        <span className={`${dot} rounded-full bg-[#ff5f57]`} />
+        <span className={`${dot} rounded-full bg-[#febc2e]`} />
+        <span className={`${dot} rounded-full bg-[#28c840]`} />
       </div>
-      <span className="absolute bottom-3 left-3 rounded-md border bg-background px-2 py-0.5 font-mono text-[10.5px] text-muted-foreground">
-        {gif}
+      {children}
+    </div>
+  );
+}
+
+// ThemeProvider toggles `dark` on <html>, so the demo follows it by watching
+// that class rather than prefers-color-scheme — the in-app toggle has to win.
+function useIsDark() {
+  const [dark, setDark] = useState(
+    () => typeof document !== "undefined" && document.documentElement.classList.contains("dark")
+  );
+  useEffect(() => {
+    const root = document.documentElement;
+    const read = () => setDark(root.classList.contains("dark"));
+    read();
+    const obs = new MutationObserver(read);
+    obs.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
+  return dark;
+}
+
+// Tailwind's md breakpoint, read from JS: the parallax has to know whether the
+// two windows are overlapping or stacked, and only CSS knows that otherwise.
+// Keep in step with the md: classes on the inset in DemoReel.
+const OVERLAP_QUERY = "(min-width: 768px)";
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(
+    () => typeof window !== "undefined" && window.matchMedia(query).matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const read = () => setMatches(mq.matches);
+    read();
+    mq.addEventListener("change", read);
+    return () => mq.removeEventListener("change", read);
+  }, [query]);
+  return matches;
+}
+
+// Drift for the front window as the page scrolls: nearer things travel further,
+// so the inset rises a little faster than the frame behind it. Capped, because
+// past the hero the effect has nothing left to say. Returns 0 under
+// prefers-reduced-motion — parallax is exactly the motion that setting is about.
+function useParallax(enabled: boolean, factor = 0.1, max = 110) {
+  const [offset, setOffset] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    let raf = 0;
+    const read = () => {
+      raf = 0;
+      setOffset(-Math.min(window.scrollY * factor, max));
+    };
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(read);
+    };
+    read();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [enabled, factor, max]);
+  return offset;
+}
+
+// Hero demo reel: two recordings of one session, the presenter's controller and
+// the audience's viewer, captured together and replayed overlaid. Autoplays
+// muted and loops, which is what a silent screen recording wants. It plays
+// under prefers-reduced-motion too, by request — the scroll parallax still
+// honours that setting, but the reel itself is the page's main content.
+//
+// The clips are trimmed to a shared origin at record time, so they start
+// aligned; this only has to correct the drift that accumulates from two
+// independent decoders. The controller is the clock and the viewer chases it.
+function DemoReel() {
+  const controllerRef = useRef<HTMLVideoElement | null>(null);
+  const viewerRef = useRef<HTMLVideoElement | null>(null);
+  const reducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Each theme has its own pair of recordings. Swapping src reloads the video
+  // from zero, so the position is carried across the switch.
+  const dark = useIsDark();
+  const theme = dark ? "dark" : "light";
+  const overlapping = useMediaQuery(OVERLAP_QUERY);
+  const parallax = useParallax(!reducedMotion && overlapping);
+  const resumeAt = useRef(0);
+  const resume = (el: HTMLVideoElement) => {
+    if (resumeAt.current > 0 && resumeAt.current < el.duration) {
+      el.currentTime = resumeAt.current;
+    }
+  };
+
+  useEffect(() => {
+    const lead = controllerRef.current;
+    const follow = viewerRef.current;
+    if (!lead || !follow) return;
+
+    // A seek mid-frame is visible, so only correct once the gap is worse than
+    // the seam it would cause. The loop wrap is not drift — skip it.
+    const DRIFT_S = 0.2;
+    const resync = () => {
+      resumeAt.current = lead.currentTime;
+      if (follow.readyState < 1 || follow.seeking) return;
+      const gap = lead.currentTime - follow.currentTime;
+      if (Math.abs(gap) > DRIFT_S && Math.abs(gap) < lead.duration / 2) {
+        follow.currentTime = lead.currentTime;
+      }
+    };
+
+    const play = () => void follow.play().catch(() => { });
+    const pause = () => follow.pause();
+
+    lead.addEventListener("timeupdate", resync);
+    lead.addEventListener("play", play);
+    lead.addEventListener("pause", pause);
+    lead.addEventListener("seeked", resync);
+    return () => {
+      lead.removeEventListener("timeupdate", resync);
+      lead.removeEventListener("play", play);
+      lead.removeEventListener("pause", pause);
+      lead.removeEventListener("seeked", resync);
+    };
+  }, []);
+
+  const shared = {
+    preload: "auto" as const,
+    autoPlay: true,
+    loop: true,
+    muted: true,
+    playsInline: true,
+  };
+
+  return (
+    // Held a little back from full strength: the reel is supporting material
+    // next to the headline and the drop zone, not competing with them.
+    <div className="relative mx-auto w-full max-w-115 opacity-85 md:mx-0 md:max-w-none">
+      <span className="mb-3 block text-center font-mono text-xs font-semibold uppercase tracking-wide text-[var(--home2-accent)] sm:text-left">
+        How it works:
       </span>
+
+      {/* Presenter's controller: the deck, next slide, notes and timer. */}
+      <span className="mb-2 block text-center text-xs font-medium text-foreground/70 sm:text-left">
+        Browser Window 1
+      </span>
+      <WindowFrame>
+        <video
+          {...shared}
+          ref={controllerRef}
+          className="block w-full"
+          poster={`/demo-controller-${theme}-poster.jpg`}
+          src={`/demo-controller-${theme}.mp4`}
+          onLoadedMetadata={(e) => resume(e.currentTarget)}
+          aria-label="Screen recording: the Presio controller, showing the current slide, the next slide, speaker notes and a running timer while the presenter moves through a deck."
+        />
+      </WindowFrame>
+
+      {/* What the audience sees, hung off the bottom-right corner so it clips
+          the controller rather than covering it. Below md the hero is a single
+          column, so it stacks underneath instead. While the grid still spans
+          the viewport the window can only just clear the edge; from xl up there
+          is spare gutter beside the max-w-6xl grid to drift out into. */}
+      <div
+        className="mt-4 md:absolute md:mt-0 md:-bottom-8 md:right-0 md:w-[58%] lg:-bottom-10 lg:-right-2 lg:w-[56%] xl:-bottom-14 xl:-right-12 2xl:-right-28 min-[1800px]:-right-44"
+        style={parallax ? { transform: `translate3d(0, ${parallax}px, 0)`, willChange: "transform" } : undefined}
+      >
+        <WindowFrame dense className="md:ring-4 md:ring-background dark:md:ring-0">
+          <video
+            {...shared}
+            ref={viewerRef}
+            className="block w-full"
+            poster={`/demo-viewer-${theme}-poster.jpg`}
+            src={`/demo-viewer-${theme}.mp4`}
+            onLoadedMetadata={(e) => resume(e.currentTarget)}
+            aria-hidden="true"
+            tabIndex={-1}
+          />
+        </WindowFrame>
+        {/* Sits over the frame's shadow, so it needs more contrast than the
+            muted grey the rest of the page uses for captions. */}
+        <span className="relative mt-2.5 block text-center text-xs font-medium text-foreground/70 sm:text-left">
+          Browser Window 2
+        </span>
+      </div>
     </div>
   );
 }
 
 // Shared scroll-reveal: dims + drops an element until it enters the
 // viewport, then brightens it as the page scrolls further (used for every
-// section below the mock browser mock-up).
+// section below the hero demo reel).
 function useScrollReveal() {
   const ref = useRef<HTMLDivElement | null>(null);
   const reducedMotion =
@@ -206,27 +385,6 @@ function ScrollReveal({ children, className = "" }: { children: React.ReactNode;
     </div>
   );
 }
-
-function Cue({ cue, index, flip }: { cue: (typeof CUES)[number]; index: number; flip: boolean }) {  return (
-    <ScrollReveal className="grid grid-cols-1 items-center gap-7 md:grid-cols-2 md:gap-16">
-      <div className={flip ? "md:order-2" : "md:order-1"}>
-        <div className="mb-3.5 flex items-center gap-2.5 font-mono text-xs font-semibold uppercase tracking-wide text-[var(--home2-accent)]">
-          <span className="text-muted-foreground">CUE {String(index + 1).padStart(2, "0")}</span>
-          {cue.label}
-        </div>
-        <h3 className="mb-3 text-xl font-semibold leading-tight tracking-tight md:text-2xl">
-          {cue.title}
-        </h3>
-        <p className="max-w-[42ch] text-[15px] text-muted-foreground">{cue.body}</p>
-      </div>
-      <div className={flip ? "md:order-1" : "md:order-2"}>
-        <CueMedia gif={cue.gif} />
-      </div>
-    </ScrollReveal>
-  );
-}
-
-// Compact date for the recents list: "Aug 25" this year, otherwise "Aug 25, 2025".
 function formatRecentDate(ts: number): string {
   const d = new Date(ts);
   const opts: Intl.DateTimeFormatOptions =
@@ -927,7 +1085,7 @@ export default function Home() {
 
       {/* ---------------------------------------------------------------- hero */}
       <section className="relative px-6 pb-24 pt-16">
-        <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 md:grid-cols-[0.92fr_1.08fr] md:gap-20">
+        <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 md:grid-cols-[0.92fr_1.08fr] md:gap-20 xl:grid-cols-[1fr_1.05fr]">
           <div>
             <div className='max-w-xl'>
               <h1 className="mb-8 font-mono text-4xl font-semibold leading-[1.06] tracking-tight md:text-5xl">
@@ -939,12 +1097,12 @@ export default function Home() {
               Drop a deck and get a controller with notes and a viewer that mirrors it in real
               time — on this laptop, or on every screen in the room.
             </p> */}
-              <div className='mb-8'>
-                <PitchTicker />
-              </div>
             </div>
 
-            <div className="py-6">
+            {/* The drop target grows with the viewport but stays in a readable
+                band: min() so the floor can never exceed the column it sits in
+                (below md that column is narrower than the floor itself). */}
+            <div className="mx-auto w-full min-w-[min(100%,320px)] max-w-[420px] py-6 md:mx-0 lg:max-w-[480px] xl:max-w-[530px]">
               {/* Live reload needs the File System Access API, which only
                   Chromium ships. Worth telling everyone else it exists —
                   it's the difference between one drop and thirty. */}
@@ -1171,61 +1329,10 @@ export default function Home() {
             </div>
           </div>
 
-          {/* mock browser + phone visual, purely illustrative */}
-          <div className="relative mx-auto aspect-[4/3.1] w-full max-w-115 md:mx-0 md:max-w-none" aria-hidden="true">
-            <div className="absolute inset-0 mr-[8%] mb-[10%] flex flex-col overflow-hidden rounded-xl border bg-card shadow-lg">
-              <div className="flex items-center gap-1.5 border-b bg-muted/50 px-3 py-2.5">
-                <div className="flex gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-border" />
-                  <span className="h-2 w-2 rounded-full bg-border" />
-                  <span className="h-2 w-2 rounded-full bg-border" />
-                </div>
-                <div className="flex-1 rounded bg-background px-2 py-0.5 text-center font-mono text-[10.5px] text-muted-foreground">
-                  presio.xyz/s/A3F9K2
-                </div>
-              </div>
-              <div className="grid flex-1 grid-cols-[64px_1fr_1fr] gap-px bg-border">
-                <div className="flex flex-col gap-1.5 bg-card p-1.5">
-                  <div className="aspect-[4/3] rounded border bg-[var(--home2-accent-soft)] ring-1 ring-[var(--home2-accent)]" />
-                  <div className="aspect-[4/3] rounded border bg-muted" />
-                  <div className="aspect-[4/3] rounded border bg-muted" />
-                  <div className="aspect-[4/3] rounded border bg-muted" />
-                </div>
-                <div className="flex items-center justify-center bg-card p-3.5">
-                  <div className="relative aspect-[16/10] w-full overflow-hidden rounded-md border bg-gradient-to-br from-muted to-background">
-                    <div className="absolute left-[14%] right-[30%] top-[22%] h-1.5 rounded bg-border" />
-                    <div className="absolute right-[45%] left-[14%] top-[34%] h-1.5 rounded bg-border" />
-                  </div>
-                </div>
-                <div className="bg-card p-3">
-                  <div className="mb-2 font-mono text-[9.5px] uppercase tracking-wide text-muted-foreground/70">
-                    Speaker notes
-                  </div>
-                  <div className="mb-1.5 h-1.5 rounded bg-muted" />
-                  <div className="mb-1.5 h-1.5 w-[90%] rounded bg-muted" />
-                  <div className="mb-1.5 h-1.5 w-[70%] rounded bg-muted" />
-                  <div className="h-1.5 w-[80%] rounded bg-muted" />
-                </div>
-              </div>
-            </div>
-            <div className="absolute -right-[2%] -bottom-[6%] hidden w-[34%] rounded-[22px] bg-foreground p-2 shadow-lg sm:block">
-              <div className="flex h-full flex-col overflow-hidden rounded-[15px] bg-card">
-                <div className="flex items-center justify-between px-2 pt-2 pb-1">
-                  <span className="flex items-center gap-1 font-mono text-[8px] font-bold uppercase tracking-wide text-[var(--home2-accent)]">
-                    <span className="relative flex h-1.5 w-1.5">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--home2-accent)] opacity-60" />
-                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--home2-accent)]" />
-                    </span>
-                    Live
-                  </span>
-                </div>
-                <div className="relative m-2 flex-1 rounded border bg-gradient-to-br from-muted to-background">
-                  <div className="absolute left-[14%] right-[30%] top-[22%] h-1 rounded bg-border" />
-                  <div className="absolute right-[45%] left-[14%] top-[32%] h-1 rounded bg-border" />
-                </div>
-              </div>
-            </div>
-          </div>
+          {/* The demo reel from the README. Shipped as H.264 rather than the
+              34 MB GIF the README links to: same 27 s recording, ~2.9 MB, and
+              it decodes on the GPU instead of the main thread. */}
+          <DemoReel />
         </div>
       </section>
 
@@ -1344,14 +1451,36 @@ Hello world.
         </ScrollReveal>
       </section>
 
+      {/* ------------------------------------------------------------ features */}
+      <section id="features" className="px-6 py-24 md:py-28">
+        <ScrollReveal className="mx-auto max-w-6xl">
+          <div className="mb-10 max-w-2xl">
+            <h2 className="text-2xl font-semibold leading-tight tracking-tight md:text-3xl">
+              Features:
+            </h2>
+          </div>
 
-      {/* ---------------------------------------------------------------- cues */}
-      <section id="cues" className="px-6 py-24 md:py-28">
-        <div className="mx-auto flex max-w-6xl flex-col gap-28 md:gap-32">
-          {CUES.map((cue, i) => (
-            <Cue key={cue.label} cue={cue} index={i} flip={i % 2 === 1} />
-          ))}
-        </div>
+          <ul className="grid grid-cols-1 gap-x-12 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
+            {FEATURES.map((f) => (
+              <li key={f.title}>
+                <h3 className="text-[15px] font-medium">{f.title}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{f.body}</p>
+              </li>
+            ))}
+          </ul>
+
+          <p className="mt-12 text-sm text-muted-foreground">
+            Missing something?{" "}
+            <a
+              href={`${REPO_URL}/issues/new`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground underline underline-offset-4 hover:text-[var(--home2-accent)]"
+            >
+              Open a feature request on GitHub
+            </a>{" "}
+          </p>
+        </ScrollReveal>
       </section>
 
       <footer className="px-6 py-8">

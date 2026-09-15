@@ -17,6 +17,15 @@ import { PORT, SESSION_ID, CONTROLLER_TOKEN, TOTAL_SLIDES } from "../e2e/constan
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || PORT);
 
+// The specs use example/example.pdf and its 7 pages. scripts/record-demo.mts
+// points these at its own deck instead, so the homepage recording isn't driven
+// by the media test fixture.
+const deckPath = process.env.E2E_PDF
+  ? path.resolve(process.env.E2E_PDF)
+  : path.resolve(__dirname, "../example/example.pdf");
+const totalSlides = Number(process.env.E2E_TOTAL_SLIDES || TOTAL_SLIDES);
+const filename = process.env.E2E_FILENAME || "E2E Deck";
+
 // Allow the harness's own origin so the browser's API/socket requests (which
 // carry an Origin header) aren't rejected by the CORS guard. In production the
 // client and server share an origin and this isn't needed.
@@ -27,8 +36,8 @@ const fake = new FakeSupabase([
     id: SESSION_ID,
     pdf_path: "",
     pdf_url: "/test.pdf",
-    filename: "E2E Deck",
-    total_slides: TOTAL_SLIDES,
+    filename,
+    total_slides: totalSlides,
     current_slide: 1,
     note_prefix: "note:",
     local: false,
@@ -45,7 +54,7 @@ const inner = createApp({ supabase: fake as unknown as SupabaseClient, io });
 // Wrap createApp so the example PDF route is matched before its catch-all.
 const app = express();
 app.get("/test.pdf", (_req, res) => {
-  res.sendFile(path.resolve(__dirname, "../example/example.pdf"));
+  res.sendFile(deckPath);
 });
 app.use(inner);
 
