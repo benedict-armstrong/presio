@@ -61,30 +61,33 @@ function PitchTicker() {
   );
 }
 
+const DEMO_VIDEO = "/demo.mp4";
+const DEMO_POSTER = "/demo-poster.jpg";
+
 const CUES = [
   {
     label: "Local by default",
     title: "Nothing leaves your browser.",
     body: "Your deck is decoded locally and stored in this browser only. It works offline, opens instantly, and there's nothing to upload unless you choose to share it.",
-    gif: "cue-01-local.mp4",
+    sketch: "local" as const,
   },
   {
     label: "One code, any screen",
     title: "Share a code, present everywhere.",
     body: "Log in to sync a deck online and hand out a 6-character code. Anyone who enters it watches your slides change live — no app, no sign-up.",
-    gif: "cue-02-sync.mp4",
+    sketch: "sync" as const,
   },
   {
     label: "Notes & media, built in",
     title: "Speaker notes and video that just play.",
     body: "Write in Typst or LaTeX, attach notes and media with one line, and Presio reads them automatically. Embedded video and GIFs stay in sync across every viewer.",
-    gif: "cue-03-notes.mp4",
+    sketch: "notes" as const,
   },
   {
     label: "Built for the podium",
     title: "A controller that stays out of the way.",
     body: "A presentation timer, remappable keyboard shortcuts, and a layout you can rearrange — so driving the deck never competes with presenting it.",
-    gif: "cue-04-controller.mp4",
+    sketch: "controller" as const,
   },
 ];
 
@@ -131,31 +134,248 @@ function LatexMark() {
   );
 }
 
-function CueMedia({ gif }: { gif: string }) {
+// Shared frame for the cue sketches: the same hatched card the placeholder
+// boxes used, so the section keeps its rhythm now that the art is real.
+function SketchFrame({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="group relative aspect-video overflow-hidden rounded-2xl border shadow-sm"
+      className="relative aspect-video overflow-hidden rounded-2xl border p-5 shadow-sm"
       style={{
         backgroundImage:
           "repeating-linear-gradient(45deg, var(--home2-grid) 0 1px, transparent 1px 14px)",
         backgroundColor: "var(--card)",
       }}
+      aria-hidden="true"
     >
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div className="flex h-11 w-11 items-center justify-center rounded-full border bg-card text-muted-foreground transition-colors group-hover:text-[var(--home2-accent)] group-hover:border-[var(--home2-accent)]">
-          <PlayGlyph />
+      {children}
+    </div>
+  );
+}
+
+// A slide stand-in: two text bars on a soft gradient, matching the hero mock.
+function SlideGlyph({ className = "" }: { className?: string }) {
+  return (
+    <div
+      className={`relative overflow-hidden rounded-md border bg-gradient-to-br from-muted to-background ${className}`}
+    >
+      <div className="absolute left-[14%] right-[30%] top-[24%] h-1.5 rounded bg-border" />
+      <div className="absolute left-[14%] right-[45%] top-[38%] h-1.5 rounded bg-border" />
+    </div>
+  );
+}
+
+function LiveDot({ label = "Live" }: { label?: string }) {
+  return (
+    <span className="flex items-center gap-1 font-mono text-[9px] font-bold uppercase tracking-wide text-[var(--home2-accent)]">
+      <span className="relative flex h-1.5 w-1.5">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--home2-accent)] opacity-60" />
+        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--home2-accent)]" />
+      </span>
+      {label}
+    </span>
+  );
+}
+
+// CUE 01 — the deck never leaves the tab: one browser window, a dashed cordon
+// around it, and a server that stays empty.
+function LocalSketch() {
+  return (
+    <SketchFrame>
+      <div className="flex h-full items-center gap-4">
+        <div className="flex-1 rounded-lg border border-dashed border-[var(--home2-accent)] p-2">
+          <div className="overflow-hidden rounded-md border bg-card">
+            <div className="flex items-center gap-1.5 border-b bg-muted/50 px-2 py-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-border" />
+              <span className="h-1.5 w-1.5 rounded-full bg-border" />
+              <div className="flex-1 rounded bg-background px-1.5 py-0.5 text-center font-mono text-[8px] text-muted-foreground">
+                presio.xyz
+              </div>
+            </div>
+            <div className="p-2">
+              <SlideGlyph className="aspect-[16/9] w-full" />
+            </div>
+          </div>
+          <div className="mt-1.5 text-center font-mono text-[8.5px] uppercase tracking-wide text-[var(--home2-accent)]">
+            deck.pdf — stays here
+          </div>
+        </div>
+        <div className="flex flex-col items-center gap-1 text-muted-foreground/50">
+          <span className="font-mono text-[13px] leading-none">⇢</span>
+          <span className="font-mono text-[8px] uppercase tracking-wide">nothing</span>
+        </div>
+        <div className="flex w-[22%] flex-col items-center gap-1.5 rounded-lg border border-dashed p-2 text-muted-foreground/60">
+          <div className="h-1.5 w-full rounded bg-muted" />
+          <div className="h-1.5 w-full rounded bg-muted" />
+          <div className="h-1.5 w-full rounded bg-muted" />
+          <span className="mt-0.5 font-mono text-[8px] uppercase tracking-wide">server</span>
         </div>
       </div>
-      <span className="absolute bottom-3 left-3 rounded-md border bg-background px-2 py-0.5 font-mono text-[10.5px] text-muted-foreground">
-        {gif}
-      </span>
+    </SketchFrame>
+  );
+}
+
+// CUE 02 — one 6-character code, three screens following it.
+function SyncSketch() {
+  return (
+    <SketchFrame>
+      <div className="flex h-full flex-col items-center justify-center gap-4">
+        <div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 shadow-sm">
+          <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+            code
+          </span>
+          <span className="font-mono text-sm font-semibold tracking-[0.2em] text-[var(--home2-accent)]">
+            A3F9K2
+          </span>
+        </div>
+        <div className="flex w-full items-end justify-center gap-3">
+          <div className="w-[26%] rounded-md border bg-card p-1 shadow-sm">
+            <SlideGlyph className="aspect-[16/10] w-full" />
+          </div>
+          <div className="w-[34%] rounded-md border bg-card p-1.5 shadow-sm ring-1 ring-[var(--home2-accent)]">
+            <SlideGlyph className="aspect-[16/10] w-full" />
+            <div className="mt-1 flex justify-center">
+              <LiveDot />
+            </div>
+          </div>
+          <div className="w-[16%] rounded-[8px] border bg-card p-1 shadow-sm">
+            <SlideGlyph className="aspect-[9/14] w-full" />
+          </div>
+        </div>
+      </div>
+    </SketchFrame>
+  );
+}
+
+// CUE 03 — one line of source turns into a slide with media plus notes.
+function NotesSketch() {
+  return (
+    <SketchFrame>
+      <div className="flex h-full flex-col gap-2.5">
+        <div className="rounded-md border bg-background px-2 py-1 font-mono text-[9px] text-muted-foreground">
+          <span className="text-[var(--home2-accent)]">#media</span>(&quot;clip.mp4&quot;) ·{" "}
+          <span className="text-[var(--home2-accent)]">#speaker-notes</span>[…]
+        </div>
+        <div className="flex min-h-0 flex-1 gap-2.5">
+          <div className="relative flex-[1.5] overflow-hidden rounded-md border bg-gradient-to-br from-muted to-background">
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full border bg-card text-[var(--home2-accent)]">
+                <PlayGlyph />
+              </div>
+            </div>
+            <div className="absolute bottom-2 left-2 right-2 h-1 rounded-full bg-border">
+              <div className="h-1 w-1/3 rounded-full bg-[var(--home2-accent)]" />
+            </div>
+          </div>
+          <div className="flex-1 rounded-md border bg-card p-2">
+            <div className="mb-1.5 font-mono text-[8.5px] uppercase tracking-wide text-muted-foreground/70">
+              Speaker notes
+            </div>
+            <div className="mb-1 h-1.5 rounded bg-muted" />
+            <div className="mb-1 h-1.5 w-[90%] rounded bg-muted" />
+            <div className="mb-1 h-1.5 w-[70%] rounded bg-muted" />
+            <div className="h-1.5 w-[80%] rounded bg-muted" />
+          </div>
+        </div>
+      </div>
+    </SketchFrame>
+  );
+}
+
+// CUE 04 — the controller layout itself: thumbnail rail, current slide, notes,
+// timer. (This is the mock that used to sit in the hero.)
+function ControllerSketch() {
+  return (
+    <SketchFrame>
+      <div className="flex h-full flex-col overflow-hidden rounded-lg border bg-card">
+        <div className="flex items-center justify-between border-b bg-muted/50 px-2.5 py-1.5">
+          <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+            controller
+          </span>
+          <span className="rounded bg-background px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
+            12:04
+          </span>
+        </div>
+        <div className="grid min-h-0 flex-1 grid-cols-[46px_1fr_1fr] gap-px bg-border">
+          <div className="flex flex-col gap-1 bg-card p-1">
+            <div className="aspect-[4/3] rounded border bg-[var(--home2-accent-soft)] ring-1 ring-[var(--home2-accent)]" />
+            <div className="aspect-[4/3] rounded border bg-muted" />
+            <div className="aspect-[4/3] rounded border bg-muted" />
+          </div>
+          <div className="flex items-center justify-center bg-card p-2">
+            <SlideGlyph className="aspect-[16/10] w-full" />
+          </div>
+          <div className="bg-card p-2">
+            <div className="mb-1.5 font-mono text-[8.5px] uppercase tracking-wide text-muted-foreground/70">
+              Notes
+            </div>
+            <div className="mb-1 h-1.5 rounded bg-muted" />
+            <div className="mb-1 h-1.5 w-[90%] rounded bg-muted" />
+            <div className="h-1.5 w-[70%] rounded bg-muted" />
+          </div>
+        </div>
+      </div>
+    </SketchFrame>
+  );
+}
+
+const CUE_SKETCHES = {
+  local: LocalSketch,
+  sync: SyncSketch,
+  notes: NotesSketch,
+  controller: ControllerSketch,
+};
+
+function CueSketch({ kind }: { kind: keyof typeof CUE_SKETCHES }) {
+  const Sketch = CUE_SKETCHES[kind];
+  return <Sketch />;
+}
+
+// Hero demo reel. Autoplays muted and loops, which is what a silent screen
+// recording wants — but prefers-reduced-motion gets the poster frame and an
+// explicit play control instead of 27 s of unrequested movement.
+function DemoReel() {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const reducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const [playing, setPlaying] = useState(!reducedMotion);
+
+  return (
+    <div className="relative mx-auto w-full max-w-115 md:mx-0 md:max-w-none">
+      <video
+        ref={videoRef}
+        className="w-full rounded-xl border bg-card shadow-lg"
+        poster={DEMO_POSTER}
+        src={DEMO_VIDEO}
+        preload={reducedMotion ? "none" : "auto"}
+        autoPlay={!reducedMotion}
+        loop
+        muted
+        playsInline
+        controls={reducedMotion}
+        aria-label="Screen recording: a PDF opened in Presio, slides driven from the controller while a second window mirrors them live."
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+      />
+      {reducedMotion && !playing && (
+        <button
+          type="button"
+          onClick={() => void videoRef.current?.play()}
+          className="absolute inset-0 flex items-center justify-center rounded-xl"
+          aria-label="Play the Presio demo"
+        >
+          <span className="flex h-14 w-14 items-center justify-center rounded-full border bg-card text-muted-foreground shadow-sm transition-colors hover:border-[var(--home2-accent)] hover:text-[var(--home2-accent)]">
+            <PlayGlyph />
+          </span>
+        </button>
+      )}
     </div>
   );
 }
 
 // Shared scroll-reveal: dims + drops an element until it enters the
 // viewport, then brightens it as the page scrolls further (used for every
-// section below the mock browser mock-up).
+// section below the hero demo reel).
 function useScrollReveal() {
   const ref = useRef<HTMLDivElement | null>(null);
   const reducedMotion =
@@ -220,7 +440,7 @@ function Cue({ cue, index, flip }: { cue: (typeof CUES)[number]; index: number; 
         <p className="max-w-[42ch] text-[15px] text-muted-foreground">{cue.body}</p>
       </div>
       <div className={flip ? "md:order-1" : "md:order-2"}>
-        <CueMedia gif={cue.gif} />
+        <CueSketch kind={cue.sketch} />
       </div>
     </ScrollReveal>
   );
@@ -1171,61 +1391,10 @@ export default function Home() {
             </div>
           </div>
 
-          {/* mock browser + phone visual, purely illustrative */}
-          <div className="relative mx-auto aspect-[4/3.1] w-full max-w-115 md:mx-0 md:max-w-none" aria-hidden="true">
-            <div className="absolute inset-0 mr-[8%] mb-[10%] flex flex-col overflow-hidden rounded-xl border bg-card shadow-lg">
-              <div className="flex items-center gap-1.5 border-b bg-muted/50 px-3 py-2.5">
-                <div className="flex gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-border" />
-                  <span className="h-2 w-2 rounded-full bg-border" />
-                  <span className="h-2 w-2 rounded-full bg-border" />
-                </div>
-                <div className="flex-1 rounded bg-background px-2 py-0.5 text-center font-mono text-[10.5px] text-muted-foreground">
-                  presio.xyz/s/A3F9K2
-                </div>
-              </div>
-              <div className="grid flex-1 grid-cols-[64px_1fr_1fr] gap-px bg-border">
-                <div className="flex flex-col gap-1.5 bg-card p-1.5">
-                  <div className="aspect-[4/3] rounded border bg-[var(--home2-accent-soft)] ring-1 ring-[var(--home2-accent)]" />
-                  <div className="aspect-[4/3] rounded border bg-muted" />
-                  <div className="aspect-[4/3] rounded border bg-muted" />
-                  <div className="aspect-[4/3] rounded border bg-muted" />
-                </div>
-                <div className="flex items-center justify-center bg-card p-3.5">
-                  <div className="relative aspect-[16/10] w-full overflow-hidden rounded-md border bg-gradient-to-br from-muted to-background">
-                    <div className="absolute left-[14%] right-[30%] top-[22%] h-1.5 rounded bg-border" />
-                    <div className="absolute right-[45%] left-[14%] top-[34%] h-1.5 rounded bg-border" />
-                  </div>
-                </div>
-                <div className="bg-card p-3">
-                  <div className="mb-2 font-mono text-[9.5px] uppercase tracking-wide text-muted-foreground/70">
-                    Speaker notes
-                  </div>
-                  <div className="mb-1.5 h-1.5 rounded bg-muted" />
-                  <div className="mb-1.5 h-1.5 w-[90%] rounded bg-muted" />
-                  <div className="mb-1.5 h-1.5 w-[70%] rounded bg-muted" />
-                  <div className="h-1.5 w-[80%] rounded bg-muted" />
-                </div>
-              </div>
-            </div>
-            <div className="absolute -right-[2%] -bottom-[6%] hidden w-[34%] rounded-[22px] bg-foreground p-2 shadow-lg sm:block">
-              <div className="flex h-full flex-col overflow-hidden rounded-[15px] bg-card">
-                <div className="flex items-center justify-between px-2 pt-2 pb-1">
-                  <span className="flex items-center gap-1 font-mono text-[8px] font-bold uppercase tracking-wide text-[var(--home2-accent)]">
-                    <span className="relative flex h-1.5 w-1.5">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--home2-accent)] opacity-60" />
-                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--home2-accent)]" />
-                    </span>
-                    Live
-                  </span>
-                </div>
-                <div className="relative m-2 flex-1 rounded border bg-gradient-to-br from-muted to-background">
-                  <div className="absolute left-[14%] right-[30%] top-[22%] h-1 rounded bg-border" />
-                  <div className="absolute right-[45%] left-[14%] top-[32%] h-1 rounded bg-border" />
-                </div>
-              </div>
-            </div>
-          </div>
+          {/* The demo reel from the README. Shipped as H.264 rather than the
+              34 MB GIF the README links to: same 27 s recording, ~2.9 MB, and
+              it decodes on the GPU instead of the main thread. */}
+          <DemoReel />
         </div>
       </section>
 
