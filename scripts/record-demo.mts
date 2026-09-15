@@ -23,12 +23,11 @@ import { fileURLToPath } from "node:url";
 import { SESSION_ID, CONTROLLER_TOKEN } from "../e2e/constants.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.DEMO_PORT || 4181);
-const BASE = `http://localhost:${PORT}`;
+const PORT_BASE = Number(process.env.DEMO_PORT || 4181);
 const OUT = path.resolve(__dirname, ".demo-out");
 const PUBLIC = path.resolve(__dirname, "../client/public");
 const DECK = path.resolve(__dirname, "demo-deck/deck.pdf");
-const DECK_SLIDES = 7;
+const DECK_SLIDES = 8;
 
 // The viewer is a projector (16:9); the controller is the presenter's laptop.
 const VIEWER = { width: 1280, height: 720 };
@@ -37,14 +36,19 @@ const CONTROLLER = { width: 1280, height: 800 };
 // Everything before T0 (page load, dialog dismissal, the viewer's 10s hint) is
 // trimmed off the front of both clips.
 const LEAD_MS = 1500;
-const DURATION_MS = 24_000;
+const DURATION_MS = 34_000;
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// Boot the E2E harness on our own port, serving the demo deck.
-async function startHarness() {
+// Boot the E2E harness on its own port, serving the demo deck.
+//
+// Each pass gets a FRESH harness. Annotations live in the session the harness
+// holds, so a second pass against the same one starts with the first pass's
+// strokes already drawn — they appear on the slide the moment it opens instead
+// of being drawn on camera.
+async function startHarness(port: number) {
   if (!fs.existsSync(DECK)) {
     throw new Error(`missing ${DECK} — run: typst compile scripts/demo-deck/deck.typ`);
   }
@@ -52,7 +56,7 @@ async function startHarness() {
     cwd: path.resolve(__dirname, ".."),
     env: {
       ...process.env,
-      PORT: String(PORT),
+      PORT: String(port),
       E2E_PDF: DECK,
       E2E_TOTAL_SLIDES: String(DECK_SLIDES),
       E2E_FILENAME: "Cutting our p99 in half.pdf",
@@ -60,21 +64,22 @@ async function startHarness() {
     stdio: "ignore",
   });
 
+  const base = `http://localhost:${port}`;
   for (let i = 0; i < 60; i++) {
     try {
-      const res = await fetch(BASE);
-      if (res.ok) return child;
+      const res = await fetch(base);
+      if (res.ok) return { child, base };
     } catch {
       // not listening yet
     }
     await sleep(500);
   }
   child.kill();
-  throw new Error(`harness did not come up on ${BASE}`);
+  throw new Error(`harness did not come up on ${base}`);
 }
 
 // One full pass: both windows in the given theme, recorded and encoded.
-async function record(browser: Browser, theme: "light" | "dark") {
+async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
   const controllerCtx = await browser.newContext({
     viewport: CONTROLLER,
     recordVideo: { dir: OUT, size: CONTROLLER },
@@ -124,6 +129,14 @@ async function record(browser: Browser, theme: "light" | "dark") {
   // before T0 so it reads as a live talk rather than a fresh page.
   await controller.getByRole("button", { name: "Start", exact: true }).click().catch(() => {});
 
+  // The tool palette collapses to a grip when idle; make sure it is expanded so
+  // the laser and pen buttons are hittable once the clock starts.
+  const anyTool = controller.getByTestId("tool-laser").or(controller.getByTestId("tool-collapsed"));
+  if (!(await anyTool.first().isVisible().catch(() => false))) {
+    await controller.getByTestId("toolbar-toggle").click().catch(() => {});
+    await anyTool.first().waitFor({ timeout: 10_000 });
+  }
+
   await controller.locator("body").click();
   await sleep(600);
 
@@ -136,34 +149,98 @@ async function record(browser: Browser, theme: "light" | "dark") {
 
   const next = () => controller.keyboard.press("ArrowRight");
 
-  await at(1500);
-  await next(); // title -> "Where the time went"
+  // Coordinates are fractions of the RENDERED PAGE, not of the card holding it
+  // — the slide is letterboxed inside that card, so card fractions land in the
+  // empty margin. The pdf.js canvas is exactly the page rect.
+  const surface = controller.locator(".touch-none canvas").first();
+  const box = await surface.boundingBox();
+  if (!box) throw new Error("could not find the controller's rendered slide");
+  const at_ = (fx: number, fy: number) =>
+    ({ x: box.x + box.width * fx, y: box.y + box.height * fy });
 
-  await at(5000);
+  // With a tool active and the pointer away, the palette collapses to just the
+  // active tool, so the others have to be revealed before they can be clicked.
+  const pickTool = async (key: "none" | "laser" | "pen") => {
+    const btn = controller.getByTestId(`tool-${key}`);
+    if (!(await btn.isVisible().catch(() => false))) {
+      await controller.getByTestId("tool-collapsed").click();
+      await btn.waitFor({ timeout: 5_000 });
+    }
+    await btn.click();
+  };
+
+  // Trace a path with the pointer, optionally holding the button down (a
+  // stroke) rather than just hovering (a laser).
+  const trace = async (points: [number, number][], draw: boolean, stepMs = 45) => {
+    const first = at_(...points[0]);
+    await controller.mouse.move(first.x, first.y);
+    if (draw) await controller.mouse.down();
+    for (const [fx, fy] of points.slice(1)) {
+      const p = at_(fx, fy);
+      await controller.mouse.move(p.x, p.y, { steps: 6 });
+      await sleep(stepMs);
+    }
+    if (draw) await controller.mouse.up();
+  };
+
+  // The deck opens on a cover and a title slide, so two presses get to the
+  // first slide with anything on it to point at.
+  await at(800);
+  await next();
+  await at(1800);
+  await next(); // -> "Where the time went"
+
+  // Laser: sweep across the three bars as if calling them out in the room.
+  await at(3200);
+  await pickTool("laser");
+  await at(3800);
+  await trace(
+    [[0.55, 0.26], [0.70, 0.25], [0.88, 0.27], [0.74, 0.34], [0.57, 0.34], [0.60, 0.42], [0.74, 0.42]],
+    false
+  );
+
+  await at(8000);
   await next(); // -> "One writer, many waiters"
 
-  await at(8500);
+  // Drawing: underline the clause that matters, twice, the way a marker does.
+  await at(9000);
+  await pickTool("pen");
+  await at(9800);
+  await trace([[0.05, 0.285], [0.32, 0.30], [0.62, 0.29], [0.92, 0.305]], true, 35);
+  await at(11_400);
+  await trace([[0.05, 0.355], [0.18, 0.368], [0.32, 0.358]], true, 35);
+
+  // Back to the plain pointer before moving on, so the cursor is not a pen for
+  // the rest of the run. The strokes themselves can stay: the clip is linear,
+  // so this slide is never revisited and the loop restarts before it.
+  await at(13_000);
+  await pickTool("none");
+
+  await at(14_200);
   await next(); // -> "What we changed"
 
-  // "j5" + Enter: the jump-to-page binding, with the pending digits visible in
-  // the footer counter as they're typed. Lands on the payoff slide.
-  await at(12_000);
+  // "j6" + Enter: the jump binding, digits visible in the footer counter as
+  // they land. Goes to the media slide, which needs a beat to start playing.
+  await at(17_000);
   await controller.keyboard.press("j");
-  await at(12_500);
-  await controller.keyboard.press("5");
-  await at(13_200);
+  await at(17_500);
+  await controller.keyboard.press("6");
+  await at(18_200);
   await controller.keyboard.press("Enter");
 
-  await at(17_000);
+  await at(25_000);
+  await next(); // -> "The result"
+
+  await at(28_500);
   await next(); // -> "Questions"
 
   // Land back on slide 1 so the loop seam is invisible. firstSlide is bound to
   // Meta+ArrowLeft, which Playwright can't press portably — reuse the jump.
-  await at(20_000);
+  await at(31_000);
   await controller.keyboard.press("j");
-  await at(20_400);
+  await at(31_400);
   await controller.keyboard.press("1");
-  await at(20_900);
+  await at(31_900);
   await controller.keyboard.press("Enter");
 
   await at(DURATION_MS);
@@ -229,18 +306,22 @@ async function main() {
   fs.rmSync(OUT, { recursive: true, force: true });
   fs.mkdirSync(OUT, { recursive: true });
 
-  const harness = await startHarness();
-  process.on("exit", () => harness.kill());
-
   const browser = await chromium.launch();
   const written: string[] = [];
+  const themes = ["light", "dark"] as const;
+
   // Sequential, not parallel: two decks rendering at once makes the wall-clock
-  // choreography miss its marks on a loaded machine.
-  for (const theme of ["light", "dark"] as const) {
-    written.push(...(await record(browser, theme)));
+  // choreography miss its marks on a loaded machine. Each pass gets its own
+  // harness on its own port so no state carries between them.
+  for (const [i, theme] of themes.entries()) {
+    const { child, base } = await startHarness(PORT_BASE + i);
+    try {
+      written.push(...(await record(browser, theme, base)));
+    } finally {
+      child.kill();
+    }
   }
   await browser.close();
-  harness.kill();
 
   for (const f of written) {
     console.log(`${path.basename(f)}  ${(fs.statSync(f).size / 1e6).toFixed(2)} MB`);

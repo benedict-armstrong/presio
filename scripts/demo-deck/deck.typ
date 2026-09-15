@@ -8,7 +8,7 @@
 // Compile with: typst compile scripts/demo-deck/deck.typ
 #import "@preview/touying:0.7.4": *
 #import themes.simple: *
-#import "@preview/presio:0.2.2": speaker-notes
+#import "@preview/presio:0.2.2": media, speaker-notes
 
 #show: simple-theme.with(aspect-ratio: "16-9")
 
@@ -76,6 +76,32 @@ how many replicas we added.
 #speaker-notes[
   Sharding was the only risky one. Mention the migration took two weeks and
   shipped behind a flag.
+]
+
+== YouTube/GIF video support
+
+#v(0.4em)
+
+#grid(
+  columns: (1fr, 1fr),
+  gutter: 1.6em,
+  [
+    #media(path("demo-chart.gif"), width: 100%)
+    #text(size: 13pt, fill: gray)[an embedded GIF]
+  ],
+  [
+    #media(
+      "https://www.youtube.com/watch?v=YE7VzlLtp-4",
+      width: 100%,
+      aspect-ratio: 16 / 9,
+    )
+    #text(size: 13pt, fill: gray)[a YouTube link]
+  ],
+)
+
+#speaker-notes[
+  Both play in place — the GIF rides along inside the PDF, the YouTube one
+  is fetched at presentation time.
 ]
 
 == The result
