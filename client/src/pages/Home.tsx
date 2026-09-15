@@ -189,10 +189,7 @@ function DemoReel() {
       {/* What the audience sees, hung off the bottom-right corner so it clips
           the controller rather than covering it. On a phone there is no room to
           overlap at all, so it sits underneath instead. */}
-      <div className="mt-3 sm:mt-0 sm:absolute sm:-bottom-12 sm:-right-10 sm:w-[38%] md:-bottom-14 md:-right-14">
-        <span className="mb-1.5 block text-center text-xs text-muted-foreground sm:text-left">
-          What the audience sees
-        </span>
+      <div className="mt-3 sm:mt-0 sm:absolute sm:-bottom-12 sm:-right-10 sm:w-[46%] md:-bottom-14 md:-right-14">
         <div className="overflow-hidden rounded-lg border-2 border-background bg-card shadow-xl">
           <video
             {...shared}
@@ -204,6 +201,9 @@ function DemoReel() {
             tabIndex={-1}
           />
         </div>
+        <span className="mt-1.5 block text-center text-xs text-muted-foreground sm:text-left">
+          What the audience sees
+        </span>
       </div>
 
       {reducedMotion && !playing && (
