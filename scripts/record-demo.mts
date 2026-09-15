@@ -12,10 +12,10 @@
 //   npm run record:demo
 //
 // Boots the E2E harness itself, pointed at scripts/demo-deck (not the media
-// test fixture the specs use). Writes controller.webm / viewer.webm into
-// scripts/.demo-out, then encodes client/public/demo-controller.mp4 and
-// demo-viewer.mp4 via ffmpeg.
-import { chromium, type BrowserContext, type Page } from "@playwright/test";
+// test fixture the specs use). Records the whole sequence twice, once per
+// theme, and encodes client/public/demo-{controller,viewer}-{light,dark}.mp4
+// plus a poster for each.
+import { chromium, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -73,15 +73,8 @@ async function startHarness() {
   throw new Error(`harness did not come up on ${BASE}`);
 }
 
-async function main() {
-  fs.rmSync(OUT, { recursive: true, force: true });
-  fs.mkdirSync(OUT, { recursive: true });
-
-  const harness = await startHarness();
-  process.on("exit", () => harness.kill());
-
-  const browser = await chromium.launch();
-
+// One full pass: both windows in the given theme, recorded and encoded.
+async function record(browser: Browser, theme: "light" | "dark") {
   const controllerCtx = await browser.newContext({
     viewport: CONTROLLER,
     recordVideo: { dir: OUT, size: CONTROLLER },
@@ -99,6 +92,11 @@ async function main() {
   const viewer = await viewerCtx.newPage();
   const viewerStart = Date.now();
 
+  // ThemeProvider reads localStorage on mount, so pinning it here avoids
+  // recording whatever the machine's OS preference happens to be.
+  for (const page of [controller, viewer]) {
+    await page.addInitScript((t) => localStorage.setItem("theme", t), theme);
+  }
   await controller.addInitScript(
     ([id, token]) => {
       localStorage.setItem(`session_${id}`, JSON.stringify({ controllerToken: token }));
@@ -176,14 +174,13 @@ async function main() {
     if (!video) throw new Error(`no video recorded for ${name}`);
     await ctx.close(); // flushes the file
     const src = await video.path();
-    const dest = path.join(OUT, `${name}.webm`);
+    const dest = path.join(OUT, `${name}-${theme}.webm`);
     fs.renameSync(src, dest);
     return dest;
   };
 
   const controllerWebm = await grab(controllerCtx, controller, "controller");
   const viewerWebm = await grab(viewerCtx, viewer, "viewer");
-  await browser.close();
 
   // Trim each clip to the shared T0. The offsets differ by the few ms between
   // the two page creations, which is when recording actually began.
@@ -212,23 +209,40 @@ async function main() {
     return dest;
   };
 
-  const c = encode(controllerWebm, "demo-controller.mp4", controllerStart, CONTROLLER);
-  const v = encode(viewerWebm, "demo-viewer.mp4", viewerStart, VIEWER);
+  const c = encode(controllerWebm, `demo-controller-${theme}.mp4`, controllerStart, CONTROLLER);
+  const v = encode(viewerWebm, `demo-viewer-${theme}.mp4`, viewerStart, VIEWER);
+
+  // Poster frames for the reduced-motion path.
+  const poster = (clip: string, out: string) =>
+    execFileSync(
+      "ffmpeg",
+      ["-y", "-ss", "3", "-i", clip, "-frames:v", "1", "-q:v", "4", path.join(PUBLIC, out)],
+      { stdio: "inherit" }
+    );
+  poster(c, `demo-controller-${theme}-poster.jpg`);
+  poster(v, `demo-viewer-${theme}-poster.jpg`);
+
+  return [c, v];
+}
+
+async function main() {
+  fs.rmSync(OUT, { recursive: true, force: true });
+  fs.mkdirSync(OUT, { recursive: true });
+
+  const harness = await startHarness();
+  process.on("exit", () => harness.kill());
+
+  const browser = await chromium.launch();
+  const written: string[] = [];
+  // Sequential, not parallel: two decks rendering at once makes the wall-clock
+  // choreography miss its marks on a loaded machine.
+  for (const theme of ["light", "dark"] as const) {
+    written.push(...(await record(browser, theme)));
+  }
+  await browser.close();
   harness.kill();
 
-  // A poster frame for the reduced-motion path, taken from the controller clip.
-  execFileSync(
-    "ffmpeg",
-    ["-y", "-ss", "3", "-i", c, "-frames:v", "1", "-q:v", "4", path.join(PUBLIC, "demo-controller-poster.jpg")],
-    { stdio: "inherit" }
-  );
-  execFileSync(
-    "ffmpeg",
-    ["-y", "-ss", "3", "-i", v, "-frames:v", "1", "-q:v", "4", path.join(PUBLIC, "demo-viewer-poster.jpg")],
-    { stdio: "inherit" }
-  );
-
-  for (const f of [c, v]) {
+  for (const f of written) {
     console.log(`${path.basename(f)}  ${(fs.statSync(f).size / 1e6).toFixed(2)} MB`);
   }
 }

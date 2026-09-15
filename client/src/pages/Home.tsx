@@ -61,14 +61,6 @@ function PitchTicker() {
   );
 }
 
-// The hero demo is two recordings of the same session — the presenter's
-// controller and the audience's viewer — captured together by
-// scripts/record-demo.mts and replayed overlaid.
-const DEMO_CONTROLLER = "/demo-controller.mp4";
-const DEMO_CONTROLLER_POSTER = "/demo-controller-poster.jpg";
-const DEMO_VIEWER = "/demo-viewer.mp4";
-const DEMO_VIEWER_POSTER = "/demo-viewer-poster.jpg";
-
 
 function PlayGlyph() {
   return (
@@ -112,6 +104,50 @@ function LatexMark() {
   );
 }
 
+// Mac-style chrome for the demo frames, so each recording reads as its own
+// window instead of a bare video. Decorative: the dots are not controls.
+function WindowFrame({
+  children,
+  dense = false,
+  className = "",
+}: {
+  children: React.ReactNode;
+  dense?: boolean;
+  className?: string;
+}) {
+  const dot = dense ? "h-1.5 w-1.5" : "h-2.5 w-2.5";
+  return (
+    <div className={`overflow-hidden rounded-xl border bg-card ${className}`}>
+      <div
+        aria-hidden="true"
+        className={`flex items-center gap-1.5 border-b bg-muted/60 ${dense ? "px-2 py-1.5" : "px-3 py-2.5"}`}
+      >
+        <span className={`${dot} rounded-full bg-[#ff5f57]`} />
+        <span className={`${dot} rounded-full bg-[#febc2e]`} />
+        <span className={`${dot} rounded-full bg-[#28c840]`} />
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ThemeProvider toggles `dark` on <html>, so the demo follows it by watching
+// that class rather than prefers-color-scheme — the in-app toggle has to win.
+function useIsDark() {
+  const [dark, setDark] = useState(
+    () => typeof document !== "undefined" && document.documentElement.classList.contains("dark")
+  );
+  useEffect(() => {
+    const root = document.documentElement;
+    const read = () => setDark(root.classList.contains("dark"));
+    read();
+    const obs = new MutationObserver(read);
+    obs.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
+  return dark;
+}
+
 // Hero demo reel: two recordings of one session, the presenter's controller and
 // the audience's viewer, captured together and replayed overlaid. Autoplays
 // muted and loops, which is what a silent screen recording wants — but
@@ -129,6 +165,17 @@ function DemoReel() {
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const [playing, setPlaying] = useState(!reducedMotion);
 
+  // Each theme has its own pair of recordings. Swapping src reloads the video
+  // from zero, so the position is carried across the switch.
+  const dark = useIsDark();
+  const theme = dark ? "dark" : "light";
+  const resumeAt = useRef(0);
+  const resume = (el: HTMLVideoElement) => {
+    if (resumeAt.current > 0 && resumeAt.current < el.duration) {
+      el.currentTime = resumeAt.current;
+    }
+  };
+
   useEffect(() => {
     const lead = controllerRef.current;
     const follow = viewerRef.current;
@@ -138,6 +185,7 @@ function DemoReel() {
     // the seam it would cause. The loop wrap is not drift — skip it.
     const DRIFT_S = 0.2;
     const resync = () => {
+      resumeAt.current = lead.currentTime;
       if (follow.readyState < 1 || follow.seeking) return;
       const gap = lead.currentTime - follow.currentTime;
       if (Math.abs(gap) > DRIFT_S && Math.abs(gap) < lead.duration / 2) {
@@ -177,30 +225,37 @@ function DemoReel() {
   return (
     <div className="relative mx-auto w-full max-w-115 md:mx-0 md:max-w-none">
       {/* Presenter's controller: the deck, next slide, notes and timer. */}
-      <video
-        {...shared}
-        ref={controllerRef}
-        className="w-full rounded-xl border bg-card shadow-lg"
-        poster={DEMO_CONTROLLER_POSTER}
-        src={DEMO_CONTROLLER}
-        aria-label="Screen recording: the Presio controller, showing the current slide, the next slide, speaker notes and a running timer while the presenter moves through a deck."
-      />
+      <span className="mb-1.5 block text-center text-xs text-muted-foreground sm:text-left">
+        What you see
+      </span>
+      <WindowFrame className="shadow-lg">
+        <video
+          {...shared}
+          ref={controllerRef}
+          className="block w-full"
+          poster={`/demo-controller-${theme}-poster.jpg`}
+          src={`/demo-controller-${theme}.mp4`}
+          onLoadedMetadata={(e) => resume(e.currentTarget)}
+          aria-label="Screen recording: the Presio controller, showing the current slide, the next slide, speaker notes and a running timer while the presenter moves through a deck."
+        />
+      </WindowFrame>
 
       {/* What the audience sees, hung off the bottom-right corner so it clips
           the controller rather than covering it. On a phone there is no room to
           overlap at all, so it sits underneath instead. */}
       <div className="mt-3 sm:mt-0 sm:absolute sm:-bottom-12 sm:-right-10 sm:w-[46%] md:-bottom-14 md:-right-14">
-        <div className="overflow-hidden rounded-lg border-2 border-background bg-card shadow-xl">
+        <WindowFrame dense className="border-2 border-background shadow-xl">
           <video
             {...shared}
             ref={viewerRef}
             className="block w-full"
-            poster={DEMO_VIEWER_POSTER}
-            src={DEMO_VIEWER}
+            poster={`/demo-viewer-${theme}-poster.jpg`}
+            src={`/demo-viewer-${theme}.mp4`}
+            onLoadedMetadata={(e) => resume(e.currentTarget)}
             aria-hidden="true"
             tabIndex={-1}
           />
-        </div>
+        </WindowFrame>
         <span className="mt-1.5 block text-center text-xs text-muted-foreground sm:text-left">
           What the audience sees
         </span>
