@@ -6,7 +6,8 @@
   "scripts": {
     "build": "cd client && npm install && npm run build && cd ../server && npm install",
     "start": "cd server && npm start",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "record:demo": "tsx scripts/record-demo.mts"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",

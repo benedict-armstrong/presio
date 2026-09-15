@@ -15,3 +15,6 @@ deploy/volumes/snippets/
 # Local mode's SQLite DB + uploaded PDFs (PRESIO_MODE=local), default location
 # when LOCAL_DATA_DIR isn't set.
 /server/data/
+
+# Recording scratch from scripts/record-demo.mts
+/scripts/.demo-out/

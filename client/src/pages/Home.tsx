@@ -61,8 +61,13 @@ function PitchTicker() {
   );
 }
 
-const DEMO_VIDEO = "/demo.mp4";
-const DEMO_POSTER = "/demo-poster.jpg";
+// The hero demo is two recordings of the same session — the presenter's
+// controller and the audience's viewer — captured together by
+// scripts/record-demo.mts and replayed overlaid.
+const DEMO_CONTROLLER = "/demo-controller.mp4";
+const DEMO_CONTROLLER_POSTER = "/demo-controller-poster.jpg";
+const DEMO_VIEWER = "/demo-viewer.mp4";
+const DEMO_VIEWER_POSTER = "/demo-viewer-poster.jpg";
 
 const CUES = [
   {
@@ -330,37 +335,103 @@ function CueSketch({ kind }: { kind: keyof typeof CUE_SKETCHES }) {
   return <Sketch />;
 }
 
-// Hero demo reel. Autoplays muted and loops, which is what a silent screen
-// recording wants — but prefers-reduced-motion gets the poster frame and an
-// explicit play control instead of 27 s of unrequested movement.
+// Hero demo reel: two recordings of one session, the presenter's controller and
+// the audience's viewer, captured together and replayed overlaid. Autoplays
+// muted and loops, which is what a silent screen recording wants — but
+// prefers-reduced-motion gets the poster frames and an explicit play control
+// instead of unrequested movement.
+//
+// The clips are trimmed to a shared origin at record time, so they start
+// aligned; this only has to correct the drift that accumulates from two
+// independent decoders. The controller is the clock and the viewer chases it.
 function DemoReel() {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const controllerRef = useRef<HTMLVideoElement | null>(null);
+  const viewerRef = useRef<HTMLVideoElement | null>(null);
   const reducedMotion =
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const [playing, setPlaying] = useState(!reducedMotion);
 
+  useEffect(() => {
+    const lead = controllerRef.current;
+    const follow = viewerRef.current;
+    if (!lead || !follow) return;
+
+    // A seek mid-frame is visible, so only correct once the gap is worse than
+    // the seam it would cause. The loop wrap is not drift — skip it.
+    const DRIFT_S = 0.2;
+    const resync = () => {
+      if (follow.readyState < 1 || follow.seeking) return;
+      const gap = lead.currentTime - follow.currentTime;
+      if (Math.abs(gap) > DRIFT_S && Math.abs(gap) < lead.duration / 2) {
+        follow.currentTime = lead.currentTime;
+      }
+    };
+
+    const play = () => {
+      void follow.play().catch(() => {});
+      setPlaying(true);
+    };
+    const pause = () => {
+      follow.pause();
+      setPlaying(false);
+    };
+
+    lead.addEventListener("timeupdate", resync);
+    lead.addEventListener("play", play);
+    lead.addEventListener("pause", pause);
+    lead.addEventListener("seeked", resync);
+    return () => {
+      lead.removeEventListener("timeupdate", resync);
+      lead.removeEventListener("play", play);
+      lead.removeEventListener("pause", pause);
+      lead.removeEventListener("seeked", resync);
+    };
+  }, []);
+
+  const shared = {
+    preload: reducedMotion ? ("none" as const) : ("auto" as const),
+    autoPlay: !reducedMotion,
+    loop: true,
+    muted: true,
+    playsInline: true,
+  };
+
   return (
     <div className="relative mx-auto w-full max-w-115 md:mx-0 md:max-w-none">
+      {/* Presenter's controller: the deck, next slide, notes and timer. */}
       <video
-        ref={videoRef}
+        {...shared}
+        ref={controllerRef}
         className="w-full rounded-xl border bg-card shadow-lg"
-        poster={DEMO_POSTER}
-        src={DEMO_VIDEO}
-        preload={reducedMotion ? "none" : "auto"}
-        autoPlay={!reducedMotion}
-        loop
-        muted
-        playsInline
-        controls={reducedMotion}
-        aria-label="Screen recording: a PDF opened in Presio, slides driven from the controller while a second window mirrors them live."
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
+        poster={DEMO_CONTROLLER_POSTER}
+        src={DEMO_CONTROLLER}
+        aria-label="Screen recording: the Presio controller, showing the current slide, the next slide, speaker notes and a running timer while the presenter moves through a deck."
       />
+
+      {/* What the room sees. Overlaps the controller on desktop; on a phone
+          there is no room to overlap, so it sits underneath instead. */}
+      <div className="mt-3 sm:mt-0 sm:absolute sm:-bottom-6 sm:-right-4 sm:w-[44%] md:-bottom-8 md:-right-6">
+        <div className="overflow-hidden rounded-lg border-2 border-background bg-card shadow-xl">
+          <video
+            {...shared}
+            ref={viewerRef}
+            className="block w-full"
+            poster={DEMO_VIEWER_POSTER}
+            src={DEMO_VIEWER}
+            aria-hidden="true"
+            tabIndex={-1}
+          />
+        </div>
+        <span className="mt-1.5 block text-center text-xs text-muted-foreground sm:text-left">
+          What the room sees
+        </span>
+      </div>
+
       {reducedMotion && !playing && (
         <button
           type="button"
-          onClick={() => void videoRef.current?.play()}
+          onClick={() => void controllerRef.current?.play()}
           className="absolute inset-0 flex items-center justify-center rounded-xl"
           aria-label="Play the Presio demo"
         >
