@@ -31,35 +31,49 @@ const LATEX_PACKAGE_URL = "https://github.com/benedict-armstrong/presio-latex-pa
 const OVERLEAF_EXAMPLE_URL =
   "https://www.overleaf.com/docs?snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/main.tex&snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/presio.sty&snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/clip.gif&snip_uri[]=https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/poster.png&snip_name[]=main.tex&snip_name[]=presio.sty&snip_name[]=clip.gif&snip_name[]=poster.png&engine=pdflatex";
 
+const FEATURES = [
+  {
+    title: "Local by default",
+    body: "Decks are decoded and stored in this browser. Nothing is uploaded unless you choose to share.",
+  },
+  {
+    title: "No account, no install",
+    body: "Drop a PDF and present. Signing in to sync decks across devices and with viewers.",
+  },
+  {
+    title: "Speaker notes",
+    body: "Written straight into your Typst or LaTeX source and read back out of the PDF.",
+  },
+  {
+    title: "Embedded media",
+    body: "GIFs, MP4s and YouTube or Vimeo links play in place, inside the slide.",
+  },
+  {
+    title: "Drawing and laser pointer",
+    body: "Annotate slides from the controller",
+  },
+  {
+    title: "Presenter view",
+    body: "Current slide, next slide, notes and a running timer, on your screen only.",
+  },
+  {
+    title: "Share by code",
+    body: "One short code joins any screen. A second window, a projector, or a phone. Unlimited number of viewers.",
+  },
+  {
+    title: "Hot reload",
+    body: "Recompile the deck and Presio picks the new file up without losing your place.",
+  },
+  {
+    title: "Works offline",
+    body: "Install it as an app and present with no connection at all.",
+  },
+];
+
 const TYPST_EXAMPLE_PDF_URL =
   "https://raw.githubusercontent.com/benedict-armstrong/presio-typst-package/main/examples/plain/example.pdf";
 const LATEX_EXAMPLE_PDF_URL =
   "https://raw.githubusercontent.com/benedict-armstrong/presio-latex-package/main/starter/main.pdf";
-
-const PITCH = [
-  "No account, no install",
-  "Speaker Notes & youtube/vimeo/gifs",
-  "Local by default - PDFs stay on device",
-  "Drawing and Annotations",
-  "Easy Sharing",
-];
-
-function PitchTicker() {
-  return (
-    <div className="mb-4 overflow-hidden">
-      <div className="animate-marquee flex w-max items-center">
-        {[...PITCH, ...PITCH].map((statement, i) => (
-          <span
-            key={i}
-            className="inline-flex shrink-0 items-center gap-2 pr-6 font-mono text-xs font-semibold uppercase tracking-wide text-[var(--home2-accent)]"
-          >
-            {statement}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 
 // Official Typst logo (Simple Icons, CC0).
@@ -149,6 +163,25 @@ function useIsDark() {
   return dark;
 }
 
+// Tailwind's md breakpoint, read from JS: the parallax has to know whether the
+// two windows are overlapping or stacked, and only CSS knows that otherwise.
+// Keep in step with the md: classes on the inset in DemoReel.
+const OVERLAP_QUERY = "(min-width: 768px)";
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(
+    () => typeof window !== "undefined" && window.matchMedia(query).matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const read = () => setMatches(mq.matches);
+    read();
+    mq.addEventListener("change", read);
+    return () => mq.removeEventListener("change", read);
+  }, [query]);
+  return matches;
+}
+
 // Drift for the front window as the page scrolls: nearer things travel further,
 // so the inset rises a little faster than the frame behind it. Capped, because
 // past the hero the effect has nothing left to say. Returns 0 under
@@ -195,7 +228,8 @@ function DemoReel() {
   // from zero, so the position is carried across the switch.
   const dark = useIsDark();
   const theme = dark ? "dark" : "light";
-  const parallax = useParallax(!reducedMotion);
+  const overlapping = useMediaQuery(OVERLAP_QUERY);
+  const parallax = useParallax(!reducedMotion && overlapping);
   const resumeAt = useRef(0);
   const resume = (el: HTMLVideoElement) => {
     if (resumeAt.current > 0 && resumeAt.current < el.duration) {
@@ -220,7 +254,7 @@ function DemoReel() {
       }
     };
 
-    const play = () => void follow.play().catch(() => {});
+    const play = () => void follow.play().catch(() => { });
     const pause = () => follow.pause();
 
     lead.addEventListener("timeupdate", resync);
@@ -244,10 +278,16 @@ function DemoReel() {
   };
 
   return (
-    <div className="relative mx-auto w-full max-w-115 md:mx-0 md:max-w-none">
+    // Held a little back from full strength: the reel is supporting material
+    // next to the headline and the drop zone, not competing with them.
+    <div className="relative mx-auto w-full max-w-115 opacity-85 md:mx-0 md:max-w-none">
+      <span className="mb-3 block text-center font-mono text-xs font-semibold uppercase tracking-wide text-[var(--home2-accent)] sm:text-left">
+        How it works:
+      </span>
+
       {/* Presenter's controller: the deck, next slide, notes and timer. */}
       <span className="mb-2 block text-center text-xs font-medium text-foreground/70 sm:text-left">
-        What you see
+        Browser Window 1
       </span>
       <WindowFrame>
         <video
@@ -262,13 +302,15 @@ function DemoReel() {
       </WindowFrame>
 
       {/* What the audience sees, hung off the bottom-right corner so it clips
-          the controller rather than covering it. On a phone there is no room to
-          overlap at all, so it sits underneath instead. */}
+          the controller rather than covering it. Below md the hero is a single
+          column, so it stacks underneath instead. While the grid still spans
+          the viewport the window can only just clear the edge; from xl up there
+          is spare gutter beside the max-w-6xl grid to drift out into. */}
       <div
-        className="mt-3 sm:mt-0 sm:absolute sm:-bottom-12 sm:-right-10 sm:w-[46%] md:-bottom-14 md:-right-14"
+        className="mt-4 md:absolute md:mt-0 md:-bottom-8 md:right-0 md:w-[58%] lg:-bottom-10 lg:-right-2 lg:w-[56%] xl:-bottom-14 xl:-right-12 2xl:-right-28 min-[1800px]:-right-44"
         style={parallax ? { transform: `translate3d(0, ${parallax}px, 0)`, willChange: "transform" } : undefined}
       >
-        <WindowFrame dense className="ring-4 ring-background dark:ring-0">
+        <WindowFrame dense className="md:ring-4 md:ring-background dark:md:ring-0">
           <video
             {...shared}
             ref={viewerRef}
@@ -283,7 +325,7 @@ function DemoReel() {
         {/* Sits over the frame's shadow, so it needs more contrast than the
             muted grey the rest of the page uses for captions. */}
         <span className="relative mt-2.5 block text-center text-xs font-medium text-foreground/70 sm:text-left">
-          What the audience sees
+          Browser Window 2
         </span>
       </div>
     </div>
@@ -1043,7 +1085,7 @@ export default function Home() {
 
       {/* ---------------------------------------------------------------- hero */}
       <section className="relative px-6 pb-24 pt-16">
-        <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 md:grid-cols-[0.92fr_1.08fr] md:gap-20">
+        <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 md:grid-cols-[0.92fr_1.08fr] md:gap-20 xl:grid-cols-[1fr_1.05fr]">
           <div>
             <div className='max-w-xl'>
               <h1 className="mb-8 font-mono text-4xl font-semibold leading-[1.06] tracking-tight md:text-5xl">
@@ -1055,12 +1097,12 @@ export default function Home() {
               Drop a deck and get a controller with notes and a viewer that mirrors it in real
               time — on this laptop, or on every screen in the room.
             </p> */}
-              <div className='mb-8'>
-                <PitchTicker />
-              </div>
             </div>
 
-            <div className="py-6">
+            {/* The drop target grows with the viewport but stays in a readable
+                band: min() so the floor can never exceed the column it sits in
+                (below md that column is narrower than the floor itself). */}
+            <div className="mx-auto w-full min-w-[min(100%,320px)] max-w-[420px] py-6 md:mx-0 lg:max-w-[480px] xl:max-w-[530px]">
               {/* Live reload needs the File System Access API, which only
                   Chromium ships. Worth telling everyone else it exists —
                   it's the difference between one drop and thirty. */}
@@ -1406,6 +1448,38 @@ Hello world.
           </div>
 
           {exampleError && <p className="mt-4 text-sm text-destructive">{exampleError}</p>}
+        </ScrollReveal>
+      </section>
+
+      {/* ------------------------------------------------------------ features */}
+      <section id="features" className="px-6 py-24 md:py-28">
+        <ScrollReveal className="mx-auto max-w-6xl">
+          <div className="mb-10 max-w-2xl">
+            <h2 className="text-2xl font-semibold leading-tight tracking-tight md:text-3xl">
+              Features:
+            </h2>
+          </div>
+
+          <ul className="grid grid-cols-1 gap-x-12 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
+            {FEATURES.map((f) => (
+              <li key={f.title}>
+                <h3 className="text-[15px] font-medium">{f.title}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{f.body}</p>
+              </li>
+            ))}
+          </ul>
+
+          <p className="mt-12 text-sm text-muted-foreground">
+            Missing something?{" "}
+            <a
+              href={`${REPO_URL}/issues/new`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground underline underline-offset-4 hover:text-[var(--home2-accent)]"
+            >
+              Open a feature request on GitHub
+            </a>{" "}
+          </p>
         </ScrollReveal>
       </section>
 

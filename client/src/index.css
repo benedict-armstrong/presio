@@ -40,26 +40,6 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* Home2 marquee — holds on the first statements, then scrolls slowly. */
-@theme {
-  --animate-marquee: marquee 32s linear 2.5s infinite;
-
-  @keyframes marquee {
-    from {
-      transform: translateX(0);
-    }
-    to {
-      transform: translateX(-50%);
-    }
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .animate-marquee {
-    animation: none;
-  }
-}
-
 :root {
   --radius: 0.625rem;
   --background: oklch(0.985 0 0);
