@@ -8,23 +8,27 @@
 // less there is to correct.
 //
 // Usage:
-//   npm run build --prefix client
-//   PORT=4180 npx tsx server/e2eHarness.ts &
-//   npx tsx scripts/record-demo.mts
+//   npm run build --prefix client   # the harness serves client/dist
+//   npm run record:demo
 //
-// Writes controller.webm / viewer.webm into scripts/.demo-out, then encodes
-// client/public/demo-controller.mp4 and demo-viewer.mp4 via ffmpeg.
+// Boots the E2E harness itself, pointed at scripts/demo-deck (not the media
+// test fixture the specs use). Writes controller.webm / viewer.webm into
+// scripts/.demo-out, then encodes client/public/demo-controller.mp4 and
+// demo-viewer.mp4 via ffmpeg.
 import { chromium, type BrowserContext, type Page } from "@playwright/test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SESSION_ID, CONTROLLER_TOKEN } from "../e2e/constants.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASE = process.env.DEMO_BASE_URL || "http://localhost:4180";
+const PORT = Number(process.env.DEMO_PORT || 4181);
+const BASE = `http://localhost:${PORT}`;
 const OUT = path.resolve(__dirname, ".demo-out");
 const PUBLIC = path.resolve(__dirname, "../client/public");
+const DECK = path.resolve(__dirname, "demo-deck/deck.pdf");
+const DECK_SLIDES = 7;
 
 // The viewer is a projector (16:9); the controller is the presenter's laptop.
 const VIEWER = { width: 1280, height: 720 };
@@ -39,9 +43,42 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Boot the E2E harness on our own port, serving the demo deck.
+async function startHarness() {
+  if (!fs.existsSync(DECK)) {
+    throw new Error(`missing ${DECK} — run: typst compile scripts/demo-deck/deck.typ`);
+  }
+  const child = spawn("npx", ["tsx", path.resolve(__dirname, "../server/e2eHarness.ts")], {
+    cwd: path.resolve(__dirname, ".."),
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      E2E_PDF: DECK,
+      E2E_TOTAL_SLIDES: String(DECK_SLIDES),
+      E2E_FILENAME: "Cutting our p99 in half.pdf",
+    },
+    stdio: "ignore",
+  });
+
+  for (let i = 0; i < 60; i++) {
+    try {
+      const res = await fetch(BASE);
+      if (res.ok) return child;
+    } catch {
+      // not listening yet
+    }
+    await sleep(500);
+  }
+  child.kill();
+  throw new Error(`harness did not come up on ${BASE}`);
+}
+
 async function main() {
   fs.rmSync(OUT, { recursive: true, force: true });
   fs.mkdirSync(OUT, { recursive: true });
+
+  const harness = await startHarness();
+  process.on("exit", () => harness.kill());
 
   const browser = await chromium.launch();
 
@@ -102,25 +139,25 @@ async function main() {
   const next = () => controller.keyboard.press("ArrowRight");
 
   await at(1500);
-  await next(); // 1 -> 2, embedded GIF
+  await next(); // title -> "Where the time went"
 
   await at(5000);
-  await next(); // 2 -> 3, URL-sourced media
+  await next(); // -> "One writer, many waiters"
 
   await at(8500);
-  await next(); // 3 -> 4, the #pause reveal
+  await next(); // -> "What we changed"
 
-  // "j2" + Enter: the jump-to-page binding, with the pending digits visible in
-  // the footer counter as they're typed.
+  // "j5" + Enter: the jump-to-page binding, with the pending digits visible in
+  // the footer counter as they're typed. Lands on the payoff slide.
   await at(12_000);
   await controller.keyboard.press("j");
   await at(12_500);
-  await controller.keyboard.press("2");
+  await controller.keyboard.press("5");
   await at(13_200);
   await controller.keyboard.press("Enter");
 
   await at(17_000);
-  await next(); // 2 -> 3
+  await next(); // -> "Questions"
 
   // Land back on slide 1 so the loop seam is invisible. firstSlide is bound to
   // Meta+ArrowLeft, which Playwright can't press portably — reuse the jump.
@@ -148,8 +185,8 @@ async function main() {
   const viewerWebm = await grab(viewerCtx, viewer, "viewer");
   await browser.close();
 
-  // Trim each clip to the shared T0. The offsets differ by the few hundred ms
-  // between the two context creations.
+  // Trim each clip to the shared T0. The offsets differ by the few ms between
+  // the two page creations, which is when recording actually began.
   const encode = (webm: string, out: string, startedAt: number, size: { width: number; height: number }) => {
     const seek = Math.max(0, (t0 - startedAt + LEAD_MS) / 1000);
     const dest = path.join(PUBLIC, out);
@@ -177,6 +214,7 @@ async function main() {
 
   const c = encode(controllerWebm, "demo-controller.mp4", controllerStart, CONTROLLER);
   const v = encode(viewerWebm, "demo-viewer.mp4", viewerStart, VIEWER);
+  harness.kill();
 
   // A poster frame for the reduced-motion path, taken from the controller clip.
   execFileSync(

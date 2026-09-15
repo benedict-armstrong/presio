@@ -69,33 +69,6 @@ const DEMO_CONTROLLER_POSTER = "/demo-controller-poster.jpg";
 const DEMO_VIEWER = "/demo-viewer.mp4";
 const DEMO_VIEWER_POSTER = "/demo-viewer-poster.jpg";
 
-const CUES = [
-  {
-    label: "Local by default",
-    title: "Nothing leaves your browser.",
-    body: "Your deck is decoded locally and stored in this browser only. It works offline, opens instantly, and there's nothing to upload unless you choose to share it.",
-    sketch: "local" as const,
-  },
-  {
-    label: "One code, any screen",
-    title: "Share a code, present everywhere.",
-    body: "Log in to sync a deck online and hand out a 6-character code. Anyone who enters it watches your slides change live — no app, no sign-up.",
-    sketch: "sync" as const,
-  },
-  {
-    label: "Notes & media, built in",
-    title: "Speaker notes and video that just play.",
-    body: "Write in Typst or LaTeX, attach notes and media with one line, and Presio reads them automatically. Embedded video and GIFs stay in sync across every viewer.",
-    sketch: "notes" as const,
-  },
-  {
-    label: "Built for the podium",
-    title: "A controller that stays out of the way.",
-    body: "A presentation timer, remappable keyboard shortcuts, and a layout you can rearrange — so driving the deck never competes with presenting it.",
-    sketch: "controller" as const,
-  },
-];
-
 
 function PlayGlyph() {
   return (
@@ -137,202 +110,6 @@ function LatexMark() {
       <path d="m3.76 2.95 1.37-2c.21-.32.55-.64 1.44-.65v-.3h-2.38v.3c.4.01.62.23.62.46 0 .1-.02.12-.09.23 0 0-1.14 1.68-1.14 1.68l-1.28-1.92c-.02-.03-.07-.11-.07-.15 0-.12.22-.29.64-.3v-.3c-.34.03-1.07.03-1.45.03-.31 0-.93-.01-1.3-.03v.3h.19c.55 0 .74.07.93.35 0 0 1.83 2.77 1.83 2.77l-1.63 2.41c-.14.2-.44.66-1.44.66v.31h2.38v-.31c-.46-.01-.63-.28-.63-.46 0-.09.03-.13.1-.24l1.41-2.09 1.58 2.38c.02.04.05.08.05.11 0 .12-.22.29-.65.3v.31c.35-.03 1.08-.03 1.45-.03.42 0 .88.01 1.3.03v-.31h-.19c-.52 0-.73-.05-.94-.36 0 0-2.1-3.18-2.1-3.18z" transform="matrix(45 0 0 45 845.95 47.65)" />
     </svg>
   );
-}
-
-// Shared frame for the cue sketches: the same hatched card the placeholder
-// boxes used, so the section keeps its rhythm now that the art is real.
-function SketchFrame({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      className="relative aspect-video overflow-hidden rounded-2xl border p-5 shadow-sm"
-      style={{
-        backgroundImage:
-          "repeating-linear-gradient(45deg, var(--home2-grid) 0 1px, transparent 1px 14px)",
-        backgroundColor: "var(--card)",
-      }}
-      aria-hidden="true"
-    >
-      {children}
-    </div>
-  );
-}
-
-// A slide stand-in: two text bars on a soft gradient, matching the hero mock.
-function SlideGlyph({ className = "" }: { className?: string }) {
-  return (
-    <div
-      className={`relative overflow-hidden rounded-md border bg-gradient-to-br from-muted to-background ${className}`}
-    >
-      <div className="absolute left-[14%] right-[30%] top-[24%] h-1.5 rounded bg-border" />
-      <div className="absolute left-[14%] right-[45%] top-[38%] h-1.5 rounded bg-border" />
-    </div>
-  );
-}
-
-function LiveDot({ label = "Live" }: { label?: string }) {
-  return (
-    <span className="flex items-center gap-1 font-mono text-[9px] font-bold uppercase tracking-wide text-[var(--home2-accent)]">
-      <span className="relative flex h-1.5 w-1.5">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--home2-accent)] opacity-60" />
-        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--home2-accent)]" />
-      </span>
-      {label}
-    </span>
-  );
-}
-
-// CUE 01 — the deck never leaves the tab: one browser window, a dashed cordon
-// around it, and a server that stays empty.
-function LocalSketch() {
-  return (
-    <SketchFrame>
-      <div className="flex h-full items-center gap-4">
-        <div className="flex-1 rounded-lg border border-dashed border-[var(--home2-accent)] p-2">
-          <div className="overflow-hidden rounded-md border bg-card">
-            <div className="flex items-center gap-1.5 border-b bg-muted/50 px-2 py-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-border" />
-              <span className="h-1.5 w-1.5 rounded-full bg-border" />
-              <div className="flex-1 rounded bg-background px-1.5 py-0.5 text-center font-mono text-[8px] text-muted-foreground">
-                presio.xyz
-              </div>
-            </div>
-            <div className="p-2">
-              <SlideGlyph className="aspect-[16/9] w-full" />
-            </div>
-          </div>
-          <div className="mt-1.5 text-center font-mono text-[8.5px] uppercase tracking-wide text-[var(--home2-accent)]">
-            deck.pdf — stays here
-          </div>
-        </div>
-        <div className="flex flex-col items-center gap-1 text-muted-foreground/50">
-          <span className="font-mono text-[13px] leading-none">⇢</span>
-          <span className="font-mono text-[8px] uppercase tracking-wide">nothing</span>
-        </div>
-        <div className="flex w-[22%] flex-col items-center gap-1.5 rounded-lg border border-dashed p-2 text-muted-foreground/60">
-          <div className="h-1.5 w-full rounded bg-muted" />
-          <div className="h-1.5 w-full rounded bg-muted" />
-          <div className="h-1.5 w-full rounded bg-muted" />
-          <span className="mt-0.5 font-mono text-[8px] uppercase tracking-wide">server</span>
-        </div>
-      </div>
-    </SketchFrame>
-  );
-}
-
-// CUE 02 — one 6-character code, three screens following it.
-function SyncSketch() {
-  return (
-    <SketchFrame>
-      <div className="flex h-full flex-col items-center justify-center gap-4">
-        <div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 shadow-sm">
-          <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
-            code
-          </span>
-          <span className="font-mono text-sm font-semibold tracking-[0.2em] text-[var(--home2-accent)]">
-            A3F9K2
-          </span>
-        </div>
-        <div className="flex w-full items-end justify-center gap-3">
-          <div className="w-[26%] rounded-md border bg-card p-1 shadow-sm">
-            <SlideGlyph className="aspect-[16/10] w-full" />
-          </div>
-          <div className="w-[34%] rounded-md border bg-card p-1.5 shadow-sm ring-1 ring-[var(--home2-accent)]">
-            <SlideGlyph className="aspect-[16/10] w-full" />
-            <div className="mt-1 flex justify-center">
-              <LiveDot />
-            </div>
-          </div>
-          <div className="w-[16%] rounded-[8px] border bg-card p-1 shadow-sm">
-            <SlideGlyph className="aspect-[9/14] w-full" />
-          </div>
-        </div>
-      </div>
-    </SketchFrame>
-  );
-}
-
-// CUE 03 — one line of source turns into a slide with media plus notes.
-function NotesSketch() {
-  return (
-    <SketchFrame>
-      <div className="flex h-full flex-col gap-2.5">
-        <div className="rounded-md border bg-background px-2 py-1 font-mono text-[9px] text-muted-foreground">
-          <span className="text-[var(--home2-accent)]">#media</span>(&quot;clip.mp4&quot;) ·{" "}
-          <span className="text-[var(--home2-accent)]">#speaker-notes</span>[…]
-        </div>
-        <div className="flex min-h-0 flex-1 gap-2.5">
-          <div className="relative flex-[1.5] overflow-hidden rounded-md border bg-gradient-to-br from-muted to-background">
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full border bg-card text-[var(--home2-accent)]">
-                <PlayGlyph />
-              </div>
-            </div>
-            <div className="absolute bottom-2 left-2 right-2 h-1 rounded-full bg-border">
-              <div className="h-1 w-1/3 rounded-full bg-[var(--home2-accent)]" />
-            </div>
-          </div>
-          <div className="flex-1 rounded-md border bg-card p-2">
-            <div className="mb-1.5 font-mono text-[8.5px] uppercase tracking-wide text-muted-foreground/70">
-              Speaker notes
-            </div>
-            <div className="mb-1 h-1.5 rounded bg-muted" />
-            <div className="mb-1 h-1.5 w-[90%] rounded bg-muted" />
-            <div className="mb-1 h-1.5 w-[70%] rounded bg-muted" />
-            <div className="h-1.5 w-[80%] rounded bg-muted" />
-          </div>
-        </div>
-      </div>
-    </SketchFrame>
-  );
-}
-
-// CUE 04 — the controller layout itself: thumbnail rail, current slide, notes,
-// timer. (This is the mock that used to sit in the hero.)
-function ControllerSketch() {
-  return (
-    <SketchFrame>
-      <div className="flex h-full flex-col overflow-hidden rounded-lg border bg-card">
-        <div className="flex items-center justify-between border-b bg-muted/50 px-2.5 py-1.5">
-          <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
-            controller
-          </span>
-          <span className="rounded bg-background px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
-            12:04
-          </span>
-        </div>
-        <div className="grid min-h-0 flex-1 grid-cols-[46px_1fr_1fr] gap-px bg-border">
-          <div className="flex flex-col gap-1 bg-card p-1">
-            <div className="aspect-[4/3] rounded border bg-[var(--home2-accent-soft)] ring-1 ring-[var(--home2-accent)]" />
-            <div className="aspect-[4/3] rounded border bg-muted" />
-            <div className="aspect-[4/3] rounded border bg-muted" />
-          </div>
-          <div className="flex items-center justify-center bg-card p-2">
-            <SlideGlyph className="aspect-[16/10] w-full" />
-          </div>
-          <div className="bg-card p-2">
-            <div className="mb-1.5 font-mono text-[8.5px] uppercase tracking-wide text-muted-foreground/70">
-              Notes
-            </div>
-            <div className="mb-1 h-1.5 rounded bg-muted" />
-            <div className="mb-1 h-1.5 w-[90%] rounded bg-muted" />
-            <div className="h-1.5 w-[70%] rounded bg-muted" />
-          </div>
-        </div>
-      </div>
-    </SketchFrame>
-  );
-}
-
-const CUE_SKETCHES = {
-  local: LocalSketch,
-  sync: SyncSketch,
-  notes: NotesSketch,
-  controller: ControllerSketch,
-};
-
-function CueSketch({ kind }: { kind: keyof typeof CUE_SKETCHES }) {
-  const Sketch = CUE_SKETCHES[kind];
-  return <Sketch />;
 }
 
 // Hero demo reel: two recordings of one session, the presenter's controller and
@@ -409,9 +186,13 @@ function DemoReel() {
         aria-label="Screen recording: the Presio controller, showing the current slide, the next slide, speaker notes and a running timer while the presenter moves through a deck."
       />
 
-      {/* What the room sees. Overlaps the controller on desktop; on a phone
-          there is no room to overlap, so it sits underneath instead. */}
-      <div className="mt-3 sm:mt-0 sm:absolute sm:-bottom-6 sm:-right-4 sm:w-[44%] md:-bottom-8 md:-right-6">
+      {/* What the audience sees, hung off the bottom-right corner so it clips
+          the controller rather than covering it. On a phone there is no room to
+          overlap at all, so it sits underneath instead. */}
+      <div className="mt-3 sm:mt-0 sm:absolute sm:-bottom-12 sm:-right-10 sm:w-[38%] md:-bottom-14 md:-right-14">
+        <span className="mb-1.5 block text-center text-xs text-muted-foreground sm:text-left">
+          What the audience sees
+        </span>
         <div className="overflow-hidden rounded-lg border-2 border-background bg-card shadow-xl">
           <video
             {...shared}
@@ -423,9 +204,6 @@ function DemoReel() {
             tabIndex={-1}
           />
         </div>
-        <span className="mt-1.5 block text-center text-xs text-muted-foreground sm:text-left">
-          What the room sees
-        </span>
       </div>
 
       {reducedMotion && !playing && (
@@ -497,27 +275,6 @@ function ScrollReveal({ children, className = "" }: { children: React.ReactNode;
     </div>
   );
 }
-
-function Cue({ cue, index, flip }: { cue: (typeof CUES)[number]; index: number; flip: boolean }) {  return (
-    <ScrollReveal className="grid grid-cols-1 items-center gap-7 md:grid-cols-2 md:gap-16">
-      <div className={flip ? "md:order-2" : "md:order-1"}>
-        <div className="mb-3.5 flex items-center gap-2.5 font-mono text-xs font-semibold uppercase tracking-wide text-[var(--home2-accent)]">
-          <span className="text-muted-foreground">CUE {String(index + 1).padStart(2, "0")}</span>
-          {cue.label}
-        </div>
-        <h3 className="mb-3 text-xl font-semibold leading-tight tracking-tight md:text-2xl">
-          {cue.title}
-        </h3>
-        <p className="max-w-[42ch] text-[15px] text-muted-foreground">{cue.body}</p>
-      </div>
-      <div className={flip ? "md:order-1" : "md:order-2"}>
-        <CueSketch kind={cue.sketch} />
-      </div>
-    </ScrollReveal>
-  );
-}
-
-// Compact date for the recents list: "Aug 25" this year, otherwise "Aug 25, 2025".
 function formatRecentDate(ts: number): string {
   const d = new Date(ts);
   const opts: Intl.DateTimeFormatOptions =
@@ -1582,16 +1339,6 @@ Hello world.
 
           {exampleError && <p className="mt-4 text-sm text-destructive">{exampleError}</p>}
         </ScrollReveal>
-      </section>
-
-
-      {/* ---------------------------------------------------------------- cues */}
-      <section id="cues" className="px-6 py-24 md:py-28">
-        <div className="mx-auto flex max-w-6xl flex-col gap-28 md:gap-32">
-          {CUES.map((cue, i) => (
-            <Cue key={cue.label} cue={cue} index={i} flip={i % 2 === 1} />
-          ))}
-        </div>
       </section>
 
       <footer className="px-6 py-8">
