@@ -116,8 +116,14 @@ function WindowFrame({
   className?: string;
 }) {
   const dot = dense ? "h-1.5 w-1.5" : "h-2.5 w-2.5";
+  // Without an outline a near-white window disappears into a near-white page,
+  // so the frame is lifted instead: a layered drop shadow in light, and in dark
+  // — where a drop shadow is invisible — a faint light glow doing the same job.
+  const elevation =
+    "shadow-[0_0_0_1px_rgba(15,23,42,0.07),0_2px_4px_rgba(15,23,42,0.10),0_12px_28px_-6px_rgba(15,23,42,0.28),0_36px_72px_-20px_rgba(15,23,42,0.30)] " +
+    "dark:shadow-[0_0_0_1px_rgba(255,255,255,0.12),0_8px_24px_-4px_rgba(0,0,0,0.75),0_32px_72px_-16px_rgba(0,0,0,0.9)]";
   return (
-    <div className={`overflow-hidden rounded-xl bg-card ${className}`}>
+    <div className={`overflow-hidden rounded-xl bg-card ${elevation} ${className}`}>
       <div
         aria-hidden="true"
         className={`flex items-center gap-1.5 bg-muted/60 ${dense ? "px-2 py-1.5" : "px-3 py-2.5"}`}
@@ -228,7 +234,7 @@ function DemoReel() {
       <span className="mb-1.5 block text-center text-xs text-muted-foreground sm:text-left">
         What you see
       </span>
-      <WindowFrame className="shadow-lg">
+      <WindowFrame>
         <video
           {...shared}
           ref={controllerRef}
@@ -244,7 +250,7 @@ function DemoReel() {
           the controller rather than covering it. On a phone there is no room to
           overlap at all, so it sits underneath instead. */}
       <div className="mt-3 sm:mt-0 sm:absolute sm:-bottom-12 sm:-right-10 sm:w-[46%] md:-bottom-14 md:-right-14">
-        <WindowFrame dense className="shadow-xl ring-4 ring-background">
+        <WindowFrame dense className="ring-4 ring-background dark:ring-0">
           <video
             {...shared}
             ref={viewerRef}
