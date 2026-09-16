@@ -82,9 +82,12 @@ jobs:
           set -euo pipefail
           sed -i "s/TYPST_PACKAGE_VERSION = \"$PINNED\"/TYPST_PACKAGE_VERSION = \"$LATEST\"/" \
             client/src/lib/packageVersions.ts
-          # README.md and example/example.typ are not built from TypeScript, so
-          # they carry the literal themselves and move with the constant.
-          sed -i "s|@preview/presio:$PINNED|@preview/presio:$LATEST|g" README.md example/example.typ
+          # README.md, example/example.typ and the demo deck are not built from
+          # TypeScript, so they carry the literal themselves and move with the
+          # constant. scripts/demo-deck/deck.pdf is only rebuilt when the hero
+          # demo is re-recorded, so it can trail its source by a patch release.
+          sed -i "s|@preview/presio:$PINNED|@preview/presio:$LATEST|g" \
+            README.md example/example.typ scripts/demo-deck/deck.typ
 
       - name: Open the bump PR
         if: steps.check.outputs.behind == 'true'

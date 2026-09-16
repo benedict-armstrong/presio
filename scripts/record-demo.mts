@@ -59,7 +59,7 @@ async function startHarness(port: number) {
       PORT: String(port),
       E2E_PDF: DECK,
       E2E_TOTAL_SLIDES: String(DECK_SLIDES),
-      E2E_FILENAME: "Cutting our p99 in half.pdf",
+      E2E_FILENAME: "Presio — a quick tour.pdf",
     },
     stdio: "ignore",
   });
@@ -188,19 +188,20 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
   await at(800);
   await next();
   await at(1800);
-  await next(); // -> "Where the time went"
+  await next(); // -> "Two windows, one deck"
 
-  // Laser: sweep across the three bars as if calling them out in the room.
+  // Laser: sweep across the three window sketches as if calling them out in
+  // the room. One pass per window, alternating direction.
   await at(3200);
   await pickTool("laser");
   await at(3800);
   await trace(
-    [[0.55, 0.26], [0.70, 0.25], [0.88, 0.27], [0.74, 0.34], [0.57, 0.34], [0.60, 0.42], [0.74, 0.42]],
+    [[0.55, 0.295], [0.72, 0.29], [0.90, 0.295], [0.80, 0.445], [0.62, 0.445], [0.56, 0.615], [0.70, 0.61]],
     false
   );
 
   await at(8000);
-  await next(); // -> "One writer, many waiters"
+  await next(); // -> "Your PDF stays in the browser"
 
   // Drawing: underline the clause that matters, twice, the way a marker does.
   await at(9000);
@@ -217,7 +218,7 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
   await pickTool("none");
 
   await at(14_200);
-  await next(); // -> "What we changed"
+  await next(); // -> "While you are talking"
 
   // "j6" + Enter: the jump binding, digits visible in the footer counter as
   // they land. Goes to the media slide, which needs a beat to start playing.
@@ -229,7 +230,7 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
   await controller.keyboard.press("Enter");
 
   await at(25_000);
-  await next(); // -> "The result"
+  await next(); // -> "One import away"
 
   await at(28_500);
   await next(); // -> "Questions"
