@@ -52,6 +52,21 @@ async function startHarness(port: number) {
   if (!fs.existsSync(DECK)) {
     throw new Error(`missing ${DECK} — run: typst compile scripts/demo-deck/deck.typ`);
   }
+
+  // Refuse to record against a server this run did not start. A harness
+  // orphaned by an earlier run keeps its session — annotations included — so
+  // reusing one silently records a slide with the previous run's strokes
+  // already on it. The readiness probe below cannot tell the two apart.
+  const base = `http://localhost:${port}`;
+  const squatter = await fetch(base)
+    .then(() => true)
+    .catch(() => false);
+  if (squatter) {
+    throw new Error(
+      `something is already listening on ${base} — probably an orphaned harness. ` +
+        `Stop it first: lsof -nP -iTCP:${port} -sTCP:LISTEN`
+    );
+  }
   const child = spawn("npx", ["tsx", path.resolve(__dirname, "../server/e2eHarness.ts")], {
     cwd: path.resolve(__dirname, ".."),
     env: {
@@ -64,7 +79,6 @@ async function startHarness(port: number) {
     stdio: "ignore",
   });
 
-  const base = `http://localhost:${port}`;
   for (let i = 0; i < 60; i++) {
     try {
       const res = await fetch(base);
@@ -137,6 +151,23 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
     await anyTool.first().waitFor({ timeout: 10_000 });
   }
 
+  // The palette parks itself at the slide's top-left, where it covers the
+  // heading — and picking the pen opens a colour popover over the same corner,
+  // so a stroke aimed at the heading lands on the popover instead of the
+  // canvas. Drag it down to the bottom-left first, off camera, while the tool
+  // is still "none" and nothing is being pointed at.
+  {
+    const grip = controller.getByTestId("toolbar-drag");
+    const g = await grip.boundingBox();
+    const slide = await controller.locator(".touch-none canvas").first().boundingBox();
+    if (g && slide) {
+      await controller.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+      await controller.mouse.down();
+      await controller.mouse.move(g.x + g.width / 2, slide.y + slide.height - 80, { steps: 10 });
+      await controller.mouse.up();
+    }
+  }
+
   await controller.locator("body").click();
   await sleep(600);
 
@@ -151,9 +182,24 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
 
   // Coordinates are fractions of the RENDERED PAGE, not of the card holding it
   // — the slide is letterboxed inside that card, so card fractions land in the
-  // empty margin. The pdf.js canvas is exactly the page rect.
+  // empty margin.
+  //
+  // The pdf.js canvas is NOT the page rect: it is stretched over the whole
+  // container and drawn with `object-fit: contain`, so its client box carries
+  // the letterbox bars. The page is the contain-fitted rect inside it, which is
+  // what AnnotationOverlay normalizes against (contentRectFor in
+  // client/src/lib/annotations.ts) — so the fractions here have to be measured
+  // the same way, or every mark lands off by the bar.
   const surface = controller.locator(".touch-none canvas").first();
-  const box = await surface.boundingBox();
+  const box = await surface.evaluate((el) => {
+    const c = el as HTMLCanvasElement;
+    const r = c.getBoundingClientRect();
+    const aspect = c.height > 0 ? c.width / c.height : 0;
+    if (!aspect || r.width <= 0 || r.height <= 0) return null;
+    const width = r.width / r.height > aspect ? r.height * aspect : r.width;
+    const height = width / aspect;
+    return { x: r.x + (r.width - width) / 2, y: r.y + (r.height - height) / 2, width, height };
+  });
   if (!box) throw new Error("could not find the controller's rendered slide");
   const at_ = (fx: number, fy: number) =>
     ({ x: box.x + box.width * fx, y: box.y + box.height * fy });
@@ -183,57 +229,79 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
     if (draw) await controller.mouse.up();
   };
 
+  // Park the pointer off the rendered page. A laser dot only clears when the
+  // pointer leaves the slide (AnnotationOverlay's onPointerLeave), so without
+  // this the dot sits frozen where the sweep ended — on camera, and on the
+  // viewer until its 3s remote-hide timer fires.
+  const leaveSlide = () =>
+    controller.mouse.move(box.x + box.width / 2, Math.max(2, box.y - 40));
+
   // The deck opens on a cover and a title slide, so two presses get to the
-  // first slide with anything on it to point at.
-  await at(800);
+  // first slide with anything on it to point at. Both land well after
+  // LEAD_MS: the encoder trims that much off the head, and a press inside it
+  // is a slide the finished clip never shows.
+  await at(2600);
   await next();
-  await at(1800);
+  await at(4000);
   await next(); // -> "Two windows, one deck"
 
-  // Laser: sweep across the three window sketches as if calling them out in
-  // the room. One pass per window, alternating direction.
-  await at(3200);
+  // Laser: call out the three window sketches one at a time, alternating
+  // direction, the way a hand does in the room. The sketches are a stack of
+  // three equal-width blocks spanning x 0.53-0.93 of the page, centred at
+  // y 0.35 / 0.53 / 0.71 — measured off the rendered page, so re-measure them
+  // if the slide's layout changes.
+  await at(4400);
   await pickTool("laser");
-  await at(3800);
-  await trace(
-    [[0.55, 0.295], [0.72, 0.29], [0.90, 0.295], [0.80, 0.445], [0.62, 0.445], [0.56, 0.615], [0.70, 0.61]],
-    false
-  );
+  await at(4800);
+  await trace([[0.55, 0.347], [0.68, 0.342], [0.81, 0.350], [0.91, 0.345]], false, 100);
+  await at(5900);
+  await trace([[0.91, 0.528], [0.79, 0.533], [0.66, 0.525], [0.55, 0.530]], false, 100);
+  await at(7000);
+  await trace([[0.55, 0.709], [0.68, 0.704], [0.81, 0.712], [0.91, 0.707]], false, 100);
 
-  await at(8000);
-  await next(); // -> "Your PDF stays in the browser"
+  // Off the slide the moment the sweep lands, so the dot goes out with the
+  // gesture rather than hanging around waiting for the next slide.
+  await at(8100);
+  await leaveSlide();
 
-  // Drawing: underline the clause that matters, twice, the way a marker does.
-  await at(9000);
+  await at(8700);
+  await next(); // -> "Your PDF stays on your machine"
+
+  // Drawing: underline the heading, one confident pass with the wobble a hand
+  // leaves. The heading's ink runs x 0.058-0.550, baseline at y 0.152, so the
+  // stroke sits just under it and overshoots slightly at both ends.
+  await at(9200);
   await pickTool("pen");
-  await at(9800);
-  await trace([[0.05, 0.285], [0.32, 0.30], [0.62, 0.29], [0.92, 0.305]], true, 35);
-  await at(11_400);
-  await trace([[0.05, 0.355], [0.18, 0.368], [0.32, 0.358]], true, 35);
+  await at(9700);
+  await trace(
+    [[0.050, 0.170], [0.16, 0.177], [0.28, 0.171], [0.40, 0.178], [0.50, 0.172], [0.565, 0.176]],
+    true,
+    55
+  );
 
   // Back to the plain pointer before moving on, so the cursor is not a pen for
   // the rest of the run. The strokes themselves can stay: the clip is linear,
   // so this slide is never revisited and the loop restarts before it.
-  await at(13_000);
+  await at(11_000);
   await pickTool("none");
 
-  await at(14_200);
+  await at(12_000);
   await next(); // -> "While you are talking"
 
   // "j6" + Enter: the jump binding, digits visible in the footer counter as
   // they land. Goes to the media slide, which needs a beat to start playing.
-  await at(17_000);
+  await at(16_500);
   await controller.keyboard.press("j");
-  await at(17_500);
+  await at(17_000);
   await controller.keyboard.press("6");
-  await at(18_200);
+  await at(17_700);
   await controller.keyboard.press("Enter");
 
   await at(25_000);
-  await next(); // -> "One import away"
+  await next(); // -> "Try it on your own deck!"
 
   await at(28_500);
-  await next(); // -> "Questions"
+  await next(); // -> "Questions?"
 
   // Land back on slide 1 so the loop seam is invisible. firstSlide is bound to
   // Meta+ArrowLeft, which Playwright can't press portably — reuse the jump.
