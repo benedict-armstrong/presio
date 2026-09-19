@@ -10,18 +10,18 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@sentry/node": "^10.70.0",
-    "@supabase/supabase-js": "^2.112.3",
+    "@sentry/node": "^10.75.0",
+    "@supabase/supabase-js": "^2.116.0",
     "better-sqlite3": "^13.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "helmet": "^8.3.0",
-    "multer": "^2.1.1",
+    "multer": "^2.4.0",
     "nanoid": "^6.0.1",
-    "pdfjs-dist": "^5.5.207",
+    "pdfjs-dist": "^5.7.284",
     "socket.io": "^4.8.3",
-    "zod": "^4.4.3"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -31,7 +31,7 @@
     "@types/supertest": "^7.2.1",
     "socket.io-client": "^4.8.3",
     "supertest": "^7.2.2",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"
   }
