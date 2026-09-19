@@ -1,0 +1,150 @@
+import { test, expect } from "@playwright/test";
+import { newSession, openController, openViewer, waitForSlide } from "./helpers";
+
+// The controller is a presenter's dashboard, not just a remote: notes to read
+// from, a clock to pace against, and two keys that take over the room's screen.
+// Each of these either shows something only the presenter sees, or changes what
+// the audience sees — so each is worth its own assertion.
+
+test("speaker notes follow the deck and come from the PDF's own attachments", async ({
+  browser,
+  request,
+}) => {
+  const sessionId = await newSession(request);
+  const ctx = await browser.newContext();
+  const controller = await openController(ctx, sessionId);
+  await waitForSlide(controller);
+
+  const notes = controller.getByTestId("speaker-notes");
+
+  // The fixture deck carries notes on slides 2 and 3 only, so slide 1 offers
+  // the empty-state instead of a notes body.
+  await expect(notes).toHaveCount(0);
+  await expect(controller.getByText("Click to add speaker notes.")).toBeVisible();
+
+  await controller.locator("body").click();
+  await controller.keyboard.press("ArrowRight");
+
+  // Slide 2's sidecar has two notes blocks, which are concatenated into one.
+  await expect(notes).toContainText("Remember to introduce yourself");
+  await expect(notes).toContainText("should be concatenated");
+
+  await controller.keyboard.press("ArrowRight");
+  await expect(notes).toContainText("This GIF is embedded directly in the PDF.");
+
+  // Notes are the presenter's alone — they must never reach the projector.
+  const viewer = await openViewer(ctx, sessionId);
+  await waitForSlide(viewer);
+  await expect(viewer.getByTestId("speaker-notes")).toHaveCount(0);
+  await expect(viewer.getByText("This GIF is embedded directly")).toHaveCount(0);
+
+  await ctx.close();
+});
+
+test("the talk timer starts, counts, and resets", async ({ browser, request }) => {
+  const sessionId = await newSession(request);
+  const ctx = await browser.newContext();
+  const controller = await openController(ctx, sessionId);
+  await waitForSlide(controller);
+
+  const elapsed = controller.getByTestId("timer-elapsed");
+  await expect(elapsed).toHaveText("00:00");
+
+  await controller.getByRole("button", { name: "Start", exact: true }).click();
+
+  // Running, not just relabelled: the readout has to actually move.
+  await expect(elapsed).not.toHaveText("00:00", { timeout: 5_000 });
+  await expect(controller.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+
+  await controller.getByRole("button", { name: "Stop", exact: true }).click();
+  const stopped = await elapsed.textContent();
+
+  // Stopped means stopped — the clock must hold where it was left.
+  await controller.waitForTimeout(1500);
+  await expect(elapsed).toHaveText(stopped ?? "");
+
+  await controller.getByRole("button", { name: "Reset", exact: true }).click();
+  await expect(elapsed).toHaveText("00:00");
+
+  await ctx.close();
+});
+
+test("blanking the screen takes over the viewer and releases it again", async ({
+  browser,
+  request,
+}) => {
+  const sessionId = await newSession(request);
+  const ctx = await browser.newContext();
+  const controller = await openController(ctx, sessionId);
+  const viewer = await openViewer(ctx, sessionId);
+  await waitForSlide(controller);
+  await waitForSlide(viewer);
+
+  const blanked = viewer.getByText("Screen blanked by presenter");
+  await expect(blanked).toBeHidden();
+
+  // "b" is the key you hit when the room should be looking at you instead.
+  await controller.locator("body").click();
+  await controller.keyboard.press("b");
+  await expect(blanked).toBeVisible();
+
+  await controller.keyboard.press("b");
+  await expect(blanked).toBeHidden();
+
+  await ctx.close();
+});
+
+test("the join code can be thrown up on the viewer", async ({ browser, request }) => {
+  const sessionId = await newSession(request);
+  const ctx = await browser.newContext();
+  const controller = await openController(ctx, sessionId);
+  const viewer = await openViewer(ctx, sessionId);
+  await waitForSlide(controller);
+  await waitForSlide(viewer);
+
+  const code = viewer.getByText("Session code");
+  await expect(code).toBeHidden();
+
+  await controller.locator("body").click();
+  await controller.keyboard.press("c");
+
+  // The projector shows the code itself, so the room can type it in.
+  await expect(code).toBeVisible();
+  await expect(viewer.getByText(sessionId, { exact: true })).toBeVisible();
+
+  await controller.keyboard.press("c");
+  await expect(code).toBeHidden();
+
+  await ctx.close();
+});
+
+test("the drawing palette collapses to the active tool and reopens", async ({
+  browser,
+  request,
+}) => {
+  const sessionId = await newSession(request);
+  const ctx = await browser.newContext();
+  const controller = await openController(ctx, sessionId);
+  await waitForSlide(controller);
+
+  // All four tools are offered while the palette is expanded.
+  for (const key of ["none", "laser", "pen", "highlighter"]) {
+    await expect(controller.getByTestId(`tool-${key}`)).toBeVisible();
+  }
+
+  // Picking one and moving the pointer away collapses the palette to just that
+  // tool, so it stops covering the slide mid-talk.
+  await controller.getByTestId("tool-pen").click();
+  await controller.mouse.move(5, 5);
+
+  const collapsed = controller.getByTestId("tool-collapsed");
+  await expect(collapsed).toBeVisible();
+  await expect(controller.getByTestId("tool-laser")).toBeHidden();
+
+  // And it reopens on demand, with the pen still the active tool.
+  await collapsed.click();
+  await expect(controller.getByTestId("tool-pen")).toHaveAttribute("aria-pressed", "true");
+  await expect(controller.getByTestId("tool-laser")).toBeVisible();
+
+  await ctx.close();
+});

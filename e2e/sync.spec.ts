@@ -1,29 +1,19 @@
 import { test, expect } from "@playwright/test";
-import { SESSION_ID, CONTROLLER_TOKEN } from "./constants";
+import { newSession, openController, openViewer, waitForSlide } from "./helpers";
 
 // The controller and viewer run in separate browser contexts, so they share no
 // BroadcastChannel (that's per-origin-per-profile) — the only path between them
 // is the server socket. A slide change propagating from one to the other
 // therefore exercises the full controller -> server -> viewer round-trip.
 
-test("controller advancing a slide syncs to the viewer", async ({ browser }) => {
-  const controllerCtx = await browser.newContext();
-  const viewerCtx = await browser.newContext();
+test("controller advancing a slide syncs to the viewer", async ({ browser, request }) => {
+  const sessionId = await newSession(request);
+  const ctx = await browser.newContext();
 
-  // The controller proves ownership with the token stored in localStorage.
-  const controller = await controllerCtx.newPage();
-  await controller.addInitScript(
-    ([id, token]) => {
-      localStorage.setItem(`session_${id}`, JSON.stringify({ controllerToken: token }));
-      // Skip the first-run tutorial overlay so it can't swallow key presses.
-      localStorage.setItem("presio_controller_onboarded", "true");
-    },
-    [SESSION_ID, CONTROLLER_TOKEN]
-  );
-  await controller.goto(`/s/${SESSION_ID}?role=controller`);
-
-  const viewer = await viewerCtx.newPage();
-  await viewer.goto(`/s/${SESSION_ID}?role=viewer`);
+  const controller = await openController(ctx, sessionId);
+  const viewer = await openViewer(ctx, sessionId);
+  await waitForSlide(controller);
+  await waitForSlide(viewer);
 
   // Both load on slide 1.
   const viewerSlide = viewer.getByTestId("viewer-slide");
@@ -38,6 +28,5 @@ test("controller advancing a slide syncs to the viewer", async ({ browser }) => 
   await controller.keyboard.press("ArrowLeft");
   await expect(viewerSlide).toHaveAttribute("data-slide", "1");
 
-  await controllerCtx.close();
-  await viewerCtx.close();
+  await ctx.close();
 });

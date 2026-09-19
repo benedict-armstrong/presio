@@ -31,22 +31,24 @@ const filename = process.env.E2E_FILENAME || "E2E Deck";
 // client and server share an origin and this isn't needed.
 process.env.ALLOWED_ORIGIN = `http://localhost:${port}`;
 
-const fake = new FakeSupabase([
-  {
-    id: SESSION_ID,
-    pdf_path: "",
-    pdf_url: "/test.pdf",
-    filename,
-    total_slides: totalSlides,
-    current_slide: 1,
-    note_prefix: "note:",
-    local: false,
-    controller_token: CONTROLLER_TOKEN,
-    passphrase: "E2EPASS1",
-    user_id: null,
-    expires_at: new Date(Date.now() + 86_400_000).toISOString(),
-  },
-]);
+// One session shape, minted under different ids. SESSION_ID is the fixed one
+// scripts/record-demo.mts drives; the specs mint their own (see below).
+const sessionRow = (id: string) => ({
+  id,
+  pdf_path: "",
+  pdf_url: "/test.pdf",
+  filename,
+  total_slides: totalSlides,
+  current_slide: 1,
+  note_prefix: "note:",
+  local: false,
+  controller_token: CONTROLLER_TOKEN,
+  passphrase: "E2EPASS1",
+  user_id: null,
+  expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+});
+
+const fake = new FakeSupabase([sessionRow(SESSION_ID)]);
 
 const io = new Server();
 const inner = createApp({ supabase: fake as unknown as SupabaseClient, io });
@@ -56,6 +58,21 @@ const app = express();
 app.get("/test.pdf", (_req, res) => {
   res.sendFile(deckPath);
 });
+
+// Test-only: mint an isolated session.
+//
+// Playwright runs `fullyParallel`, and a session carries mutable state the
+// specs care about — current slide, annotations, timer. Sharing one id across
+// concurrent tests made them fail only when run together (a second controller
+// joining mid-test), which is the worst kind of flake. Each spec takes a fresh
+// id instead, so nothing carries between tests or across workers.
+let minted = 0;
+app.post("/__e2e/session", (_req, res) => {
+  const id = `E2E${String(minted++).padStart(3, "0")}`;
+  fake.seed(sessionRow(id));
+  res.json({ id, controllerToken: CONTROLLER_TOKEN });
+});
+
 app.use(inner);
 
 const server = http.createServer(app);

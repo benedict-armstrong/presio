@@ -135,6 +135,7 @@ export function TimerCard({
     <div className="flex flex-col h-full gap-2">
       <div className="flex flex-col items-center justify-center flex-1 gap-2">
         <span
+          data-testid="timer-elapsed"
           className="font-mono tabular-nums text-2xl font-semibold transition-colors duration-500"
           style={warningStyle(warning)}
         >

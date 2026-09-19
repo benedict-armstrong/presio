@@ -231,6 +231,8 @@ export function AnnotationOverlay({
   const dot = (pt: LaserPoint, key: string) => (
     <span
       key={key}
+      data-testid="laser-dot"
+      data-laser={key}
       className="absolute size-4 -ml-2 -mt-2 rounded-full bg-red-500 shadow-[0_0_10px_3px_rgba(239,68,68,0.65)] ring-2 ring-white/60 pointer-events-none"
       style={{ left: pt.x * rect.width, top: pt.y * rect.height }}
     />
