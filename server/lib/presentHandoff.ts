@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Server } from "socket.io";
 import { nanoid } from "nanoid";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { openPdf, closePdf } from "./pdfDoc.js";
 import { isValidTotalSlides, MAX_TOTAL_SLIDES } from "../validation.js";
 import { safeEqual } from "../auth.js";
 import type { SocketState } from "../socket.js";
@@ -21,9 +21,9 @@ export async function createPresentHandoff(
 ): Promise<PresentResult> {
   let totalSlides: number;
   try {
-    const doc = await getDocument({ data: new Uint8Array(opts.buffer) }).promise;
+    const doc = await openPdf({ data: new Uint8Array(opts.buffer) });
     totalSlides = doc.numPages;
-    doc.destroy();
+    void closePdf(doc);
   } catch {
     return { ok: false, status: 422, error: "Could not parse PDF" };
   }
@@ -133,9 +133,9 @@ export async function updatePresentDeck(
 
   let totalSlides: number;
   try {
-    const doc = await getDocument({ data: new Uint8Array(opts.buffer) }).promise;
+    const doc = await openPdf({ data: new Uint8Array(opts.buffer) });
     totalSlides = doc.numPages;
-    doc.destroy();
+    void closePdf(doc);
   } catch {
     return { ok: false, status: 422, error: "Could not parse PDF" };
   }

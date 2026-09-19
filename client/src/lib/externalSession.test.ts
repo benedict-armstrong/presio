@@ -1,32 +1,37 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock pdfjs-dist so loadExternalPdfMeta doesn't actually fetch/parse a PDF.
-// We capture the URL it was asked to load to assert URL normalization.
-const getDocument = vi.fn();
-vi.mock("pdfjs-dist", () => ({
-  getDocument: (arg: unknown) => getDocument(arg),
+// Mock our own pdf module so loadExternalPdfMeta doesn't actually fetch/parse
+// a PDF. openPdf/destroyPdf are the seam the app loads documents through (they
+// own the pdf.js loading task), so stubbing them here also keeps the pdf.js
+// worker side-effect out of the test environment.
+//
+// We capture the source openPdf was asked for to assert URL normalization.
+const openPdf = vi.fn();
+const destroyPdf = vi.fn();
+vi.mock("@/lib/pdf", () => ({
+  openPdf: (arg: unknown) => openPdf(arg),
+  destroyPdf: (arg: unknown) => destroyPdf(arg),
 }));
-// `@/lib/pdf` is imported for its worker side-effect only; stub it out.
-vi.mock("@/lib/pdf", () => ({}));
 
 import { loadExternalPdfMeta } from "./externalSession";
 
 function mockPdf(numPages: number) {
-  getDocument.mockReturnValue({
-    promise: Promise.resolve({ numPages, destroy: vi.fn() }),
-  });
+  openPdf.mockResolvedValue({ numPages });
 }
 
 describe("loadExternalPdfMeta", () => {
-  beforeEach(() => getDocument.mockReset());
+  beforeEach(() => {
+    openPdf.mockReset();
+    destroyPdf.mockReset();
+  });
 
   it("rewrites a github.com blob URL to raw.githubusercontent.com", async () => {
     mockPdf(5);
     const meta = await loadExternalPdfMeta(
       "https://github.com/me/repo/blob/main/slides/deck.pdf"
     );
-    expect(getDocument).toHaveBeenCalledWith(
+    expect(openPdf).toHaveBeenCalledWith(
       expect.objectContaining({
         url: "https://raw.githubusercontent.com/me/repo/main/slides/deck.pdf",
       })
@@ -36,6 +41,8 @@ describe("loadExternalPdfMeta", () => {
     );
     expect(meta.totalSlides).toBe(5);
     expect(meta.filename).toBe("deck");
+    // The document is released once its page count has been read.
+    expect(destroyPdf).toHaveBeenCalled();
   });
 
   it("rewrites a github.com raw URL too", async () => {
@@ -49,7 +56,7 @@ describe("loadExternalPdfMeta", () => {
   it("passes non-github HTTPS URLs through unchanged", async () => {
     mockPdf(3);
     const meta = await loadExternalPdfMeta("https://example.com/files/talk.pdf");
-    expect(getDocument).toHaveBeenCalledWith(
+    expect(openPdf).toHaveBeenCalledWith(
       expect.objectContaining({ url: "https://example.com/files/talk.pdf" })
     );
     expect(meta.url).toBe("https://example.com/files/talk.pdf");
@@ -66,7 +73,7 @@ describe("loadExternalPdfMeta", () => {
     await expect(loadExternalPdfMeta("http://example.com/x.pdf")).rejects.toThrow(
       /https/
     );
-    expect(getDocument).not.toHaveBeenCalled();
+    expect(openPdf).not.toHaveBeenCalled();
   });
 
   it("rejects malformed URLs", async () => {
@@ -74,7 +81,7 @@ describe("loadExternalPdfMeta", () => {
   });
 
   it("throws a friendly error when the PDF fails to load", async () => {
-    getDocument.mockReturnValue({ promise: Promise.reject(new Error("CORS")) });
+    openPdf.mockRejectedValue(new Error("CORS"));
     await expect(
       loadExternalPdfMeta("https://example.com/x.pdf")
     ).rejects.toThrow(/Couldn't load a PDF/);

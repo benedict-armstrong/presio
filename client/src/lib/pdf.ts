@@ -4,6 +4,78 @@ import { typstAstToMarkdown } from "./typstNotes";
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
 
+type DocumentSource = Parameters<typeof getDocument>[0];
+
+/**
+ * The loading task that owns each open document.
+ *
+ * pdf.js v6 moved `destroy()` off PDFDocumentProxy and onto the loading task.
+ * Documents are handed around this app as plain proxies — held in React state,
+ * stashed in refs, prefetched and adopted later — so threading a second value
+ * alongside every one of them would touch the whole presentation lifecycle.
+ * Keeping the pairing here instead means callers still hold a document and say
+ * destroyPdf(doc), exactly as they said doc.destroy() before.
+ *
+ * Weak, so a document dropped without being destroyed doesn't pin its task.
+ */
+const loadingTasks = new WeakMap<PDFDocumentProxy, ReturnType<typeof getDocument>>();
+
+/** Open a PDF and remember the task that owns it. */
+export async function openPdf(source: DocumentSource): Promise<PDFDocumentProxy> {
+  const task = getDocument(source);
+  const doc = await task.promise;
+  loadingTasks.set(doc, task);
+  return doc;
+}
+
+/**
+ * Release a document's worker. Safe to call with null/undefined, and safe to
+ * call twice — both of which the prefetch paths rely on.
+ */
+export function destroyPdf(doc: PDFDocumentProxy | null | undefined): void {
+  if (!doc) return;
+  void loadingTasks.get(doc)?.destroy();
+}
+
+/** One of a deck's sidecar attachments, with its bytes resolved. */
+export interface PdfAttachment {
+  filename: string;
+  content: Uint8Array;
+}
+
+/**
+ * Whether the deck carries any sidecar attachments at all.
+ *
+ * Separate from readAttachments() because the answer is just a count: pulling
+ * every attachment's bytes to find out would fetch the whole sidecar payload
+ * for a boolean.
+ */
+export async function hasAttachments(pdf: PDFDocumentProxy): Promise<boolean> {
+  const raw = await pdf.getAttachments();
+  return !!raw && raw.size > 0;
+}
+
+/**
+ * Read a deck's attachments, bytes included.
+ *
+ * v6 returns a Map rather than a plain object, and an entry's `content` is
+ * only populated when the bytes happen to be loaded already. The old
+ * `Object.keys`/`Object.values` call sites read a Map as empty, which turned a
+ * deck full of notes into a deck with none — silently, because the casts they
+ * used hid the change from the compiler.
+ */
+export async function readAttachments(pdf: PDFDocumentProxy): Promise<PdfAttachment[]> {
+  const raw = await pdf.getAttachments();
+  if (!raw) return [];
+
+  const out: PdfAttachment[] = [];
+  for (const [id, entry] of raw) {
+    const content = entry.content ?? (await pdf.getAttachmentContent(id));
+    if (content) out.push({ filename: entry.filename ?? id, content });
+  }
+  return out;
+}
+
 // Cached *source* canvases, keyed by page+scale. These are never mounted in the
 // DOM: each renderPage() call returns a fresh copy (see below). A canvas is a
 // DOM node that can only live in one place, so handing the same cached element
@@ -32,11 +104,11 @@ export async function loadPdf(url: string): Promise<PDFDocumentProxy> {
   // with HTTP range requests. Mobile Safari/iOS mishandles cross-origin 206
   // Partial Content responses, so range-loaded PDFs that work on desktop fail
   // on iOS. Presentations are small, so a single GET is cheap and robust.
-  return getDocument({ url, disableRange: true, disableStream: true }).promise;
+  return openPdf({ url, disableRange: true, disableStream: true });
 }
 
 export async function loadPdfData(data: Uint8Array): Promise<PDFDocumentProxy> {
-  return getDocument({ data }).promise;
+  return openPdf({ data });
 }
 
 /**
@@ -137,31 +209,25 @@ async function loadNotesFromAttachments(pdf: PDFDocumentProxy): Promise<Map<numb
   if (notesCachePdf === pdf && notesCache) return notesCache;
 
   const map = new Map<number, string>();
-  const attachments = await pdf.getAttachments();
-  if (attachments) {
-    for (const [, attachment] of Object.entries(
-      attachments as Record<string, { filename?: string; content: Uint8Array }>
-    )) {
-      const match = (attachment.filename ?? "").match(/^notes-slide-(\d+)\.json$/);
-      if (!match) continue;
-      try {
-        const text = new TextDecoder().decode(attachment.content);
-        const data = JSON.parse(text);
-        const slideNum = parseInt(match[1], 10);
-        let rendered: string;
-        if (typeof data.notes === "string") {
-          rendered = data.notes;
-        } else if (Array.isArray(data.notes)) {
-          rendered = data.notes
-            .map((n: unknown) => typstAstToMarkdown(n))
-            .filter((s: string) => s.length > 0)
-            .join("\n\n---\n\n");
-        } else {
-          rendered = typstAstToMarkdown(data.notes);
-        }
-        map.set(slideNum, rendered);
-      } catch { /* skip malformed */ }
-    }
+  for (const { filename, content } of await readAttachments(pdf)) {
+    const match = filename.match(/^notes-slide-(\d+)\.json$/);
+    if (!match) continue;
+    try {
+      const data = JSON.parse(new TextDecoder().decode(content));
+      const slideNum = parseInt(match[1], 10);
+      let rendered: string;
+      if (typeof data.notes === "string") {
+        rendered = data.notes;
+      } else if (Array.isArray(data.notes)) {
+        rendered = data.notes
+          .map((n: unknown) => typstAstToMarkdown(n))
+          .filter((s: string) => s.length > 0)
+          .join("\n\n---\n\n");
+      } else {
+        rendered = typstAstToMarkdown(data.notes);
+      }
+      map.set(slideNum, rendered);
+    } catch { /* skip malformed */ }
   }
 
   notesCache = map;
@@ -273,31 +339,24 @@ export async function loadMediaPlacements(
   if (mediaCachePdf === pdf && mediaCache) return mediaCache;
   revokeMediaUrls();
 
-  const attachments = await pdf.getAttachments();
   const binaries = new Map<string, string>(); // filename -> blob URL
   const metas: MediaMetaJson[] = [];
 
-  if (attachments) {
-    for (const [, att] of Object.entries(
-      attachments as Record<string, { filename?: string; content: Uint8Array }>
-    )) {
-      const name: string = att.filename ?? "";
-      if (/^media-slide-\d+-.+\.json$/.test(name)) {
-        try {
-          const text = new TextDecoder().decode(att.content);
-          metas.push(JSON.parse(text));
-        } catch { /* skip */ }
-      } else if (/^media-.+\.(gif|mp4|webm)$/i.test(name)) {
-        if (binaries.has(name)) continue;
-        const mime =
-          /\.gif$/i.test(name) ? "image/gif" :
-          /\.mp4$/i.test(name) ? "video/mp4" :
-          /\.webm$/i.test(name) ? "video/webm" : "application/octet-stream";
-        const blob = new Blob([att.content as BlobPart], { type: mime });
-        const url = URL.createObjectURL(blob);
-        mediaBlobUrls.push(url);
-        binaries.set(name, url);
-      }
+  for (const { filename: name, content } of await readAttachments(pdf)) {
+    if (/^media-slide-\d+-.+\.json$/.test(name)) {
+      try {
+        metas.push(JSON.parse(new TextDecoder().decode(content)));
+      } catch { /* skip */ }
+    } else if (/^media-.+\.(gif|mp4|webm)$/i.test(name)) {
+      if (binaries.has(name)) continue;
+      const mime =
+        /\.gif$/i.test(name) ? "image/gif" :
+        /\.mp4$/i.test(name) ? "video/mp4" :
+        /\.webm$/i.test(name) ? "video/webm" : "application/octet-stream";
+      const blob = new Blob([content as BlobPart], { type: mime });
+      const url = URL.createObjectURL(blob);
+      mediaBlobUrls.push(url);
+      binaries.set(name, url);
     }
   }
 

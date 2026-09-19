@@ -4,6 +4,7 @@
 // fix their Typst source.
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import { readAttachments } from "./pdf";
 import { typstAstToMarkdown } from "./typstNotes";
 
 export type Validity = "valid" | "warning" | "invalid";
@@ -252,9 +253,9 @@ function inspectBinary(
 
 export async function inspectAttachments(pdf: PDFDocumentProxy): Promise<DeckReport> {
   const pageCount = pdf.numPages;
-  const rawAttachments = await pdf.getAttachments() as Record<string, { filename?: string; content: Uint8Array }> | null;
+  const entries = await readAttachments(pdf);
 
-  if (!rawAttachments || Object.keys(rawAttachments).length === 0) {
+  if (entries.length === 0) {
     const pages: PageReport[] = Array.from({ length: pageCount }, (_, i) => ({
       page: i + 1,
       notes: null,
@@ -262,11 +263,6 @@ export async function inspectAttachments(pdf: PDFDocumentProxy): Promise<DeckRep
     }));
     return { pageCount, pages, orphans: [], binaries: new Map(), summary: { valid: 0, warning: 0, invalid: 0, total: 0 } };
   }
-
-  const entries = Object.values(rawAttachments).map((att) => ({
-    filename: att.filename ?? "",
-    content: att.content,
-  }));
 
   const allNames = new Set(entries.map((e) => e.filename));
 

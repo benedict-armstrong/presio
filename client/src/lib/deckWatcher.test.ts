@@ -1,17 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// pdf.js is the watcher's "is this a complete document?" gate. Stub it so a
-// test can decide, per call, whether the current bytes parse.
+// pdf.js is the watcher's "is this a complete document?" gate. Stub it at our
+// own seam — openPdf/destroyPdf own the pdf.js loading task — so a test can
+// decide, per call, whether the current bytes parse, and so the pdf.js worker
+// side-effect stays out of the test environment.
 const parseOk = { value: true };
 const destroy = vi.fn();
-vi.mock("pdfjs-dist", () => ({
-  getDocument: () => ({
-    promise: parseOk.value
-      ? Promise.resolve({ destroy })
+vi.mock("@/lib/pdf", () => ({
+  openPdf: () =>
+    parseOk.value
+      ? Promise.resolve({})
       : Promise.reject(new Error("Invalid PDF structure")),
-  }),
+  destroyPdf: () => destroy(),
 }));
-vi.mock("@/lib/pdf", () => ({}));
 
 const { DeckWatcher } = await import("@/lib/deckWatcher");
 

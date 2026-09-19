@@ -3,7 +3,7 @@ import multer from "multer";
 import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { nanoid } from "nanoid";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { openPdf, closePdf } from "../lib/pdfDoc.js";
 import { isValidHttpsUrl, isValidTotalSlides, MAX_TOTAL_SLIDES } from "../validation.js";
 import { getBearerToken, requireUser, resolveOptionalUserId, safeEqual } from "../auth.js";
 import { isLocalMode } from "../local/mode.js";
@@ -354,9 +354,9 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
 
       let totalSlides: number;
       try {
-        const doc = await getDocument({ data: new Uint8Array(file.buffer) }).promise;
+        const doc = await openPdf({ data: new Uint8Array(file.buffer) });
         totalSlides = doc.numPages;
-        doc.destroy();
+        void closePdf(doc);
       } catch {
         res.status(400).json({ error: "The file could not be read as a PDF" });
         return;
@@ -596,9 +596,9 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       }
 
       const pdfPath = `${row.id}.pdf`;
-      const doc = await getDocument({ data: new Uint8Array(file.buffer) }).promise;
+      const doc = await openPdf({ data: new Uint8Array(file.buffer) });
       const totalSlides = doc.numPages;
-      doc.destroy();
+      void closePdf(doc);
       if (!isValidTotalSlides(totalSlides)) {
         res.status(400).json({ error: `PDF exceeds the ${MAX_TOTAL_SLIDES}-page limit` });
         return;
@@ -710,9 +710,9 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
 
       let totalSlides: number;
       try {
-        const doc = await getDocument({ data: new Uint8Array(file.buffer) }).promise;
+        const doc = await openPdf({ data: new Uint8Array(file.buffer) });
         totalSlides = doc.numPages;
-        doc.destroy();
+        void closePdf(doc);
       } catch {
         res.status(400).json({ error: "The file could not be read as a PDF" });
         return;

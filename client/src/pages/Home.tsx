@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { getDocument } from "pdfjs-dist";
+import { openPdf, destroyPdf } from "@/lib/pdf";
 import { ExternalLink, RefreshCw, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -687,9 +687,9 @@ export default function Home() {
       } catch {
         // No crypto.subtle (plain-http origins): track without a fingerprint.
       }
-      const doc = await getDocument({ data: new Uint8Array(buf) }).promise;
+      const doc = await openPdf({ data: new Uint8Array(buf) });
       const totalSlides = doc.numPages;
-      doc.destroy();
+      destroyPdf(doc);
       const filename = file.name.replace(/\.pdf$/i, "");
       if (target.kind === "local") {
         try {
@@ -861,9 +861,9 @@ export default function Home() {
           // without a fingerprint rather than blocking it.
         }
         setProgress(100);
-        const doc = await getDocument({ data: new Uint8Array(buf) }).promise;
+        const doc = await openPdf({ data: new Uint8Array(buf) });
         const totalSlides = doc.numPages;
-        doc.destroy();
+        destroyPdf(doc);
         const filename = file.name.replace(/\.pdf$/i, "");
 
         // Fork on a re-upload before anything is created: the recents list is

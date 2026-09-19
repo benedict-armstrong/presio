@@ -11,7 +11,7 @@
 // before it is reported. A parse failure means the write probably isn't done:
 // keep waiting silently.
 
-import { getDocument } from "pdfjs-dist";
+import { openPdf, destroyPdf } from "./pdf";
 import "@/lib/pdf"; // ensure the pdf.js worker is configured before parsing
 
 // lib.dom.d.ts stops short of the picker / permission / drag-drop surface of
@@ -169,8 +169,8 @@ export class DeckWatcher {
     try {
       const file = await this.handle.getFile();
       const meta = { lastModified: file.lastModified, size: file.size };
-      const doc = await getDocument({ data: await file.arrayBuffer() }).promise;
-      doc.destroy();
+      const doc = await openPdf({ data: await file.arrayBuffer() });
+      destroyPdf(doc);
       return { file, meta };
     } catch {
       return null;
@@ -263,8 +263,8 @@ export class DeckWatcher {
       // After MAX_PARSE_ATTEMPTS, write this version off and treat it as the
       // reference point; it isn't a deck, and a later edit gets a fresh chance.
       try {
-        const doc = await getDocument({ data: await file.arrayBuffer() }).promise;
-        doc.destroy();
+        const doc = await openPdf({ data: await file.arrayBuffer() });
+        destroyPdf(doc);
       } catch {
         if (++this.parseAttempts >= MAX_PARSE_ATTEMPTS) {
           this.baseline = meta;

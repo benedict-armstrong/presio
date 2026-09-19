@@ -1,8 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, useSearchParams, useNavigate, useLocation, Link } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { getDocument } from "pdfjs-dist";
-import { loadPdf, loadPdfData, freshPdfUrl, loadLatestPdf, renderPage, clearCache } from "@/lib/pdf";
+import { loadPdf, loadPdfData, freshPdfUrl, loadLatestPdf, renderPage, clearCache, openPdf, destroyPdf } from "@/lib/pdf";
 import { loadDeckInfo, type Deck, type DeckInfo } from "@/lib/deck";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
@@ -307,7 +306,7 @@ export default function Presentation() {
               setPdf(prefetched);
               return;
             }
-            void prefetched?.destroy();
+            destroyPdf(prefetched);
             const doc = await loadLatestPdf(pdfUrlRef.current, {
               external: externalPdfRef.current,
               version: Date.now(),
@@ -930,12 +929,12 @@ export default function Presentation() {
           // deck backed by someone else's URL.
           const doc = await loadLatestPdf(base, { external: true, version: Date.now() });
           if (stopped) {
-            void doc.destroy();
+            destroyPdf(doc);
             return;
           }
           // Keep it: if the presenter applies this update, applyDeckUpdate
           // adopts the document instead of downloading the same bytes again.
-          void prefetchedDeckRef.current?.destroy();
+          destroyPdf(prefetchedDeckRef.current);
           prefetchedDeckRef.current = doc;
           baseline = sig;
           delay = BASE_MS; // stay fast for a while after a real change
@@ -953,7 +952,7 @@ export default function Presentation() {
     schedule();
     return () => {
       stop();
-      void prefetchedDeckRef.current?.destroy();
+      destroyPdf(prefetchedDeckRef.current);
       prefetchedDeckRef.current = null;
     };
   }, [local, role, id, pdfUrl, pdfWriteAuth]);
@@ -1062,9 +1061,9 @@ export default function Presentation() {
       } catch {
         // No crypto.subtle (plain-http origins): track without a fingerprint.
       }
-      const doc = await getDocument({ data: new Uint8Array(buf) }).promise;
+      const doc = await openPdf({ data: new Uint8Array(buf) });
       const totalSlides = doc.numPages;
-      doc.destroy();
+      destroyPdf(doc);
       const filename = file.name.replace(/\.pdf$/i, "");
 
       if (local) {

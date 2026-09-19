@@ -1,4 +1,4 @@
-import { getDocument } from "pdfjs-dist";
+import { openPdf, destroyPdf } from "./pdf";
 import { setSessionAuth } from "@/lib/utils";
 import "@/lib/pdf"; // ensure the pdf.js worker is configured
 
@@ -45,9 +45,9 @@ export async function loadExternalPdfMeta(rawUrl: string): Promise<ExternalPdfMe
   let totalSlides: number;
   try {
     // Single GET, no range/streaming — see loadPdf() for the iOS rationale.
-    const doc = await getDocument({ url: url.href, disableRange: true, disableStream: true }).promise;
+    const doc = await openPdf({ url: url.href, disableRange: true, disableStream: true });
     totalSlides = doc.numPages;
-    doc.destroy();
+    destroyPdf(doc);
   } catch (e) {
     // Surface the real cause (CORS, 404, parse error, iOS range bug) for
     // debugging; the user still gets the friendly, actionable message.

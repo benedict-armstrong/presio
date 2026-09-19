@@ -4,7 +4,8 @@
 
 import type express from "express";
 import multer from "multer";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { openPdf, closePdf, readAttachments } from "../lib/pdfDoc.js";
+import type { PDFDocumentProxy } from "pdfjs-dist";
 import { baseUrl } from "../lib/baseUrl.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -97,18 +98,18 @@ export type CheckResult =
 
 /** Build a sidecar validity report from PDF bytes (shared by REST and MCP). */
 export async function buildCheckReport(buffer: Buffer, schemaBaseUrl: string): Promise<CheckResult> {
-  let pdf: Awaited<ReturnType<typeof getDocument>["promise"]>;
+  let pdf: PDFDocumentProxy;
   try {
-    pdf = await getDocument({ data: new Uint8Array(buffer) }).promise;
+    pdf = await openPdf({ data: new Uint8Array(buffer) });
   } catch {
     return { ok: false, status: 422, error: "Could not parse PDF" };
   }
 
   const pageCount = pdf.numPages;
-  const rawAttachments = await pdf.getAttachments() as Record<string, { filename?: string; content: Uint8Array }> | null;
-  await pdf.destroy();
+  const entries = await readAttachments(pdf);
+  await closePdf(pdf);
 
-  if (!rawAttachments || Object.keys(rawAttachments).length === 0) {
+  if (entries.length === 0) {
     return {
       ok: true,
       report: {
@@ -121,7 +122,6 @@ export async function buildCheckReport(buffer: Buffer, schemaBaseUrl: string): P
     };
   }
 
-  const entries = Object.values(rawAttachments).map((a) => ({ filename: a.filename ?? "", content: a.content }));
   const allFilenames = new Set(entries.map((e) => e.filename));
 
   const referencedBinaries = new Set<string>();

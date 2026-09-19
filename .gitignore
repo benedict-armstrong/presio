@@ -13,8 +13,10 @@ deploy/volumes/snippets/
 /playwright/.cache/
 
 # Local mode's SQLite DB + uploaded PDFs (PRESIO_MODE=local), default location
-# when LOCAL_DATA_DIR isn't set.
+# when LOCAL_DATA_DIR isn't set. The path is relative to the working directory,
+# so running the server from the repo root lands it here instead.
 /server/data/
+/data/
 
 # Recording scratch from scripts/record-demo.mts
 /scripts/.demo-out/

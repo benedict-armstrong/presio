@@ -4,7 +4,7 @@
 // this single object instead of a fistful of loose pdf/url/filename props.
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { extractSpeakerNotes, loadMediaPlacements, type MediaPlacement } from "./pdf";
+import { extractSpeakerNotes, hasAttachments, loadMediaPlacements, type MediaPlacement } from "./pdf";
 import type { AnnotationsBySlide } from "./annotations";
 
 /** Everything derived from the PDF itself — stable until the file changes
@@ -37,7 +37,7 @@ export async function loadDeckInfo(
 ): Promise<DeckInfo> {
   const totalSlides = pdf.numPages;
   const [attachments, mediaBySlide, noteTexts] = await Promise.all([
-    pdf.getAttachments().catch(() => null),
+    hasAttachments(pdf).catch(() => false),
     loadMediaPlacements(pdf).catch(() => new Map<number, MediaPlacement[]>()),
     Promise.all(
       Array.from({ length: totalSlides }, (_, i) =>
@@ -54,7 +54,7 @@ export async function loadDeckInfo(
     url,
     filename,
     totalSlides,
-    hasAttachments: !!attachments && Object.keys(attachments).length > 0,
+    hasAttachments: attachments,
     notes,
     mediaBySlide,
   };

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { loadPdfData, renderPage } from "@/lib/pdf";
+import { loadPdfData, renderPage, destroyPdf } from "@/lib/pdf";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { removeAttachments } from "@/lib/removeAttachments";
 import { inspectAttachments, type DeckReport } from "@/lib/inspectAttachments";
@@ -34,7 +34,7 @@ export default function CheckerPage() {
   const pdfBytesRef = useRef<Uint8Array | null>(null);
 
   useEffect(() => {
-    return () => { pdfRef.current?.destroy(); };
+    return () => { destroyPdf(pdfRef.current); };
   }, []);
 
   const loadFile = useCallback(async (file: File) => {
@@ -49,7 +49,7 @@ export default function CheckerPage() {
     setFilename(null);
     setEditedNotes(new Map());
     setDeletedMedia(new Set());
-    pdfRef.current?.destroy();
+    destroyPdf(pdfRef.current);
 
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
@@ -164,7 +164,7 @@ export default function CheckerPage() {
   }
 
   const reset = useCallback(() => {
-    pdfRef.current?.destroy();
+    destroyPdf(pdfRef.current);
     pdfRef.current = null;
     pdfBytesRef.current = null;
     setReport(null);
