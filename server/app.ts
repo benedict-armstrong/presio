@@ -51,7 +51,12 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
       : (origin, callback) => {
           // No Origin header => same-origin / non-browser client (curl, server-to-server).
           if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-          callback(new Error("Not allowed by CORS"));
+          // Deny by omitting the CORS headers rather than by erroring: the
+          // browser blocks the response either way, but an Error here would
+          // travel to the error handler as an unhandled 500 and be reported to
+          // Sentry. Any stray page on the internet can point a fetch at us, so
+          // that is unactionable noise, not a fault of ours.
+          callback(null, false);
         };
 
   // Helmet for sensible security headers. The CSP allows the YouTube/Vimeo embed
