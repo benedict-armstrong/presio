@@ -60,7 +60,7 @@ function inspectNotesJson(
     issues.push({ level: "error", message: `Slide ${slideFromName} is out of range (1–${pageCount})` });
   }
 
-  let parsed: unknown = undefined;
+  let parsed: unknown;
   let previewText: string | undefined = undefined;
 
   let text: string;

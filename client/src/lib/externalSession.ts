@@ -52,7 +52,7 @@ export async function loadExternalPdfMeta(rawUrl: string): Promise<ExternalPdfMe
     // Surface the real cause (CORS, 404, parse error, iOS range bug) for
     // debugging; the user still gets the friendly, actionable message.
     console.error("[present] failed to load external PDF:", e);
-    throw new Error(LOAD_ERROR);
+    throw new Error(LOAD_ERROR, { cause: e });
   }
 
   // Derive a display name from the last path segment, stripping a .pdf suffix.
