@@ -65,6 +65,12 @@ jobs:
           (cd server && npm ci)
       - name: Build client
         run: cd client && npm run build
+      # The specs and the demo recorder are transpiled by esbuild (via Playwright
+      # and tsx), which strips types without checking them, so this is the only
+      # thing standing between a type error in e2e/ and a runtime failure.
+      - name: Typecheck e2e and scripts
+        run: npx tsc --noEmit
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
       - name: Run E2E tests

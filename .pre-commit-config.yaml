@@ -9,6 +9,11 @@ repos:
         args: ["--maxkb=25600"]
       - id: check-yaml
       - id: check-json
+        # tsconfig files are JSONC — TypeScript allows comments and this
+        # repo's configs use them, but check-json is a strict JSON parser.
+        # It only runs on changed files, so this stayed hidden until one
+        # of them was edited.
+        exclude: (^|/)tsconfig(\..+)?\.json$
       - id: detect-private-key
       - id: mixed-line-ending
         args: ["--fix=lf"]
@@ -40,3 +45,10 @@ repos:
         files: ^server/.*\.ts$
         pass_filenames: false
         entry: bash -c 'cd server && npx --no-install tsc --noEmit'
+
+      - id: root-tsc
+        name: tsc (e2e + scripts)
+        language: system
+        files: ^(e2e/|scripts/|playwright\.config\.ts$)
+        pass_filenames: false
+        entry: bash -c 'npx --no-install tsc --noEmit'

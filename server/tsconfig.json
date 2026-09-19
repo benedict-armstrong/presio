@@ -5,8 +5,11 @@
     "moduleResolution": "bundler",
     "esModuleInterop": true,
     "strict": true,
-    "skipLibCheck": true,
-    "outDir": "dist"
+    // No outDir on purpose. Nothing emits from this config — CI and the
+    // pre-commit hook run tsc --noEmit, and npm start runs tsx — and setting
+    // one makes TypeScript 7 enforce rootDir containment, which e2eHarness.ts
+    // breaks by importing ../e2e/constants.ts.
+    "skipLibCheck": true
   },
   "include": ["*.ts"]
 }

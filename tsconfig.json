@@ -1,0 +1,21 @@
+{
+  // Typechecks the repo-root TypeScript that no package owns: the Playwright
+  // specs, their harness helpers, and the demo recorder. Playwright and tsx
+  // both strip types with esbuild rather than checking them, so without this
+  // a type error in e2e/ or scripts/ only ever surfaces as a runtime failure.
+  //
+  // Typecheck-only — nothing is emitted from here.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["e2e", "scripts", "playwright.config.ts"]
+}
