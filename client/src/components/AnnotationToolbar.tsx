@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MousePointer2, Target, PenLine, Highlighter, Undo2, Trash2, GripHorizontal } from "lucide-react";
+import { MousePointer2, Target, PenLine, Highlighter, Undo2, Trash2, GripHorizontal, GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PEN_COLORS, HIGHLIGHTER_COLORS, PEN_REFERENCE_WIDTH, type PenStyle, type Tool } from "@/lib/annotations";
 
@@ -58,10 +58,14 @@ interface Props {
   canUndo: boolean;
   onUndo: () => void;
   onClear: () => void;
+  /** Fade the palette out — the mouse has left the slide, so there is nothing
+   *  to point at and the slide should be seen unobstructed. Never set on
+   *  touch, where there is no such thing as a pointer that has left. */
+  dimmed?: boolean;
 }
 
 // Floating tool palette shown over the controller's current slide, movable by
-// its grip handle. When a drawing tool is active, a second panel offers that
+// its grip handle and turned on its side by double-clicking that handle. When a drawing tool is active, a second panel offers that
 // tool's colors/widths plus the undo/clear actions; clicking the active tool
 // again minimizes that panel. While a tool is in use and the pointer is away
 // from the toolbar, the whole palette collapses to just the grip and the
@@ -75,6 +79,7 @@ export function AnnotationToolbar({
   canUndo,
   onUndo,
   onClear,
+  dimmed = false,
 }: Props) {
   const drawing = tool === "pen" || tool === "highlighter";
   const colors = tool === "highlighter" ? HIGHLIGHTER_COLORS : PEN_COLORS;
@@ -119,6 +124,11 @@ export function AnnotationToolbar({
     return () => document.removeEventListener("pointerdown", onDocPointerDown);
   }, []);
 
+  // Which way the palette runs. Double-clicking the grip lays it on its side,
+  // which is what a wide, short slide card wants — the tools then sit along
+  // the top edge instead of down the left.
+  const [horizontal, setHorizontal] = useState(false);
+
   // Position within the slide card (the offset parent), draggable by the grip.
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState({ x: 8, y: 8 });
@@ -148,7 +158,15 @@ export function AnnotationToolbar({
   return (
     <div
       ref={rootRef}
-      className="absolute z-10 flex items-start gap-1"
+      className={cn(
+        "absolute z-10 flex items-start gap-1 transition-opacity",
+        horizontal && "flex-col",
+        // Faded, but still live: the mouse can only reach it by coming back
+        // over the slide, which un-fades it on the way in. Leaving fades
+        // gently — a palette that vanished the instant the mouse crossed the
+        // edge would read as a glitch — while coming back is immediate.
+        dimmed ? "opacity-0 duration-700 ease-out" : "duration-150"
+      )}
       style={{ left: pos.x, top: pos.y }}
       onPointerEnter={(e) => {
         if (e.pointerType === "mouse") setHovered(true);
@@ -160,17 +178,26 @@ export function AnnotationToolbar({
         }
       }}
     >
-      <div className="flex flex-col gap-0.5 rounded-md border bg-background/85 backdrop-blur p-0.5 shadow-sm">
+      <div
+        className={cn(
+          "flex gap-0.5 rounded-md border bg-background/85 backdrop-blur p-0.5 shadow-sm",
+          horizontal ? "flex-row items-center" : "flex-col"
+        )}
+      >
         <div
-          title="Move toolbar"
+          title="Drag to move — double-click to turn the palette on its side"
           data-testid="toolbar-drag"
           onPointerDown={onGripDown}
           onPointerMove={onGripMove}
           onPointerUp={onGripUp}
           onPointerCancel={onGripUp}
-          className="flex items-center justify-center h-4 -mb-0.5 cursor-grab active:cursor-grabbing touch-none text-muted-foreground"
+          onDoubleClick={() => setHorizontal((h) => !h)}
+          className={cn(
+            "flex items-center justify-center cursor-grab active:cursor-grabbing touch-none text-muted-foreground",
+            horizontal ? "w-4 -mr-0.5 self-stretch" : "h-4 -mb-0.5"
+          )}
         >
-          <GripHorizontal size={12} />
+          {horizontal ? <GripVertical size={12} /> : <GripHorizontal size={12} />}
         </div>
         {expanded ? (
           TOOLS.map(({ key, icon: Icon, label }) => (

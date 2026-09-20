@@ -1060,14 +1060,14 @@ export default function Home() {
       {/* env(safe-area-inset-top) is 0 in browser tabs; in the installed app
           it drops the nav below the status bar. */}
       <nav
-        className={`sticky top-0 z-40 flex items-center justify-between px-6 pt-[calc(env(safe-area-inset-top)+1rem)] pb-4 backdrop-blur transition-colors ${scrolled ? "border-b bg-background/90" : "border-b border-transparent bg-background/70"
+        className={`sticky top-0 z-40 flex items-center justify-between gap-4 px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-4 backdrop-blur transition-colors sm:px-6 ${scrolled ? "border-b bg-background/90" : "border-b border-transparent bg-background/70"
           }`}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <PresioLogo className="h-5 w-auto text-foreground" />
           <span className="font-mono text-base font-semibold tracking-tight">Presio</span>
         </div>
-        <div className="flex items-center gap-5">
+        <div className="flex min-w-0 items-center gap-3 sm:gap-5">
           <a
             href={REPO_URL}
             target="_blank"

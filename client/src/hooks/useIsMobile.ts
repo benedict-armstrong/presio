@@ -31,6 +31,24 @@ export function useIsMobile(breakpoint = 768) {
   return isMobile && !forceDesktop;
 }
 
+// A phone held sideways has room across but almost none down, so the
+// controller's card layout can't be the same as in portrait. Orientation
+// rather than a width breakpoint, because that is the thing that changes.
+export function useIsLandscape(): boolean {
+  const [landscape, setLandscape] = useState(
+    () => window.matchMedia("(orientation: landscape)").matches
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia("(orientation: landscape)");
+    const onChange = (e: MediaQueryListEvent) => setLandscape(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  return landscape;
+}
+
 // Touch-device detection for the first-visit prompts. Width alone misses
 // tablets: an iPad in landscape is 1024px wide (1366px on a Pro), well past
 // the 768px mobile breakpoint. The primary pointer being coarse (finger/stylus)

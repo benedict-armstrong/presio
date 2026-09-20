@@ -1,4 +1,4 @@
-import { ChevronUp } from "lucide-react";
+import { ChevronUp, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
@@ -45,6 +45,9 @@ export function DownloadButton({
           data-testid="download-pdf"
           className={(block ? "flex-1 justify-start " : "") + (className ?? "")}
         >
+          {/* In a menu the label sits in a column of icon + text rows, so it
+              needs one too; the bottom bar's inline button reads fine without. */}
+          {block && <Download size={16} className="mr-2" />}
           {busy ? "Preparing…" : "Download PDF"}
         </Button>
         <DropdownMenu>

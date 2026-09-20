@@ -31,12 +31,11 @@ import { ControllerHeader } from "@/components/controller/ControllerHeader";
 import { ControllerNav, SlideCounter } from "@/components/controller/ControllerNav";
 import { ControllerMenu } from "@/components/controller/ControllerMenu";
 import { ControllerDashboard, type CardEntry } from "@/components/controller/ControllerDashboard";
-import { ControllerStack } from "@/components/controller/ControllerStack";
 import { ShareDialog } from "@/components/controller/ShareDialog";
 import { ConfirmEndDialog } from "@/components/controller/ConfirmEndDialog";
 import { useJoinUrls } from "@/lib/joinUrl";
 import { ConfirmReplaceDialog } from "@/components/controller/ConfirmReplaceDialog";
-import { useIsMobile } from "@/hooks/useIsMobile";
+import { useIsLandscape, useIsMobile } from "@/hooks/useIsMobile";
 import { useSlideTapNav } from "@/hooks/useSlideTapNav";
 import {
   isDeckWatchSupported,
@@ -54,7 +53,9 @@ import {
 import {
   CARD_KEYS,
   CARD_LABELS,
-  DEFAULT_LAYOUT,
+  defaultLayout,
+  LAYOUT_PRESETS,
+  type LayoutForm,
   loadLayout,
   saveLayout,
   savePreferred,
@@ -160,6 +161,14 @@ export function ControllerView({
   const { totalSlides, annotations } = deck;
   const mediaPlacements = deck.mediaBySlide.get(currentSlide) ?? [];
   const isMobile = useIsMobile();
+  // A window wide enough for the dashboard but not for the full toolbars: the
+  // header's three columns and the footer's six controls both stop fitting
+  // well before the phone breakpoint, so from here down the header's buttons
+  // and the footer's Download / End Presentation move into the slide-over
+  // menu, leaving the bars with what actually gets used mid-talk — the deck
+  // name up top, the page counter and Prev/Next below.
+  const narrow = useIsMobile(1024) && !isMobile;
+  const landscape = useIsLandscape();
   const navigate = useNavigate();
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -167,7 +176,7 @@ export function ControllerView({
   const [timerSettingsOpen, setTimerSettingsOpen] = useState(false);
   const [keymap, setKeymap] = useState<Keymap>(loadKeymap);
   const [viewerBlocked, setViewerBlocked] = useState(false);
-  const [viewerPromptOpen, setViewerPromptOpen] = useState(false);
+  const [viewerPromptDismissed, setViewerPromptDismissed] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   // Mobile-only surfaces.
   const [menuOpen, setMenuOpen] = useState(false);
@@ -310,16 +319,15 @@ export function ControllerView({
 
   // Rather than auto-opening the viewer (which steals the active tab), prompt
   // the presenter to open it themselves. A real click keeps them on the
-  // controller and avoids popup blockers.
-  useEffect(() => {
-    if (isMobile || onboardingOpen) return;
-    // Only prompt if the presenter hasn't already opened a viewer for this
-    // presentation (the flag survives controller refreshes).
-    if (lsGetString(viewerOpenedKey(id)) === "true") return;
-    // One-time mount prompt (re-armed when onboarding finishes); the extra
-    // render from setting state in the effect is intentional and harmless.
-    setViewerPromptOpen(true);
-  }, [id, isMobile, onboardingOpen]);
+  // controller and avoids popup blockers. Derived rather than opened from an
+  // effect: it is a question about this presentation (has a viewer been opened
+  // for it before?), and the answer only changes when the presenter answers
+  // it — by opening the viewer, or by waving the prompt away.
+  const viewerPromptOpen =
+    !viewerPromptDismissed &&
+    !isMobile &&
+    !onboardingOpen &&
+    lsGetString(viewerOpenedKey(id)) !== "true";
 
   // Tap the left/right half of the current slide to go back/forward on touch
   // devices. Disabled while a drawing tool is active so a stroke is never
@@ -332,7 +340,23 @@ export function ControllerView({
     onNext: () => onGoTo(currentSlide + 1),
   });
 
-  const [mosaic, setMosaic] = useState<MosaicNode<string> | null>(loadLayout);
+  // The dashboard is the same on every screen; only its default arrangement
+  // and its stored tree differ by form factor (lib/controllerLayout), so a
+  // phone starts with the current slide filling most of the column.
+  const layoutForm: LayoutForm = !isMobile
+    ? "desktop"
+    : landscape
+      ? "mobileLandscape"
+      : "mobile";
+  const [mosaic, setMosaic] = useState<MosaicNode<string> | null>(() => loadLayout(layoutForm));
+  // Crossing the breakpoint (rotating a tablet, resizing a window) swaps in
+  // that form's own tree. Adjusting during render rather than in an effect
+  // keeps the dashboard from painting one frame with the wrong layout.
+  const [renderedForm, setRenderedForm] = useState(layoutForm);
+  if (renderedForm !== layoutForm) {
+    setRenderedForm(layoutForm);
+    setMosaic(loadLayout(layoutForm));
+  }
   const [hasPreferred, setHasPreferred] = useState(hasPreferredLayout);
   // A card is shown iff it's a leaf in the tree; this drives the Settings checkboxes.
   const visible = new Set(visibleKeys(mosaic));
@@ -423,13 +447,26 @@ export function ControllerView({
 
   const onMosaicChange = useCallback((node: MosaicNode<string> | null) => {
     setMosaic(node);
-    saveLayout(node);
-  }, []);
+    saveLayout(layoutForm, node);
+  }, [layoutForm]);
+
+  // Applying a preset writes it to *this* screen's stored tree, so choosing
+  // the desktop grid on a phone doesn't change what a desktop starts with.
+  const applyPreset = useCallback((form: LayoutForm) => {
+    const layout = defaultLayout(form);
+    setMosaic(layout);
+    saveLayout(layoutForm, layout);
+  }, [layoutForm]);
+
+  const activePreset = LAYOUT_PRESETS.find(
+    (p) => JSON.stringify(mosaic) === JSON.stringify(defaultLayout(p.form))
+  )?.form;
 
   const resetLayout = useCallback(() => {
-    setMosaic(DEFAULT_LAYOUT);
-    saveLayout(DEFAULT_LAYOUT);
-  }, []);
+    const fresh = defaultLayout(layoutForm);
+    setMosaic(fresh);
+    saveLayout(layoutForm, fresh);
+  }, [layoutForm]);
 
   const savePreferredLayout = useCallback(() => {
     savePreferred(mosaic);
@@ -440,18 +477,18 @@ export function ControllerView({
     const pref = loadPreferred();
     if (!pref) return;
     setMosaic(pref);
-    saveLayout(pref);
-  }, []);
+    saveLayout(layoutForm, pref);
+  }, [layoutForm]);
 
   const toggleCard = useCallback((key: string) => {
     setMosaic((prev) => {
       const next = visibleKeys(prev).includes(key)
         ? removeLeaf(prev, key)
         : addLeaf(prev, key);
-      saveLayout(next);
+      saveLayout(layoutForm, next);
       return next;
     });
-  }, []);
+  }, [layoutForm]);
 
   // Navigations this device performs itself (viewer popup) use the page's own
   // origin — it always works locally. The share dialog's QR/links honor the
@@ -519,11 +556,11 @@ export function ControllerView({
     setViewerBlocked(!w);
     if (w) {
       lsSetString(viewerOpenedKey(id), "true");
-      setViewerPromptOpen(false);
+      setViewerPromptDismissed(true);
     }
   };
 
-  // Desktop dashboard card content + optional toolbar action for each key.
+  // Dashboard card content + optional toolbar action for each key.
   const cardContent: Record<string, CardEntry> = {
     currentSlide: {
       content: (
@@ -623,7 +660,7 @@ export function ControllerView({
     </>
   );
 
-  const mobileActions = (
+  const menuActions = (
     <ControllerMenu
       open={menuOpen}
       onOpen={() => setMenuOpen(true)}
@@ -635,9 +672,11 @@ export function ControllerView({
       onShare={() => setShareDialogOpen(true)}
       onToggleCode={onShowCodeToggle}
       onShowPassphrase={() => { setPassphraseDialogOpen(true); void requestPassphrase(); }}
-      onSwitchToViewer={() => navigate(`/s/${id}?role=viewer`, { replace: true })}
+      onSwitchToViewer={isMobile ? () => navigate(`/s/${id}?role=viewer`, { replace: true }) : undefined}
       onReplaceClick={openReplacePicker}
       onEndClick={() => setConfirmEnd(true)}
+      onSettings={() => setSettingsOpen(true)}
+      onOpenViewer={isMobile ? undefined : openViewer}
     />
   );
 
@@ -667,27 +706,19 @@ export function ControllerView({
         onDeckWatchResume={onDeckWatchResume}
         remoteDeckUpdate={remoteDeckUpdate}
         onRemoteDeckApply={onRemoteDeckApply}
-        actions={isMobile ? mobileActions : desktopActions}
+        actions={isMobile || narrow ? menuActions : desktopActions}
+      />
+
+      <ControllerDashboard
+        value={mosaic}
+        onChange={onMosaicChange}
+        cards={cardContent}
+        onHideCard={toggleCard}
       />
 
       {isMobile ? (
-        <ControllerStack
-          deck={deck}
-          currentSlide={currentSlide}
-          currentCanvasRef={currentCanvasRef}
-        />
-      ) : (
-        <ControllerDashboard
-          value={mosaic}
-          onChange={onMosaicChange}
-          cards={cardContent}
-          onHideCard={toggleCard}
-        />
-      )}
-
-      {isMobile ? (
         <div className="border-t px-3 py-3 space-y-2">
-          <div className="flex items-center justify-center gap-3">
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
             <MobileTimer id={id} settings={timerSettings} />
             <SlideCounter
               className="text-xs text-muted-foreground"
@@ -712,9 +743,13 @@ export function ControllerView({
           />
         </div>
       ) : (
-        <div className="border-t p-4 flex items-center justify-center gap-4 shrink-0">
+        // Navigation first and centred; the session controls sit beside it,
+        // and the two "leaving the deck" actions are pushed to the far end —
+        // until the window is narrow, where they live in the header menu and
+        // the bar keeps only what is used while presenting.
+        <div className={cn("border-t flex shrink-0 items-center justify-center", narrow ? "gap-3 p-3" : "gap-4 p-4")}>
           <ControllerNav
-            className="gap-4"
+            className={narrow ? "gap-3" : "gap-4"}
             currentSlide={currentSlide}
             totalSlides={totalSlides}
             onGoTo={onGoTo}
@@ -732,16 +767,20 @@ export function ControllerView({
               onClick={onShowCodeToggle}
               title="Show the join code & QR on all viewers' screens"
             >
-              <QrCode size={14} className="mr-1" />
-              {showCode ? "Hide Code" : "Show Code"}
+              <QrCode size={14} className={narrow ? undefined : "mr-1"} />
+              <span className={narrow ? "sr-only" : undefined}>
+                {showCode ? "Hide Code" : "Show Code"}
+              </span>
             </Button>
           )}
-          <div className="ml-auto flex items-center gap-2">
-            <DownloadButton deck={deck} />
-            <Button variant="destructive" size="sm" onClick={() => setConfirmEnd(true)}>
-              End Presentation
-            </Button>
-          </div>
+          {!narrow && (
+            <div className="ml-auto flex items-center gap-2">
+              <DownloadButton deck={deck} />
+              <Button variant="destructive" size="sm" onClick={() => setConfirmEnd(true)}>
+                End Presentation
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -796,6 +835,38 @@ export function ControllerView({
                   {CARD_LABELS[key]}
                 </button>
               ))}
+            </div>
+            <div className="space-y-1.5 pt-1">
+              <label
+                htmlFor="layout-preset"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Preset
+              </label>
+              <select
+                id="layout-preset"
+                // "Custom" isn't a preset you can pick — it is what the field
+                // reads once the cards have been dragged away from one.
+                value={activePreset ?? "custom"}
+                onChange={(e) => applyPreset(e.target.value as LayoutForm)}
+                className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                {activePreset === undefined && (
+                  <option value="custom" disabled>
+                    Custom
+                  </option>
+                )}
+                {LAYOUT_PRESETS.map((preset) => (
+                  <option key={preset.form} value={preset.form} title={preset.hint}>
+                    {preset.label}
+                    {preset.form === layoutForm ? " (default for this screen)" : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                {LAYOUT_PRESETS.find((p) => p.form === activePreset)?.hint ??
+                  "Your own arrangement — pick a preset to start over."}
+              </p>
             </div>
             <div className="flex flex-wrap gap-2 pt-1">
               <Button size="sm" variant="outline" onClick={savePreferredLayout}>
@@ -976,7 +1047,7 @@ export function ControllerView({
       )}
 
       {!isMobile && viewerPromptOpen && (
-        <DialogOverlay onClose={() => setViewerPromptOpen(false)}>
+        <DialogOverlay onClose={() => setViewerPromptDismissed(true)}>
           <div className="flex flex-col items-center gap-4 text-center">
             <p className="text-xs text-muted-foreground">
               Hold <span className="font-medium text-foreground">{isMac ? "⌥ Option" : "Option/Alt"}</span> and click to open it in its own window.
@@ -999,7 +1070,7 @@ export function ControllerView({
             </div>
             <button
               type="button"
-              onClick={() => setViewerPromptOpen(false)}
+              onClick={() => setViewerPromptDismissed(true)}
               className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4 mt-2"
             >
               Not now

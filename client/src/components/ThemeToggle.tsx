@@ -26,17 +26,28 @@ const icons = {
 
 const next = { system: "light", light: "dark", dark: "system" } as const;
 
-export function ThemeToggle({ size = "sm" }: { size?: "sm" | "icon" }) {
+const LABELS = { system: "System", light: "Light", dark: "Dark" } as const;
+
+export function ThemeToggle({
+  size = "sm",
+  /** Menu row: full width, icon and label on the left like its neighbours,
+   *  rather than the bare icon the toolbars use. */
+  block = false,
+}: {
+  size?: "sm" | "icon";
+  block?: boolean;
+}) {
   const { theme, setTheme } = useTheme();
   return (
     <Button
-      className="text-muted-foreground hover:text-foreground"
-      size={size}
+      className={block ? "w-full justify-start" : "text-muted-foreground hover:text-foreground"}
+      size={block ? "default" : size}
       variant="ghost"
       onClick={() => setTheme(next[theme])}
-      title={`Theme: ${theme}`}
+      title={`Theme: ${theme} — click for ${next[theme]}`}
     >
       {icons[theme]}
+      {block && <span className="ml-2">Theme: {LABELS[theme]}</span>}
     </Button>
   );
 }

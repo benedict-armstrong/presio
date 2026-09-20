@@ -14,6 +14,10 @@ export const STORAGE_KEYS = {
   // iff it appears as a leaf in the tree, so visibility no longer needs its own
   // key (replaces the legacy controllerLayout/controllerCards array format).
   controllerMosaic: "presio_controller_mosaic",
+  // The same dashboard, arranged for a phone. Kept apart from the desktop tree
+  // so rearranging cards on one form factor never rewrites the other.
+  controllerMosaicMobile: "presio_controller_mosaic_mobile",
+  controllerMosaicMobileLandscape: "presio_controller_mosaic_mobile_landscape",
   preferredMosaic: "presio_preferred_mosaic",
   controllerOnboarded: "presio_controller_onboarded",
   // Whether the mobile "best on desktop" notice has been dismissed.

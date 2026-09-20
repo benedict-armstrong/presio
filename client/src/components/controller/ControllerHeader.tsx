@@ -71,25 +71,31 @@ export function ControllerHeader({
   return (
     <div
       className={cn(
-        "relative border-b py-2 flex items-center justify-between",
+        "relative border-b py-2 flex items-center gap-2",
         compact ? "px-3" : "px-4"
       )}
     >
-      <div className={cn("flex items-center", compact ? "gap-2" : "gap-3")}>
+      {/* Three columns, the outer two sharing the leftover width equally, so
+          the deck name sits on the middle of the bar rather than wherever its
+          neighbours happen to leave it. Both sides shrink (and truncate)
+          before the deck does. */}
+      <div className={cn("flex min-w-0 flex-1 items-center", compact ? "gap-2" : "gap-3")}>
         <Link
           to="/"
-          className="flex items-center gap-1.5 text-sm font-semibold hover:text-muted-foreground transition-colors"
+          className="flex shrink-0 items-center gap-1.5 text-sm font-semibold hover:text-muted-foreground transition-colors"
         >
           <PresioLogo className="h-4 w-auto" />
-          Presio
+          {/* Below ~640px the wordmark is the first thing to go: the logo
+              already says where you are, and the deck name needs the width. */}
+          <span className="hidden sm:inline">Presio</span>
         </Link>
-        <span className="text-muted-foreground/40">|</span>
+        <span className="hidden text-muted-foreground/40 sm:inline">|</span>
         {!local &&
           (compact ? (
             <span className="font-mono font-bold tracking-widest text-sm select-all">{id}</span>
           ) : (
             <>
-              <span className="text-xs text-muted-foreground">Code:</span>
+              <span className="hidden text-xs text-muted-foreground lg:inline">Code:</span>
               <span className="font-mono font-bold tracking-widest select-all">{id}</span>
             </>
           ))}
@@ -103,24 +109,23 @@ export function ControllerHeader({
           </span>
         )}
         {showingCode && (
-          <span className="text-xs font-medium text-primary px-1.5 py-0.5 rounded bg-primary/10">
+          <span className="hidden text-xs font-medium text-primary px-1.5 py-0.5 rounded bg-primary/10 sm:inline">
             Code shown
           </span>
         )}
-        {compact && deck}
       </div>
-      {/* Desktop centres the deck on the bar itself rather than in the gap
-          between its neighbours, so it doesn't drift as the code or the
-          badges change width. Out of flow, so the wrapper can't swallow
-          clicks meant for the clusters underneath — only the control itself
-          takes pointer events. Mobile has no room for a third column, so it
-          stays inline in the left cluster above. */}
-      {!compact && deck && (
-        <div className="pointer-events-none absolute left-1/2 -translate-x-1/2">
-          <div className="pointer-events-auto">{deck}</div>
+      {/* Wide desktop pins the deck to the centre of the bar itself, so it
+          can't drift as the code or the badges change width — out of flow, so
+          the wrapper can't swallow clicks meant for the clusters underneath,
+          and only the control itself takes pointer events. Narrower than that
+          the columns do the centring instead, which keeps the deck off its
+          neighbours when the bar gets tight. */}
+      {deck && (
+        <div className="flex min-w-0 justify-center lg:pointer-events-none lg:absolute lg:left-1/2 lg:-translate-x-1/2">
+          <div className="min-w-0 lg:pointer-events-auto">{deck}</div>
         </div>
       )}
-      <div className="flex items-center gap-1">{actions}</div>
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-1">{actions}</div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { forwardRef, useRef } from "react";
+import { forwardRef, useRef, useState } from "react";
 import {
   Play,
   Pause,
@@ -14,6 +14,7 @@ import {
 import { MediaOverlay, type MediaState, type AudioState, type AudioTarget } from "@/components/MediaOverlay";
 import { AnnotationOverlay } from "@/components/AnnotationOverlay";
 import { useSlidePinchZoom } from "@/hooks/useSlidePinchZoom";
+import { useIsTouchDevice } from "@/hooks/useIsMobile";
 import { AnnotationToolbar } from "@/components/AnnotationToolbar";
 import { DEFAULT_PEN_STYLE, type LaserPoint, type PenStyle, type Stroke, type Tool } from "@/lib/annotations";
 import { Button } from "@/components/ui/button";
@@ -101,6 +102,12 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
     // together). Local to this device. With a drawing tool active the first
     // finger still draws, but two fingers always pinch and pan.
     const surfaceRef = useRef<HTMLDivElement | null>(null);
+
+    // The tool palette belongs to the slide: with the mouse elsewhere there is
+    // nothing to point at, so it fades out and the slide is seen unobstructed.
+    // Touch-first devices have no pointer to leave with, so there it stays put.
+    const [mouseOver, setMouseOver] = useState(false);
+    const touch = useIsTouchDevice();
     const { zoom, gesturing, reset: resetZoom } = useSlidePinchZoom(surfaceRef, {
       drawing: tool !== "none",
       onActiveChange: onZoomActiveChange,
@@ -110,6 +117,8 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
       <div className="h-full flex flex-col gap-1">
         <div
           ref={surfaceRef}
+          onPointerEnter={(e) => { if (e.pointerType === "mouse") setMouseOver(true); }}
+          onPointerLeave={(e) => { if (e.pointerType === "mouse") setMouseOver(false); }}
           className="flex-1 min-h-0 relative rounded overflow-hidden bg-white select-none [-webkit-touch-callout:none] touch-none"
         >
           <div
@@ -150,6 +159,7 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
               canUndo={strokes.length > 0}
               onUndo={onStrokeUndo ?? (() => {})}
               onClear={onAnnotationsClear ?? (() => {})}
+              dimmed={!touch && !mouseOver}
             />
           )}
           {zoom.scale > 1 && (

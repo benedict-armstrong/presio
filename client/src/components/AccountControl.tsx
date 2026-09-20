@@ -45,9 +45,13 @@ export function AccountControl({ variant = "compact" }: { variant?: "compact" | 
   return (
     <>
       {user ? (
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground max-w-[180px] truncate">{user.email}</span>
-          <Button size="sm" variant="ghost" onClick={() => signOut()}>
+        // min-w-0 lets the address give way on a phone instead of shoving the
+        // control off the bar: it truncates to whatever the nav has left.
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 max-w-[110px] truncate text-xs text-muted-foreground sm:max-w-[180px]">
+            {user.email}
+          </span>
+          <Button size="sm" variant="ghost" className="shrink-0" onClick={() => signOut()}>
             Log out
           </Button>
         </div>

@@ -44,6 +44,11 @@ export const CARD_LABELS: Record<string, string> = Object.fromEntries(
   CARD_CONFIGS.map((c) => [c.key, c.label]),
 );
 
+/** Which form factor a layout belongs to. The phone and the desktop keep
+ *  separate trees (and separate defaults): the same arrangement can't serve
+ *  both, and a card moved on one shouldn't move on the other. */
+export type LayoutForm = "desktop" | "mobile" | "mobileLandscape";
+
 /** Default arrangement, mirroring the previous grid: current slide on the left,
  *  next slide + timer stacked over speaker notes on the right, thumbnails as a
  *  full-width strip along the bottom. `splitPercentages` gives each child's
@@ -78,6 +83,61 @@ export const DEFAULT_LAYOUT: MosaicNode<string> = {
   ],
   splitPercentages: [68, 32],
 };
+
+/** Phone default: one column, current slide taking most of it, with the next
+ *  slide and the speaker notes below. Same cards and same dashboard as the
+ *  desktop — only the arrangement differs, so everything else (hiding a card,
+ *  the Settings checkboxes, resizing) works identically on a phone. */
+export const MOBILE_LAYOUT: MosaicNode<string> = {
+  type: "split",
+  direction: "column",
+  children: ["currentSlide", "nextSlide", "notes"],
+  splitPercentages: [56, 26, 18],
+};
+
+/** The same idea sideways: a phone in landscape has no vertical room for three
+ *  stacked cards, so the slide takes the left and its two companions share a
+ *  narrow column on the right. */
+export const MOBILE_LANDSCAPE_LAYOUT: MosaicNode<string> = {
+  type: "split",
+  direction: "row",
+  children: [
+    "currentSlide",
+    {
+      type: "split",
+      direction: "column",
+      children: ["nextSlide", "notes"],
+      splitPercentages: [55, 45],
+    },
+  ],
+  splitPercentages: [64, 36],
+};
+
+/** The arrangements offered by name in Settings. They are the per-form
+ *  defaults, so picking one is the same as starting fresh on that kind of
+ *  screen — a phone can be given the desktop grid, and a laptop the stacked
+ *  phone column, without either becoming the default for the other. */
+export const LAYOUT_PRESETS: { form: LayoutForm; label: string; hint: string }[] = [
+  { form: "desktop", label: "Desktop", hint: "Slide left, next/timer/notes right, thumbnails below" },
+  { form: "mobile", label: "Phone", hint: "One column: slide, next slide, notes" },
+  { form: "mobileLandscape", label: "Phone landscape", hint: "Slide left, next slide over notes right" },
+];
+
+const STORAGE_KEY: Record<LayoutForm, string> = {
+  desktop: STORAGE_KEYS.controllerMosaic,
+  mobile: STORAGE_KEYS.controllerMosaicMobile,
+  mobileLandscape: STORAGE_KEYS.controllerMosaicMobileLandscape,
+};
+
+const DEFAULTS: Record<LayoutForm, MosaicNode<string>> = {
+  desktop: DEFAULT_LAYOUT,
+  mobile: MOBILE_LAYOUT,
+  mobileLandscape: MOBILE_LANDSCAPE_LAYOUT,
+};
+
+export function defaultLayout(form: LayoutForm): MosaicNode<string> {
+  return DEFAULTS[form];
+}
 
 /**
  * A layout persisted by react-mosaic v6 or earlier: a binary parent with
@@ -224,12 +284,12 @@ export function removeLeaf(
   return updateTree(node, [createRemoveUpdate(node, path)]);
 }
 
-export function loadLayout(): MosaicNode<string> {
-  return sanitize(lsGet(STORAGE_KEYS.controllerMosaic, null)) ?? DEFAULT_LAYOUT;
+export function loadLayout(form: LayoutForm): MosaicNode<string> {
+  return sanitize(lsGet(STORAGE_KEY[form], null)) ?? defaultLayout(form);
 }
 
-export function saveLayout(node: MosaicNode<string> | null) {
-  lsSet(STORAGE_KEYS.controllerMosaic, node);
+export function saveLayout(form: LayoutForm, node: MosaicNode<string> | null) {
+  lsSet(STORAGE_KEY[form], node);
 }
 
 export function savePreferred(node: MosaicNode<string> | null) {

@@ -62,7 +62,7 @@ describe("layouts saved by react-mosaic v6", () => {
 
   it("are migrated on read rather than discarded", () => {
     localStorage.setItem(STORAGE_KEYS.controllerMosaic, JSON.stringify(legacy));
-    const loaded = loadLayout();
+    const loaded = loadLayout("desktop");
 
     // Not the fallback — the user's own arrangement survived.
     expect(loaded).not.toEqual(DEFAULT_LAYOUT);
@@ -78,12 +78,12 @@ describe("layouts saved by react-mosaic v6", () => {
       JSON.stringify({ direction: "row", first: "currentSlide", second: "retiredCard" }),
     );
     // The surviving child is promoted rather than left in a one-child split.
-    expect(loadLayout()).toBe("currentSlide");
+    expect(loadLayout("desktop")).toBe("currentSlide");
   });
 
   it("fall back to the default when nothing usable is stored", () => {
     localStorage.setItem(STORAGE_KEYS.controllerMosaic, JSON.stringify(["currentSlide"]));
-    expect(loadLayout()).toEqual(DEFAULT_LAYOUT);
+    expect(loadLayout("desktop")).toEqual(DEFAULT_LAYOUT);
   });
 });
 

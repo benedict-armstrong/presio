@@ -1,12 +1,16 @@
 import type { Deck } from "@/lib/deck";
-import { Menu, X, QrCode, RefreshCw } from "lucide-react";
+import { Menu, X, QrCode, RefreshCw, Settings, ExternalLink, Share2, KeyRound, MonitorPlay, Power } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { DownloadButton } from "@/components/DownloadButton";
 
-// Mobile slide-over menu. Purely presentational: every action is a callback the
-// parent (ControllerView) wires to its single set of dialogs/handlers, so there
-// is no duplicated Share/Confirm-End/end-session logic living down here.
+// Slide-over menu for the narrow controller — phones, and any window too small
+// for the full header/footer toolbars. Purely presentational: every action is a
+// callback the parent (ControllerView) wires to its single set of
+// dialogs/handlers, so there is no duplicated Share/Confirm-End/end-session
+// logic living down here. Items whose handler is omitted don't appear, which is
+// how the phone (switch this tab to the viewer) and a narrow desktop window
+// (open a second viewer window, settings) differ.
 export function ControllerMenu({
   open,
   onOpen,
@@ -21,6 +25,8 @@ export function ControllerMenu({
   onSwitchToViewer,
   onReplaceClick,
   onEndClick,
+  onSettings,
+  onOpenViewer,
 }: {
   open: boolean;
   onOpen: () => void;
@@ -35,9 +41,14 @@ export function ControllerMenu({
   onShare: () => void;
   onToggleCode: () => void;
   onShowPassphrase: () => void;
-  onSwitchToViewer: () => void;
+  /** Take over presenting in this tab (phone: there is no second window). */
+  onSwitchToViewer?: () => void;
   onReplaceClick: () => void;
   onEndClick: () => void;
+  /** Opens the settings dialog — the gear that the wide header shows inline. */
+  onSettings?: () => void;
+  /** Opens the viewer in its own window (desktop only). */
+  onOpenViewer?: () => void;
 }) {
   // Run an action after dismissing the drawer.
   const act = (fn: () => void) => () => {
@@ -63,8 +74,9 @@ export function ControllerMenu({
                 <X size={18} />
               </Button>
             </div>
-            <div className="flex-1 flex flex-col gap-1 p-2">
+            <div className="flex-1 flex flex-col gap-1 overflow-y-auto p-2">
               <Button variant="ghost" className="justify-start" onClick={act(onShare)}>
+                <Share2 size={16} className="mr-2" />
                 Share
               </Button>
               {canShowCode && (
@@ -75,23 +87,37 @@ export function ControllerMenu({
               )}
               {canSharePassphrase && (
                 <Button variant="ghost" className="justify-start" onClick={act(onShowPassphrase)}>
+                  <KeyRound size={16} className="mr-2" />
                   Passphrase
                 </Button>
               )}
-              <Button variant="ghost" className="justify-start" onClick={act(onSwitchToViewer)}>
-                Switch to Viewer
-              </Button>
+              {onOpenViewer && (
+                <Button variant="ghost" className="justify-start" onClick={act(onOpenViewer)}>
+                  <ExternalLink size={16} className="mr-2" />
+                  Open Viewer
+                </Button>
+              )}
+              {onSwitchToViewer && (
+                <Button variant="ghost" className="justify-start" onClick={act(onSwitchToViewer)}>
+                  <MonitorPlay size={16} className="mr-2" />
+                  Switch to Viewer
+                </Button>
+              )}
               <Button variant="ghost" className="justify-start" data-testid="deck-replace" onClick={act(onReplaceClick)}>
                 <RefreshCw size={16} className="mr-2" />
                 Replace PDF…
               </Button>
-              <DownloadButton deck={deck} block />
-              <div className="flex items-center justify-between px-4 py-2">
-                <span className="text-sm">Theme</span>
-                <ThemeToggle size="icon" />
-              </div>
+              <DownloadButton deck={deck} size="default" block />
+              {onSettings && (
+                <Button variant="ghost" className="justify-start" onClick={act(onSettings)}>
+                  <Settings size={16} className="mr-2" />
+                  Settings
+                </Button>
+              )}
+              <ThemeToggle block />
               <div className="mt-auto">
                 <Button variant="destructive" className="w-full" onClick={act(onEndClick)}>
+                  <Power size={16} className="mr-2" />
                   End Presentation
                 </Button>
               </div>
