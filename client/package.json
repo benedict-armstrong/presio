@@ -27,14 +27,11 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-grid-layout": "^2.2.4",
-    "react-mosaic-component": "^6.2.0",
+    "react-mosaic-component": "^7.1.0",
     "react-router-dom": "^7.18.4",
     "shiki": "^4.4.3",
     "socket.io-client": "^4.8.3",
     "tailwind-merge": "^3.7.0"
-  },
-  "overrides": {
-    "react-dom": "$react-dom"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

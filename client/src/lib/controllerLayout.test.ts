@@ -10,7 +10,9 @@ import {
   addLeaf,
   removeLeaf,
   visibleKeys,
+  loadLayout,
 } from "./controllerLayout";
+import { STORAGE_KEYS } from "./storage";
 
 describe("controllerLayout helpers", () => {
   it("DEFAULT_LAYOUT exposes every card as a leaf", () => {
@@ -38,6 +40,53 @@ describe("controllerLayout helpers", () => {
   });
 });
 
+// react-mosaic v7 replaced the binary tree with an n-ary one. Everyone who had
+// already arranged their dashboard has a v6-shaped tree sitting in
+// localStorage, and dropping it as unrecognisable would silently reset them all
+// to the default — a quiet regression nothing else would catch.
+describe("layouts saved by react-mosaic v6", () => {
+  beforeEach(() => localStorage.clear());
+
+  /** The binary shape v6 persisted: `first`/`second`, one `splitPercentage`. */
+  const legacy = {
+    direction: "row",
+    first: "currentSlide",
+    second: {
+      direction: "column",
+      first: "notes",
+      second: "timer",
+      splitPercentage: 40,
+    },
+    splitPercentage: 60,
+  };
+
+  it("are migrated on read rather than discarded", () => {
+    localStorage.setItem(STORAGE_KEYS.controllerMosaic, JSON.stringify(legacy));
+    const loaded = loadLayout();
+
+    // Not the fallback — the user's own arrangement survived.
+    expect(loaded).not.toEqual(DEFAULT_LAYOUT);
+    expect(visibleKeys(loaded).sort()).toEqual(["currentSlide", "notes", "timer"]);
+
+    // And it came back in the n-ary shape the new Mosaic understands.
+    expect(loaded).toMatchObject({ type: "split", direction: "row" });
+  });
+
+  it("drop cards that no longer exist, keeping the rest", () => {
+    localStorage.setItem(
+      STORAGE_KEYS.controllerMosaic,
+      JSON.stringify({ direction: "row", first: "currentSlide", second: "retiredCard" }),
+    );
+    // The surviving child is promoted rather than left in a one-child split.
+    expect(loadLayout()).toBe("currentSlide");
+  });
+
+  it("fall back to the default when nothing usable is stored", () => {
+    localStorage.setItem(STORAGE_KEYS.controllerMosaic, JSON.stringify(["currentSlide"]));
+    expect(loadLayout()).toEqual(DEFAULT_LAYOUT);
+  });
+});
+
 describe("react-mosaic runtime", () => {
   let host: HTMLDivElement;
   beforeEach(() => {
@@ -47,7 +96,9 @@ describe("react-mosaic runtime", () => {
 
   // Regression guard: react-mosaic v6 pulled a nested react-dom@18 that crashed
   // under React 19 with "ReactCurrentDispatcher is undefined" at module eval /
-  // mount. A successful mount proves the dedupe-to-one-react-dom fix holds.
+  // mount. v7 drops the react-dom peer dependency altogether, so the react-dom
+  // override that used to dedupe the tree is gone too — a successful mount is
+  // what proves the tree really does resolve a single react-dom without it.
   it("mounts a Mosaic of MosaicWindows without crashing", () => {
     const root = createRoot(host);
     act(() => {
