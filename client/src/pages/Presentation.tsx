@@ -16,6 +16,7 @@ import {
   deckWatchKey,
 } from "@/lib/storage";
 import { socket } from "@/lib/socket";
+import { useLatestRef } from "@/hooks/useLatestRef";
 import { startClockSync } from "@/lib/clock";
 import { supabase } from "@/lib/supabaseClient";
 import { authEnabled } from "@/lib/authMode";
@@ -78,8 +79,7 @@ export default function Presentation() {
   );
   // In-progress stroke streamed from the controller (viewer windows).
   const [remoteDraft, setRemoteDraft] = useState<{ slide: number; stroke: Stroke | null } | null>(null);
-  const annotationsRef = useRef(annotations);
-  annotationsRef.current = annotations;
+  const annotationsRef = useLatestRef(annotations);
 
   // Everything extracted from the loaded PDF (notes, media, attachments…),
   // re-derived whenever the document is swapped (e.g. after a notes edit).
@@ -103,18 +103,6 @@ export default function Presentation() {
   const channelRef = useRef<BroadcastChannel | null>(null);
   // Object URL backing a local session's PDF, swapped when notes are edited.
   const localUrlRef = useRef("");
-  // Latest broadcastable state, for replying to a local window's state_request
-  // without re-subscribing the channel on every slide change.
-  const stateRef = useRef({
-    currentSlide: 1,
-    totalSlides: 0,
-    blanked: false,
-    showCode: false,
-    annotations: {} as AnnotationsBySlide,
-    mediaState: { id: null, action: "pause", seq: 0 } as MediaState,
-    audioState: defaultAudioState,
-  });
-
   // Resolved during load: true if this presentation's PDF lives in this
   // browser's IndexedDB (local session). null until known.
   const [local, setLocal] = useState<boolean | null>(null);
@@ -123,12 +111,21 @@ export default function Presentation() {
   const outOfSync = isViewer && viewerSlide !== null;
   const displaySlide = outOfSync ? viewerSlide! : currentSlide;
 
-  stateRef.current = { currentSlide, totalSlides, blanked, showCode, annotations, mediaState, audioState };
+  // Latest broadcastable state, for replying to a local window's state_request
+  // without re-subscribing the channel on every slide change.
+  const stateRef = useLatestRef({
+    currentSlide,
+    totalSlides,
+    blanked,
+    showCode,
+    annotations,
+    mediaState,
+    audioState,
+  });
 
   // Mirror of pdfUrl for callbacks that must not re-subscribe the socket
   // effect when it changes (a deck replace rewrites it on local sessions).
-  const pdfUrlRef = useRef("");
-  pdfUrlRef.current = pdfUrl;
+  const pdfUrlRef = useLatestRef(pdfUrl);
 
   // Deck file watching (File System Access API, Chromium only). When the
   // IndexedDB record carries a handle to the deck's file on disk, the
@@ -147,15 +144,17 @@ export default function Presentation() {
   const [watchedHandleEpoch, setWatchedHandleEpoch] = useState(0);
   // Whether this deck carries a watchable file handle. Until that's known the
   // header shows no live-reload control at all rather than a wrong one.
-  const [deckWatchable, setDeckWatchable] = useState(false);
+  // Whether this deck's IndexedDB record carries a handle to a file on disk.
+  // Resolved by the watcher effect below; whether that handle is any use right
+  // now is a separate, derivable question (see deckWatchable).
+  const [deckHasHandle, setDeckHasHandle] = useState(false);
   // How the presenter wants recompiles handled. Chosen at upload (Home's
   // live-reload checkbox), changed from the header, and remembered per deck.
   const [deckWatchMode, setDeckWatchMode] = useState<DeckWatchMode>(() => {
     const stored = lsGetString(deckWatchKey(id!));
     return isDeckWatchMode(stored) ? stored : "prompt";
   });
-  const deckWatchModeRef = useRef(deckWatchMode);
-  deckWatchModeRef.current = deckWatchMode;
+  const deckWatchModeRef = useLatestRef(deckWatchMode);
   // A detected deck change waiting on the presenter: "watch" from the file
   // watcher (prompt mode only), "remote" from the URL-republish poller. Both
   // clear drawings and Presio-edited notes, so both get the same warning.
@@ -172,26 +171,25 @@ export default function Presentation() {
   // Whether pdfUrl points at someone else's host (a URL-backed deck) rather
   // than our own storage. Decides how a changed deck is re-fetched.
   const [externalPdf, setExternalPdf] = useState(false);
-  const externalPdfRef = useRef(false);
-  externalPdfRef.current = externalPdf;
+  const externalPdfRef = useLatestRef(externalPdf);
   // The republished deck, already downloaded and parsed by the poller to
   // confirm it. Handed to applyDeckUpdate so applying costs no second download.
   const prefetchedDeckRef = useRef<PDFDocumentProxy | null>(null);
 
+  // The settled role, not the requested one: a second controller demoted to
+  // viewer by session_state must stop watching too.
+  const canWatchDeck = !!local && role === "controller" && isDeckWatchSupported();
+  const deckWatchable = canWatchDeck && deckHasHandle;
+
   useEffect(() => {
-    // The settled role, not the requested one: a second controller demoted to
-    // viewer by session_state must stop watching too.
-    if (!local || role !== "controller" || !isDeckWatchSupported()) {
-      setDeckWatchable(false);
-      return;
-    }
+    if (!canWatchDeck) return;
     let cancelled = false;
     idbGet(id!)
       .then((rec) => {
         if (cancelled || !rec?.handle) return;
         // The control appears as soon as there's a file to watch, whatever the
         // mode — that's what makes "live reload off" a state you can leave.
-        setDeckWatchable(true);
+        setDeckHasHandle(true);
         if (deckWatchModeRef.current === "off") return;
         const watcher = new DeckWatcher(rec.handle, {
           onStatus: (status) => {
@@ -221,7 +219,7 @@ export default function Presentation() {
       setDeckWatchStatus(null);
       setReloadPrompt((p) => (p === "watch" ? null : p));
     };
-  }, [local, id, role, watchedHandleEpoch, deckWatchMode]);
+  }, [canWatchDeck, id, watchedHandleEpoch, deckWatchMode, deckWatchModeRef]);
 
   // Persist the live-reload choice per deck, so it survives a reload.
   useEffect(() => {
@@ -324,7 +322,7 @@ export default function Presentation() {
       });
       return done;
     },
-    [local, id]
+    [local, id, externalPdfRef, pdfUrlRef]
   );
 
   useEffect(() => {
@@ -410,6 +408,9 @@ export default function Presentation() {
     if (!deckInfo) return;
     const docTotal = deckInfo.totalSlides;
     if (totalSlides === docTotal) return;
+    // Reconciling with the document itself, which only exists once it has
+    // finished loading — there is no render-time value to derive this from.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTotalSlides(docTotal);
     setCurrentSlide((slide) => Math.min(Math.max(slide, 1), docTotal));
     if (local) {
@@ -476,7 +477,7 @@ export default function Presentation() {
           // sync also moves displaySlide, which would trip the slide-change
           // media reset below and wipe what we just adopted — flag it off.
           if (payload.mediaState) {
-            skipMediaResetRef.current = true;
+            skipMediaResetForRef.current = payload.currentSlide;
             setMediaState(payload.mediaState);
           }
           if (payload.audioState) setAudioState(payload.audioState);
@@ -486,6 +487,9 @@ export default function Presentation() {
 
     // Local sessions never touch the server: no socket, sync over the channel.
     if (local) {
+      // Subscribing to a transport: the role this window starts with is part
+      // of setting that transport up, not something a render can derive.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       applyRole(requestedRole);
       channel.postMessage({ type: "state_request" });
       return () => {
@@ -678,7 +682,7 @@ export default function Presentation() {
       socket.off("session_ended");
       socket.disconnect();
     };
-  }, [id, local, requestedRole, navigate, setSearchParams, applyRole, applyCommit, applyUndo, applyClear, applyDeckUpdate]);
+  }, [id, local, requestedRole, navigate, setSearchParams, applyRole, applyCommit, applyUndo, applyClear, applyDeckUpdate, annotationsRef, stateRef]);
 
   // Report the settled role to analytics. The `?role=` query param is already
   // in every tracked URL, but Umami's Pages report keys on the path alone, so
@@ -694,15 +698,14 @@ export default function Presentation() {
     track("session-role", { role: settledRole, mode: local ? "local" : "server" });
   }, [settledRole, local]);
 
-  // Set when a state_sync adopts media state alongside a slide change, so the
-  // reset below doesn't immediately discard it.
-  const skipMediaResetRef = useRef(false);
+  // The slide whose media state arrived with a state_sync, so the reset below
+  // doesn't immediately discard what was just adopted. Naming the slide rather
+  // than raising a flag keeps it to that one sync: any other slide change
+  // resets as usual, with nothing to clear afterwards.
+  const skipMediaResetForRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (skipMediaResetRef.current) {
-      skipMediaResetRef.current = false;
-      return;
-    }
+    if (skipMediaResetForRef.current === displaySlide) return;
     setMediaState((s) => (s.id === null ? s : { id: null, action: "pause", seq: Date.now() }));
     setMediaTime(null);
   }, [displaySlide]);
@@ -955,7 +958,7 @@ export default function Presentation() {
       destroyPdf(prefetchedDeckRef.current);
       prefetchedDeckRef.current = null;
     };
-  }, [local, role, id, pdfUrl, pdfWriteAuth]);
+  }, [local, role, id, pdfUrl, pdfWriteAuth, pdfUrlRef]);
 
   // Pill click: announce the republished deck for controller and viewers via
   // the server's deck_updated broadcast — every client (this one included)
@@ -1154,7 +1157,11 @@ export default function Presentation() {
       setApplyingWatch(false);
     }
   }, [replacePdf]);
-  applyDeckWatchUpdateRef.current = applyDeckWatchUpdate;
+  // The watcher holds this callback for as long as it runs, so it reads the
+  // current one through a ref rather than being re-armed on every render.
+  useEffect(() => {
+    applyDeckWatchUpdateRef.current = applyDeckWatchUpdate;
+  }, [applyDeckWatchUpdate]);
 
 
 
@@ -1268,7 +1275,7 @@ export default function Presentation() {
       new Blob([serializeDrawing(annotationsRef.current)], { type: "application/json" }),
       `${filename || "slides"}-drawing.json`
     );
-  }, [filename]);
+  }, [filename, annotationsRef]);
 
   const onLoadDrawing = useCallback(
     async (file: File) => {
@@ -1305,6 +1312,8 @@ export default function Presentation() {
   useEffect(() => {
     if (role !== "controller") return;
     const auto = currentMedia.find((p) => p.autoplay);
+    // Driving playback, an external system, from the slide the deck landed on.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (auto) onMediaControl(auto.id, "play");
     // displaySlide drives currentMedia; re-run on slide change or once media loads.
     // eslint-disable-next-line react-hooks/exhaustive-deps

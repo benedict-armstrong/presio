@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { AArrowDown, AArrowUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { marked } from "marked";
@@ -27,10 +27,15 @@ export function SpeakerNotesCard({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
+  // A new slide means new notes, so an edit in progress no longer applies.
+  // Adjusted during render rather than in an effect: the editor must not
+  // paint once more holding the previous slide's draft.
+  const [editedSlide, setEditedSlide] = useState(currentSlide);
+  if (editedSlide !== currentSlide) {
+    setEditedSlide(currentSlide);
     setEditing(false);
     setError("");
-  }, [currentSlide]);
+  }
 
   const startEdit = () => {
     setDraft(notes);

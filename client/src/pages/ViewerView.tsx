@@ -65,22 +65,28 @@ export function ViewerView({
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(null);
 
-  const resetTimer = useCallback(() => {
-    setCursorVisible(true);
+  // Arming the countdown is separate from showing the cursor, so mounting can
+  // start the clock without a state update: the cursor is already visible.
+  const armHide = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       if (!menuOpen && !authOpen) setCursorVisible(false);
     }, 3000);
   }, [menuOpen, authOpen]);
 
+  const resetTimer = useCallback(() => {
+    setCursorVisible(true);
+    armHide();
+  }, [armHide]);
+
   useEffect(() => {
-    resetTimer();
+    armHide();
     window.addEventListener("mousemove", resetTimer);
     return () => {
       window.removeEventListener("mousemove", resetTimer);
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [resetTimer]);
+  }, [armHide, resetTimer]);
 
   useEffect(() => {
     const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
