@@ -147,10 +147,9 @@ needs so generated links come out `https://`.
 
 ### Serving the app on two domains
 
-`APP_HOST_ALT` adds a second hostname to the app's router; `SUPABASE_HOST_ALT`
-does the same for the API, to keep a previous API hostname answering after a
-move. Both are optional and default back to their primary, so a single-domain
-deployment needs no change.
+Every public router takes an optional second hostname via an `_ALT` variable —
+`APP_HOST_ALT`, `SUPABASE_HOST_ALT`, `UMAMI_HOST_ALT`, `UPTIME_HOST_ALT`. What
+each one is *for* differs, and the table below spells that out.
 
 The rule is two matchers OR'd together, **not** ``Host(`a`, `b`)`` — the
 multi-value form is Traefik v2 syntax. Traefik v3 rejects it with *"unexpected
@@ -161,11 +160,33 @@ which takes the app offline rather than failing visibly at deploy time:
 traefik.http.routers.presio.rule=Host(`${APP_HOST}`) || Host(`${APP_HOST_ALT:-${APP_HOST}}`)
 ```
 
-Only the *app* is dual-homed. `VITE_SUPABASE_URL` is baked into the client
-bundle at build time, `API_EXTERNAL_URL` is what GoTrue builds OAuth redirects
-and email links from, and an OAuth app has one callback URL — so the API, auth,
-storage and analytics stay on a single domain. Put them on whichever domain is
-reachable from the most restricted network you care about.
+Only the *app* is genuinely served from two domains at once. `VITE_SUPABASE_URL`
+is baked into the client bundle at build time, `API_EXTERNAL_URL` is what GoTrue
+builds OAuth redirects and email links from, and an OAuth app has one callback
+URL — so the API, auth and storage have a single canonical domain. Put it on
+whichever domain is reachable from the most restricted network you care about.
+
+Every router nevertheless takes an `_ALT` hostname, because a *move* is not the
+same thing as being dual-homed: the second matcher keeps the **previous**
+hostname answering while clients still hold it.
+
+| Router | Primary | Second matcher | What the second one is for |
+| --- | --- | --- | --- |
+| app | `APP_HOST` | `APP_HOST_ALT` | genuinely serving both domains |
+| Supabase (Kong) | `SUPABASE_HOST` | `SUPABASE_HOST_ALT` | a cached service worker or installed PWA still calling the old API host |
+| Umami | `UMAMI_HOST` | `UMAMI_HOST_ALT` | the tracking script beacons back to the origin it was loaded from |
+| Uptime Kuma | `UPTIME_HOST` | `UPTIME_HOST_ALT` | bookmarks and external status links |
+
+All four default back to their primary when the `_ALT` is empty, so a
+single-domain deployment needs no change.
+
+The analytics one is the easy one to get wrong. `ANALYTICS_URL` has to name the
+same host `client/index.html` loads the tracking script from — the CSP
+`script-src` is derived from it, so a mismatch blocks analytics with no error
+anyone will notice. And because the built client is service-worker precached,
+moving `UMAMI_HOST` without setting `UMAMI_HOST_ALT` silently drops the hits
+from every visitor still running a pre-move bundle, for as long as that cache
+lives.
 
 Because `VITE_SUPABASE_URL` is a **build arg**, changing it needs
 `docker compose up -d --build`. A plain restart keeps the old bundle.

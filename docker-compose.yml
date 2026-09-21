@@ -759,6 +759,13 @@ services:
   # After first boot: visit https://${UMAMI_HOST}, log in (admin / umami),
   # change the password, add a website, then paste the tracking script into
   # client/index.html using the generated website ID.
+  #
+  # UMAMI_HOST_ALT keeps a previous analytics hostname routed after a move.
+  # This one is not cosmetic: the tracking script beacons back to the origin it
+  # was loaded FROM, and the built client is precached by the service worker —
+  # so a visitor still running a pre-move bundle keeps calling the old host for
+  # as long as that cache lives. Without the second matcher those hits are
+  # silently dropped rather than recorded.
   umami:
     container_name: presio-umami
     image: ghcr.io/umami-software/umami:postgresql-latest
@@ -775,7 +782,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=web"
-      - "traefik.http.routers.umami.rule=Host(`${UMAMI_HOST}`)"
+      - "traefik.http.routers.umami.rule=Host(`${UMAMI_HOST}`) || Host(`${UMAMI_HOST_ALT:-${UMAMI_HOST}}`)"
       - "traefik.http.routers.umami.entrypoints=websecure"
       - "traefik.http.routers.umami.tls=true"
       - "traefik.http.services.umami.loadbalancer.server.port=3000"
@@ -783,6 +790,10 @@ services:
   # Uptime Kuma — self-hosted uptime monitoring + status dashboard.
   # After first boot: visit https://${UPTIME_HOST}, create the admin account,
   # then add an HTTP(s) monitor pointing at https://${APP_HOST}/healthz.
+  #
+  # UPTIME_HOST_ALT keeps a previous dashboard hostname routed after a move, so
+  # bookmarks and any external status link keep resolving. Same optional
+  # defaulting as the routers above.
   uptime-kuma:
     container_name: presio-uptime-kuma
     image: louislam/uptime-kuma:1
@@ -795,7 +806,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=web"
-      - "traefik.http.routers.uptime.rule=Host(`${UPTIME_HOST}`)"
+      - "traefik.http.routers.uptime.rule=Host(`${UPTIME_HOST}`) || Host(`${UPTIME_HOST_ALT:-${UPTIME_HOST}}`)"
       - "traefik.http.routers.uptime.entrypoints=websecure"
       - "traefik.http.routers.uptime.tls=true"
       - "traefik.http.services.uptime.loadbalancer.server.port=3001"
