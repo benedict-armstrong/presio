@@ -109,16 +109,20 @@
   --sidebar-ring: oklch(0.439 0 0);
 }
 
-/* Scoped accent tokens for Home2 — the rest of the app stays pure
-   grayscale; this page borrows one warm accent for the redesign. */
+/* Scoped tokens for Home2. The accent is now the ordinary foreground colour,
+   so the home page is pure grayscale like the rest of the app. Kept as tokens
+   rather than removed: the call sites that use them are load-bearing (focus
+   rings, the progress bar, the checkbox) and still need *a* colour — they just
+   no longer get a different one. Reintroducing an accent means changing these
+   two values and nothing else. */
 .home2 {
-  --home2-accent: #c97a1f;
-  --home2-accent-soft: rgba(201, 122, 31, 0.12);
+  --home2-accent: var(--foreground);
+  --home2-accent-soft: rgba(21, 23, 26, 0.06);
   --home2-grid: rgba(21, 23, 26, 0.06);
 }
 .dark .home2 {
-  --home2-accent: #f2a93c;
-  --home2-accent-soft: rgba(242, 169, 60, 0.14);
+  --home2-accent: var(--foreground);
+  --home2-accent-soft: rgba(242, 241, 237, 0.06);
   --home2-grid: rgba(242, 241, 237, 0.06);
 }
 
