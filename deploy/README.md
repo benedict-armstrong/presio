@@ -235,6 +235,36 @@ the same effect. That is what makes `Cf-Connecting-Ip` trustworthy at the edge:
 it is an ordinary header, so it is only meaningful while the edge is
 unavoidable.
 
+## Monitoring certificate expiry
+
+Uptime Kuma runs in the stack. Two monitors are worth having:
+
+| Monitor | Type | Target |
+| --- | --- | --- |
+| App reachable | HTTP(s) | `https://${APP_HOST}/healthz` |
+| Origin certificates | HTTP(s) - Keyword | `http://presio-cert-expiry:8080/cgi-bin/check`, keyword `cert-expiry: OK` |
+
+The second exists because the first cannot cover it. Behind a CDN, a monitor on
+the public URL validates the **edge** certificate, which the CDN renews on its
+own schedule — it stays green while the origin behind it serves something
+expired. The `cert-expiry` service asks Traefik directly, over the internal
+network, for each hostname in turn, so it reports what a real handshake gets.
+
+That is not hypothetical: presio.xyz served expired certificates for two days
+in September 2026 while every public check passed, because the zone was on SSL
+mode `full`, which does not verify the origin at all. Run the zones on **Full
+(strict)** and keep this monitor — the first makes a bad origin certificate
+fail, the second tells you before it does.
+
+Run it by hand any time:
+
+```bash
+docker compose exec cert-expiry /srv/check.sh
+```
+
+Tune the warning window with `CERT_EXPIRY_MIN_DAYS` (default 30) and the
+hostname list with `CERT_EXPIRY_HOSTS`, both on the `cert-expiry` service.
+
 ## Rate limiting
 
 The app does **no HTTP rate limiting of its own** — that belongs on whatever

@@ -796,7 +796,9 @@ services:
 
   # Uptime Kuma — self-hosted uptime monitoring + status dashboard.
   # After first boot: visit https://${UPTIME_HOST}, create the admin account,
-  # then add an HTTP(s) monitor pointing at https://${APP_HOST}/healthz.
+  # then add an HTTP(s) monitor pointing at https://${APP_HOST}/healthz, and an
+  # HTTP(s) - Keyword monitor on http://presio-cert-expiry:8080/cgi-bin/check
+  # with the keyword `cert-expiry: OK` (see the cert-expiry service below).
   #
   # UPTIME_HOST_ALT keeps a previous dashboard hostname routed after a move, so
   # bookmarks and any external status link keep resolving. Same optional
@@ -817,6 +819,38 @@ services:
       - "traefik.http.routers.uptime.entrypoints=websecure"
       - "traefik.http.routers.uptime.tls=true"
       - "traefik.http.services.uptime.loadbalancer.server.port=3001"
+
+  # Origin certificate expiry check, polled by Uptime Kuma.
+  #
+  # Behind a CDN, a monitor on the public URL sees the *edge* certificate — it
+  # says nothing about what this origin serves. presio.xyz runs no ACME (the
+  # origin admits Cloudflare only, so no challenge can reach it; see
+  # proxy/README.md), so its certificates are renewed by hand and nothing else
+  # would notice them lapsing. That has happened: the origin served expired
+  # certificates for two days in September 2026 and every public check stayed
+  # green, because the zone was on SSL mode `full`, which does not verify the
+  # origin. See presio#64.
+  #
+  # Asks Traefik for each hostname in turn and reports the shortest remaining
+  # validity. Add the Kuma monitor described above to act on it. Runnable by
+  # hand: `docker compose exec cert-expiry /srv/check.sh`.
+  cert-expiry:
+    container_name: presio-cert-expiry
+    image: alpine:3.21
+    restart: unless-stopped
+    networks:
+      web:
+    environment:
+      # Reached over the `web` network, so this checks the real handshake
+      # without depending on public DNS or leaving the host.
+      CERT_EXPIRY_ORIGIN: traefik:443
+      CERT_EXPIRY_HOSTS: "${APP_HOST},${APP_HOST_ALT:-},${SUPABASE_HOST},${SUPABASE_HOST_ALT:-},${UMAMI_HOST},${UPTIME_HOST}"
+      # Cloudflare Origin CA certificates run 15 years, so 30 days is a long
+      # warning. Raise it if your certificates are shorter-lived.
+      CERT_EXPIRY_MIN_DAYS: "30"
+    volumes:
+      - ./deploy/cert-expiry:/srv:ro
+    command: ["sh", "/srv/serve.sh"]
 
 networks:
   # Internal network for the Supabase services to talk to each other.
