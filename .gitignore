@@ -20,3 +20,10 @@ deploy/volumes/snippets/
 
 # Recording scratch from scripts/record-demo.mts
 /scripts/.demo-out/
+
+# Proxy TLS material. The config in proxy/ is vendored so it can be reviewed;
+# the private keys are generated on the host and must never leave it. The
+# signed certs live next to their keys on the host too. See proxy/README.md.
+/proxy/certs/*.key
+/proxy/certs/*.csr
+/proxy/certs/*.pem

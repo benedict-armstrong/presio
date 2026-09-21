@@ -1,0 +1,51 @@
+# Only Cloudflare may talk to this origin.
+#
+# Applied as a DEFAULT MIDDLEWARE on both entrypoints (see the
+# --entrypoints.*.http.middlewares flags in ../../docker-compose.yml), so it
+# covers every router on this host — current and future — without each app
+# having to remember to opt in. Anything arriving from outside Cloudflare's
+# published ranges is refused before it reaches any application.
+#
+# Why it matters: with the origin locked down, `Cf-Connecting-Ip` becomes a
+# header we can trust. It is an ordinary request header — Cloudflare overwrites
+# it on the way through, but anyone who could reach this origin directly would
+# be free to invent it (and rotate it per request), which would defeat any
+# rate limiting keyed on it. That limiting now lives at the Cloudflare edge,
+# so this allowlist is what makes the edge unavoidable rather than optional.
+#
+# The host firewall is believed to block non-Cloudflare traffic on 80/443 as
+# well. This is deliberately a second, independent enforcement point: the
+# firewall rules are not readable from any checkout, so they cannot be
+# reviewed or tested, whereas this file can.
+#
+# Ranges from https://www.cloudflare.com/ips-v4 and .../ips-v6
+# (fetched 2026-08-26; identical to the 2026-08-12 fetch). They change rarely
+# — re-check them if Cloudflare announces a change, or if legitimate traffic
+# starts coming back 403.
+http:
+  middlewares:
+    cfonly:
+      ipAllowList:
+        sourceRange:
+          - 173.245.48.0/20
+          - 103.21.244.0/22
+          - 103.22.200.0/22
+          - 103.31.4.0/22
+          - 141.101.64.0/18
+          - 108.162.192.0/18
+          - 190.93.240.0/20
+          - 188.114.96.0/20
+          - 197.234.240.0/22
+          - 198.41.128.0/17
+          - 162.158.0.0/15
+          - 104.16.0.0/13
+          - 104.24.0.0/14
+          - 172.64.0.0/13
+          - 131.0.72.0/22
+          - 2400:cb00::/32
+          - 2606:4700::/32
+          - 2803:f800::/32
+          - 2405:b500::/32
+          - 2405:8100::/32
+          - 2a06:98c0::/29
+          - 2c0f:f248::/32

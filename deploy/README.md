@@ -39,7 +39,8 @@ deploy/
     UPSTREAM_PINNED_SHA.txt  # the supabase/supabase commit these files come from
 proxy/
   docker-compose.yml      # the shared Traefik proxy (run once per host)
-  .env.example            # ACME_EMAIL for Let's Encrypt
+  README.md               # the TLS story: Cloudflare Origin CA, and why no ACME
+  certs/dynamic/          # file-provider config: certificates + the cfonly allowlist
 dbschema.sql              # mounted into presio-db-init
 ```
 
@@ -47,8 +48,13 @@ dbschema.sql              # mounted into presio-db-init
 
 - A Linux host with Docker + Docker Compose, ports **80 and 443** open.
 - Two DNS `A`/`AAAA` records pointing at the host, e.g. `presio.xyz` (app) and
-  `supabase.presio.xyz` (Supabase API). They must resolve publicly for Let's
-  Encrypt to issue certificates.
+  `supabase.presio.xyz` (Supabase API), resolving publicly.
+- A TLS certificate for those names. The presio.xyz deployment sits behind
+  Cloudflare and uses a Cloudflare Origin CA certificate, because an origin
+  that only admits Cloudflare cannot complete an ACME challenge — see
+  [`proxy/README.md`](../proxy/README.md). Self-hosting without a CDN in
+  front, add an ACME resolver to `proxy/docker-compose.yml` instead; Traefik's
+  TLS-ALPN-01 challenge needs nothing but port 443.
 
 ## 1. Generate secrets
 
@@ -103,12 +109,16 @@ verification emails).
 ```bash
 docker network create web        # the shared ingress network
 cd proxy
-cp .env.example .env             # set ACME_EMAIL
 docker compose up -d
 ```
 
 Traefik now owns ports 80/443 and watches Docker for labelled containers. You
 only do this once — every app (including Presio) attaches to the `web` network.
+
+The proxy serves TLS from certificates on disk under `proxy/certs/`, which are
+**not** in version control — install yours there and point
+`certs/dynamic/default.yml` at them. [`proxy/README.md`](../proxy/README.md)
+covers how those are minted and why this deployment runs no ACME resolver.
 
 ## 5. Start Presio
 
@@ -124,8 +134,8 @@ so you can confirm the build you meant to deploy is the one running. Left unset
 it is `dev`, and a half-applied deploy looks exactly like a good one.
 
 First boot runs the Supabase migrations, creates the MinIO bucket, then
-`presio-db-init` applies `dbschema.sql`, then `presio` starts. As soon as DNS
-resolves, Traefik fetches certificates and serves:
+`presio-db-init` applies `dbschema.sql`, then `presio` starts. Once DNS
+resolves, Traefik serves:
 
 - `https://presio.xyz` → the app
 - `https://supabase.presio.xyz` → Supabase API + Studio (login
@@ -338,9 +348,9 @@ same proxy:
    served from the proxy's **default** certificate (a Cloudflare Origin CA cert
    covering `presio.xyz` + `*.presio.xyz`), so keep the hostname one level
    deep under `presio.xyz` — that's what Cloudflare's edge certificate and
-   the origin cert both cover. No per-host ACME involved: the host firewall
-   only admits Cloudflare on 80/443, so Let's Encrypt validation can't reach
-   the origin anyway.
+   the origin cert both cover. No per-host ACME is involved, and none can be:
+   the origin admits Cloudflare only, so no ACME challenge reaches it. See
+   [`proxy/README.md`](../proxy/README.md).
 
    For a hostname under a *different* domain, the default certificate won't
    cover it. Add a second certificate rather than replacing the default —
@@ -369,6 +379,15 @@ same proxy:
    cert next to the key, and set that zone's SSL mode to **Full (strict)** —
    the API value is `strict`, not `full_strict`. Traefik's file provider picks
    the new file up live; no restart.
+
+   Check what the origin actually serves, per hostname, rather than trusting
+   the config — an SSL mode of plain `full` does not verify the origin, so a
+   wrong or expired certificate there stays invisible from the outside:
+
+   ```bash
+   echo | openssl s_client -connect 127.0.0.1:443 -servername app2.example.com \
+     2>/dev/null | openssl x509 -noout -issuer -dates -ext subjectAltName
+   ```
 
 ## Continuous deployment (optional)
 

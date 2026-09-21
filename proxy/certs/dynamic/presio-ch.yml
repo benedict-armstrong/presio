@@ -1,0 +1,13 @@
+# SNI certificate for presio.ch (see presio#108 — dual-homing the app).
+#
+# The default certificate in default.yml stays as-is and keeps serving
+# presio.xyz. Traefik picks this one only when the TLS handshake carries an
+# SNI matching presio.ch or *.presio.ch, so adding it cannot affect .xyz.
+#
+# Cloudflare Origin CA, valid to 2041-09-17. The private key was generated on
+# this host and has never left it; only the CSR went out for signing.
+# The presio.ch zone is set to Full (strict), which this cert satisfies.
+tls:
+  certificates:
+    - certFile: /certs/presio.ch.pem
+      keyFile: /certs/presio.ch.key

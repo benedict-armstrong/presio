@@ -1,0 +1,70 @@
+# Shared reverse proxy for this host.
+#
+# One Traefik instance owns :80 and :443 and auto-routes any container that
+# (a) is attached to the external `web` network and (b) carries traefik.* labels.
+# Presio's `presio` and `kong` containers already do. Add more apps the same
+# way — there is never a second proxy and never a port conflict.
+#
+# TLS: there is no ACME here, and there cannot be. Routers set `tls=true` and
+# are served from the file provider's certificates (see certs/dynamic/) — the
+# default is a Cloudflare Origin CA certificate for presio.xyz + *.presio.xyz,
+# with presio.ch carried as a second SNI certificate. Why ACME is impossible:
+# the host firewall and Traefik's own `cfonly@file` middleware both admit
+# Cloudflare only, so Let's Encrypt's validator terminates TLS against
+# Cloudflare's edge, which speaks neither `acme-tls/1` (TLS-ALPN-01) nor the
+# HTTP-01 well-known path back to this origin. If ACME is ever wanted back it
+# must be DNS-01 with the Cloudflare provider. See presio#64.
+#
+# One-time setup on the host:
+#   docker network create web
+#   docker compose up -d
+
+name: proxy
+
+services:
+  traefik:
+    image: traefik:v3.3
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      # Discover routes from Docker container labels; opt-in only.
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=web
+      # Static TLS config: the default certificate store (see certs/dynamic).
+      - --providers.file.directory=/certs/dynamic
+      # Entry points.
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      # Refuse anything that did not arrive through Cloudflare. Set as a default
+      # middleware on both entrypoints, so every router on this host — including
+      # ones added later — is covered without having to opt in. The allowlist
+      # itself, and why it exists, is in certs/dynamic/cfonly.yml.
+      #
+      # Note: at startup Traefik logs `middleware "cfonly@file" does not exist`
+      # for the internal web-to-websecure redirect router, because entrypoint
+      # defaults resolve before the file provider has loaded. It resolves a
+      # moment later; the window is boot-only and the redirect it affects
+      # carries no application traffic.
+      - --entrypoints.web.http.middlewares=cfonly@file
+      - --entrypoints.websecure.http.middlewares=cfonly@file
+      # Send all plain HTTP to HTTPS.
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --api.dashboard=true
+      - --api.insecure=true
+    ports:
+      - "80:80"
+      - "443:443"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Read the Docker API to watch container labels (read-only).
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Origin CA certificates + file-provider dynamic config (read-only).
+      - ./certs:/certs:ro
+    networks:
+      - web
+
+networks:
+  web:
+    external: true

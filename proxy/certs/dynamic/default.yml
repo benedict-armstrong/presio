@@ -1,0 +1,18 @@
+# The default certificate: what Traefik serves when a handshake carries no SNI,
+# or an SNI that no other certificate in this directory claims.
+#
+# Cloudflare Origin CA, covering presio.xyz + *.presio.xyz, valid to
+# 2041-09-17. The private key was generated on the host and has never left it;
+# only the CSR went out for signing.
+#
+# This replaced the account's Authenticated Origin Pulls *client* certificate
+# (certs/origin.pem), which sat here until 2026-09-21 despite being
+# client-auth only and carrying no subjectAltName — it matched no hostname and
+# could never satisfy Full (strict). AOP is off on both zones, so that file is
+# unused; it is not vendored here. See presio#64.
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/presio.xyz.pem
+        keyFile: /certs/presio.xyz.key
