@@ -3,6 +3,7 @@ import { useParams, useSearchParams, useNavigate, useLocation, Link } from "reac
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { loadPdf, loadPdfData, freshPdfUrl, loadLatestPdf, renderPage, clearCache, openPdf, destroyPdf } from "@/lib/pdf";
 import { loadDeckInfo, type Deck, type DeckInfo } from "@/lib/deck";
+import { useRenderTargetWidth } from "@/hooks/useRenderTargetWidth";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
 import { hasAnyStrokes, parseDrawing, serializeDrawing, type AnnotationsBySlide, type LaserPoint, type Stroke } from "@/lib/annotations";
@@ -710,20 +711,21 @@ export default function Presentation() {
     setMediaTime(null);
   }, [displaySlide]);
 
+  // The canvas is rendered at the container's pixel size, so anything that
+  // changes that size or scale — entering fullscreen, dragging the viewer onto
+  // a projector, browser zoom, a move to a differently scaled monitor — has to
+  // re-render, or the slide stays an upscaled canvas from the old size.
+  const viewWidth = useRenderTargetWidth(currentCanvasRef, !!deckInfo);
+
   useEffect(() => {
-    if (!pdf || !currentCanvasRef.current) return;
+    if (!pdf || !currentCanvasRef.current || !viewWidth) return;
     const container = currentCanvasRef.current;
-    // Render at the container's real pixel resolution (CSS width * DPR) so the
-    // slide stays sharp on large / high-DPI displays instead of upscaling a
-    // fixed-size canvas.
-    const dpr = window.devicePixelRatio || 1;
-    const targetWidth = Math.round((container.clientWidth || 1280) * dpr);
     // renderPage resolves out of order (cached pages are near-instant, fresh
     // ones aren't), so a rapid slide change could leave a stale page on screen
     // — with the annotation overlay drawing the new slide's strokes over it.
     // Drop any render that finishes after the effect has moved on.
     let stale = false;
-    renderPage(pdf, displaySlide, { targetWidth }).then((canvas) => {
+    renderPage(pdf, displaySlide, { targetWidth: viewWidth }).then((canvas) => {
       if (stale) return;
       container.innerHTML = "";
       canvas.style.width = "100%";
@@ -734,7 +736,7 @@ export default function Presentation() {
     return () => { stale = true; };
     // deckInfo gates mounting of the view that owns the container, and refs
     // don't trigger effects — re-run once the container actually exists.
-  }, [pdf, displaySlide, role, deckInfo]);
+  }, [pdf, displaySlide, role, deckInfo, viewWidth]);
 
   // Mirror a local state change outward: always to other same-browser windows
   // (BroadcastChannel) and, for synced sessions, to the server (socket). The

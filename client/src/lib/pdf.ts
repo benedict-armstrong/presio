@@ -144,9 +144,13 @@ export async function loadLatestPdf(
   return loadPdfData(new Uint8Array(await res.arrayBuffer()));
 }
 
-// Cap the rendered canvas width (device pixels). Beyond ~4K wide there's no
-// visible gain and we risk hitting browser canvas-size limits / memory.
-const MAX_CANVAS_WIDTH = 4096;
+// Cap the rendered canvas width (device pixels). The viewer is often the whole
+// point — a projector or a 5K panel — so this has to clear those: a 5K display
+// is 5120 device px, and a 4K one at DPR 2 asks for 7680. At 16:9 that is
+// ~38 Mpx, well inside every desktop browser's canvas area limit. Small-screen
+// devices never come near it (an iPad Pro is 2732 device px wide), so the
+// tighter limits on mobile Safari are not in play.
+const MAX_CANVAS_WIDTH = 8192;
 
 export interface RenderOptions {
   // Fixed scale multiplier (used for thumbnails / previews).
@@ -179,9 +183,11 @@ export async function renderPage(
   } else {
     scale = options.scale ?? 2;
   }
-  // Round so small layout/DPR jitters reuse the cached canvas instead of
-  // re-rendering on every resize.
-  scale = Math.max(0.25, Math.round(scale * 4) / 4);
+  // Quantise so small layout/DPR jitters reuse the cached canvas instead of
+  // re-rendering on every resize. Round *up*: rounding to the nearest step can
+  // land below the requested width, which then gets upscaled on display —
+  // exactly the softness targetWidth exists to avoid.
+  scale = Math.max(0.25, Math.ceil(scale * 4) / 4);
 
   const key = `${pageNum}-${scale}`;
   const cached = pageCache.get(key);

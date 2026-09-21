@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { renderPage, type MediaPlacement } from "@/lib/pdf";
+import { renderPage } from "@/lib/pdf";
 import type { Deck } from "@/lib/deck";
 import { drawStrokes, type Stroke } from "@/lib/annotations";
-import { getMediaPoster } from "@/lib/mediaPoster";
+import { MediaPoster } from "@/components/MediaPosterOverlay";
 
 export function ThumbnailsCard({
   deck,
@@ -25,7 +25,33 @@ export function ThumbnailsCard({
     });
   }, [pdf]);
 
+  // The canvas is rendered at the tile's pixel size, so a tile that grows would
+  // otherwise keep showing the old, smaller canvas upscaled. Track the width
+  // and let the render effect below re-run when it changes. Quantised to 32px
+  // steps so dragging a mosaic divider re-renders a handful of times rather
+  // than on every pixel.
+  const [tileWidth, setTileWidth] = useState(0);
   useEffect(() => {
+    // Wait for the page aspect ratio: until it lands the tiles are just their
+    // 80px minWidth, so measuring now would render every thumbnail at that
+    // size and — since the container itself never resizes when the tiles grow
+    // — leave them upscaled for good.
+    if (!aspectRatio) return;
+    const tile = thumbRefs.current.values().next().value;
+    if (!tile) return;
+    const measure = () => {
+      if (tile.clientWidth) setTileWidth(Math.ceil(tile.clientWidth / 32) * 32);
+    };
+    measure();
+    // Observe a tile rather than the scroll container: the tile changes size
+    // both when the pane is resized and when the aspect ratio arrives.
+    const ro = new ResizeObserver(measure);
+    ro.observe(tile);
+    return () => ro.disconnect();
+  }, [totalSlides, aspectRatio]);
+
+  useEffect(() => {
+    if (!tileWidth) return;
     // A swapped document (notes edit, deck replace) invalidates every rendered
     // thumbnail: drop the old canvases so the observer below re-renders them
     // from the new document instead of keeping whatever was on screen.
@@ -38,8 +64,12 @@ export function ThumbnailsCard({
           if (!entry.isIntersecting) return;
           const pageNum = Number((entry.target as HTMLElement).dataset.page);
           if (!pageNum) return;
-          renderPage(pdf, pageNum, 0.5).then((canvas) => {
-            const el = entry.target as HTMLDivElement;
+          // Match the tile's real pixel size rather than a fixed multiplier:
+          // `scale` is relative to PDF points, so a fixed one renders a beamer
+          // deck half the size of a wide one and upscales on HiDPI either way.
+          const el = entry.target as HTMLDivElement;
+          const targetWidth = Math.round(tileWidth * (window.devicePixelRatio || 1));
+          renderPage(pdf, pageNum, { targetWidth }).then((canvas) => {
             if (el.childElementCount > 0) return;
             canvas.style.width = "100%";
             canvas.style.height = "100%";
@@ -53,7 +83,7 @@ export function ThumbnailsCard({
     );
     thumbRefs.current.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, [pdf, totalSlides]);
+  }, [pdf, totalSlides, tileWidth]);
 
   useEffect(() => {
     const el = thumbRefs.current.get(currentSlide);
@@ -115,31 +145,4 @@ function ThumbStrokes({ strokes }: { strokes?: readonly Stroke[] }) {
 
   if (!strokes?.length) return null;
   return <canvas ref={ref} className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden />;
-}
-
-// Overlays a static preview image for media that has no frame baked into the
-// PDF page (YouTube/Vimeo embeds, gifs), positioned to match the live overlay.
-function MediaPoster({ placement }: { placement: MediaPlacement }) {
-  const [src, setSrc] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    getMediaPoster(placement).then((url) => { if (!cancelled) setSrc(url); });
-    return () => { cancelled = true; };
-  }, [placement]);
-
-  if (!src) return null;
-  return (
-    <img
-      src={src}
-      alt=""
-      className="absolute object-cover pointer-events-none"
-      style={{
-        left: `${placement.xPct * 100}%`,
-        top: `${placement.yPct * 100}%`,
-        width: `${placement.wPct * 100}%`,
-        height: `${placement.hPct * 100}%`,
-      }}
-    />
-  );
 }
