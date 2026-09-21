@@ -115,9 +115,13 @@ only do this once — every app (including Presio) attaches to the `web` network
 From the **repo root**:
 
 ```bash
-docker compose up -d --build
+APP_VERSION=$(git describe --tags --always) docker compose up -d --build
 docker compose ps                # everything healthy / completed
 ```
+
+`APP_VERSION` is optional but worth passing: it is what `/healthz` reports back,
+so you can confirm the build you meant to deploy is the one running. Left unset
+it is `dev`, and a half-applied deploy looks exactly like a good one.
 
 First boot runs the Supabase migrations, creates the MinIO bucket, then
 `presio-db-init` applies `dbschema.sql`, then `presio` starts. As soon as DNS

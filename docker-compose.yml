@@ -688,6 +688,13 @@ services:
         VITE_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
         VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY: ${ANON_KEY}
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        # The deploying commit or tag, so /healthz answers "which build is
+        # this?" — the one question you actually want answered when a deploy
+        # looks wrong. Without it the image keeps the Dockerfile default
+        # ("dev") and a half-applied deploy is indistinguishable from a good
+        # one. Pass it on the command line:
+        #   APP_VERSION=$(git describe --tags --always) docker compose up -d --build
+        APP_VERSION: ${APP_VERSION:-dev}
     restart: unless-stopped
     networks:
       default:
