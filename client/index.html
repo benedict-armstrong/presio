@@ -35,17 +35,10 @@
        bar. Ignored entirely in normal browser tabs. -->
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <script>
-    // Apply the saved/system theme before first paint so reloads don't flash
-    // light-then-dark. Keep this logic in sync with src/lib/theme.tsx.
-    (function () {
-      try {
-        var stored = localStorage.getItem('theme');
-        var dark = stored === 'dark' || (stored !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
-        document.documentElement.classList.toggle('dark', dark);
-      } catch { /* localStorage unavailable, e.g. private mode */ }
-    })();
-  </script>
+  <!-- Sets .dark before first paint. Deliberately NOT inline and NOT deferred:
+       inline would need 'unsafe-inline' or a per-build hash in the CSP, and
+       deferring it would reintroduce the flash it exists to prevent. -->
+  <script src="/theme.js"></script>
   <style>
     /* The static fallback in #root exists for crawlers and no-JS clients
        (see comment below); it's not meant to be seen by JS-capable browsers,
