@@ -31,17 +31,25 @@ services:
       SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
       PORT: 3001
-      ALLOWED_ORIGIN: https://${STAGING_HOST:-staging.presio.xyz}
-      # Pin the origin used in generated links (canonical/og:url, handoff URLs)
-      # instead of deriving it from the client-controlled Host header. Staging
-      # sits behind Traefik on a known hostname, so the value is knowable here.
-      PUBLIC_BASE_URL: https://${STAGING_HOST:-staging.presio.xyz}
+      # Both hostnames when dual-homed, or the second one's own requests are
+      # refused as cross-origin.
+      ALLOWED_ORIGIN: https://${STAGING_HOST:-staging.presio.xyz}${STAGING_HOST_ALT:+,https://${STAGING_HOST_ALT}}
+      # Pin the origins used in generated links (canonical/og:url, handoff URLs)
+      # instead of deriving them from the client-controlled Host header. Staging
+      # sits behind Traefik on known hostnames, so the value is knowable here.
+      # First entry wins for canonical/og:url; share links follow the request.
+      PUBLIC_BASE_URLS: https://${STAGING_HOST:-staging.presio.xyz}${STAGING_HOST_ALT:+,https://${STAGING_HOST_ALT}}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=web"
-      - "traefik.http.routers.presio-staging.rule=Host(`${STAGING_HOST:-staging.presio.xyz}`)"
+      # Two OR'd matchers, not Host(`a`, `b`) — the multi-value form is Traefik
+      # v2 syntax and v3 disables the router outright. STAGING_HOST_ALT is
+      # optional and defaults back to the primary.
+      - "traefik.http.routers.presio-staging.rule=Host(`${STAGING_HOST:-staging.presio.xyz}`) || Host(`${STAGING_HOST_ALT:-${STAGING_HOST:-staging.presio.xyz}}`)"
       - "traefik.http.routers.presio-staging.entrypoints=websecure"
-      # Serve TLS from the proxy's default certificate (Cloudflare Origin CA).
+      # Serve TLS from the proxy's certificates (Cloudflare Origin CA). Traefik
+      # picks per-handshake by SNI: the default cert covers *.presio.xyz, and a
+      # second one covers *.presio.ch when the alt host is under that domain.
       - "traefik.http.routers.presio-staging.tls=true"
       - "traefik.http.services.presio-staging.loadbalancer.server.port=3001"
 

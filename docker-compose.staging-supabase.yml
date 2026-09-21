@@ -104,7 +104,9 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=web"
-      - "traefik.http.routers.staging-supabase.rule=Host(`${SUPABASE_HOST}`)"
+      # SUPABASE_HOST_ALT keeps the previous API hostname routed after a move,
+      # so a cached service worker still calling it doesn't hard-fail. Optional.
+      - "traefik.http.routers.staging-supabase.rule=Host(`${SUPABASE_HOST}`) || Host(`${SUPABASE_HOST_ALT:-${SUPABASE_HOST}}`)"
       - "traefik.http.routers.staging-supabase.entrypoints=websecure"
       - "traefik.http.routers.staging-supabase.tls=true"
       - "traefik.http.services.staging-supabase.loadbalancer.server.port=8000"
