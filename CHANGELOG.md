@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.0.0](https://github.com/benedict-armstrong/presio/compare/v1.1.0...v2.0.0) (2026-09-21)
+
+
+### Features
+
+* clickable PDF links, sharper slide canvases, and a minimal landing layout ([#113](https://github.com/benedict-armstrong/presio/issues/113)) ([1a25e3e](https://github.com/benedict-armstrong/presio/commit/1a25e3e134428827589c16fd2e15d570384ff50d)), closes [#94](https://github.com/benedict-armstrong/presio/issues/94) [#95](https://github.com/benedict-armstrong/presio/issues/95)
+* **deps:** migrate to pdfjs-dist 6 ([#106](https://github.com/benedict-armstrong/presio/issues/106)) ([40b75e1](https://github.com/benedict-armstrong/presio/commit/40b75e127c89f903c71c6c2f71f924e2c425c261))
+* **deps:** migrate to react-mosaic-component 7 ([#107](https://github.com/benedict-armstrong/presio/issues/107)) ([882ad3d](https://github.com/benedict-armstrong/presio/commit/882ad3d9213f5e57325b1134f09b04d2e909e10d))
+* let local deploys rewrite share links to the machine's LAN address ([#68](https://github.com/benedict-armstrong/presio/issues/68)) ([8dac1e0](https://github.com/benedict-armstrong/presio/commit/8dac1e07ae23bc43c303a0216490d26a3db882cd))
+* move HTTP rate limiting from the app to the Cloudflare edge ([#63](https://github.com/benedict-armstrong/presio/issues/63)) ([6271725](https://github.com/benedict-armstrong/presio/commit/627172535cdfa72c0412c6f02fdcff7790d29b1f))
+* serve the app on presio.ch alongside presio.xyz ([#110](https://github.com/benedict-armstrong/presio/issues/110)) ([f09d9ae](https://github.com/benedict-armstrong/presio/commit/f09d9aea7fe612c56a9599bef445fccf31c26392))
+
+
+### Bug Fixes
+
+* **csp:** allow WebAssembly so syntax highlighting works on deployed origins ([29fd9e4](https://github.com/benedict-armstrong/presio/commit/29fd9e4bc9dd37f22f0798031ccca3f1c4bc9c77))
+* **csp:** load the pre-paint theme script from a file, not inline ([#111](https://github.com/benedict-armstrong/presio/issues/111)) ([0c6e938](https://github.com/benedict-armstrong/presio/commit/0c6e9385a7a7b00234d9c9b0f1e367318cf35c63))
+* **deploy:** keep the analytics and uptime hostnames routed across a move ([#114](https://github.com/benedict-armstrong/presio/issues/114)) ([6dd03b5](https://github.com/benedict-armstrong/presio/commit/6dd03b5788b71a1b2c331bd4b5953391caf8be2e))
+* document a verification command that actually works ([#55](https://github.com/benedict-armstrong/presio/issues/55)) ([4399133](https://github.com/benedict-armstrong/presio/commit/439913397a3b6cff45e6a17f34ceed47f5f207fb))
+* responsive controller chrome + clear the react-hooks lint errors ([#109](https://github.com/benedict-armstrong/presio/issues/109)) ([717b545](https://github.com/benedict-armstrong/presio/commit/717b545fa1a1d3fe2f0e611a460240bef2b800a6))
+
+
+### Miscellaneous Chores
+
+* release 2.0.0 ([bd8eb34](https://github.com/benedict-armstrong/presio/commit/bd8eb345c84c10c0dadf027a22e630b12772770e)), closes [#112](https://github.com/benedict-armstrong/presio/issues/112)
+
 ## [1.1.0](https://github.com/benedict-armstrong/presio/compare/v1.0.0...v1.1.0) (2026-08-25)
 
 
