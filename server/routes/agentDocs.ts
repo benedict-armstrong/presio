@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import type express from "express";
-import { baseUrl } from "../lib/baseUrl.js";
+import { canonicalBaseUrl } from "../lib/baseUrl.js";
 import { buildOpenApi } from "../agent/openapi.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -69,17 +69,17 @@ const SITEMAP_PATHS = [
 export function registerAgentDocRoutes(app: express.Express) {
   app.get("/llms.txt", (req, res) => {
     const type = prefersMarkdown(req) ? "text/markdown" : "text/plain";
-    sendText(res, type, withBase(readContent("llms.txt"), baseUrl(req)));
+    sendText(res, type, withBase(readContent("llms.txt"), canonicalBaseUrl(req)));
   });
 
   app.get("/llms-full.txt", (req, res) => {
     const type = prefersMarkdown(req) ? "text/markdown" : "text/plain";
-    sendText(res, type, withBase(readContent("llms-full.txt"), baseUrl(req)));
+    sendText(res, type, withBase(readContent("llms-full.txt"), canonicalBaseUrl(req)));
   });
 
   for (const name of ["AGENTS.md", "api.md", "index.md", "check.md", "glossary.md"] as const) {
     app.get(`/${name}`, (req, res) => {
-      const base = baseUrl(req);
+      const base = canonicalBaseUrl(req);
       sendText(res, "text/markdown", withBase(readContent(name), base), `${base}/${name}`);
     });
   }
@@ -87,17 +87,17 @@ export function registerAgentDocRoutes(app: express.Express) {
   // Scanners derive a page's markdown mirror as `${path}.md`, which for the
   // root is "/.md" — alias it to index.md so they don't get the SPA shell.
   app.get("/.md", (req, res) => {
-    const base = baseUrl(req);
+    const base = canonicalBaseUrl(req);
     sendText(res, "text/markdown", withBase(readContent("index.md"), base), `${base}/index.md`);
   });
 
   app.get("/openapi.json", (req, res) => {
     res.setHeader("Cache-Control", CACHE);
-    res.json(buildOpenApi(baseUrl(req)));
+    res.json(buildOpenApi(canonicalBaseUrl(req)));
   });
 
   app.get("/robots.txt", (req, res) => {
-    const base = baseUrl(req);
+    const base = canonicalBaseUrl(req);
     const body = [
       "# AI agents: see /llms.txt for how to use Presio",
       "User-agent: *",
@@ -110,7 +110,7 @@ export function registerAgentDocRoutes(app: express.Express) {
   });
 
   app.get("/sitemap.xml", (req, res) => {
-    const base = baseUrl(req);
+    const base = canonicalBaseUrl(req);
     const urls = HTML_PAGE_PATHS.map(
       (p) => `  <url>\n    <loc>${base}${p === "/" ? "/" : p}</loc>\n    <lastmod>${LASTMOD}</lastmod>\n  </url>`
     ).join("\n");
@@ -121,7 +121,7 @@ export function registerAgentDocRoutes(app: express.Express) {
   });
 
   app.get("/sitemap.md", (req, res) => {
-    const base = baseUrl(req);
+    const base = canonicalBaseUrl(req);
     const lines = [
       "# Sitemap",
       "",
@@ -133,7 +133,7 @@ export function registerAgentDocRoutes(app: express.Express) {
 
   // RFC 9727 API catalog: linkset pointing agents at the OpenAPI spec and docs.
   app.get("/.well-known/api-catalog", (req, res) => {
-    const base = baseUrl(req);
+    const base = canonicalBaseUrl(req);
     res.setHeader("Content-Type", "application/linkset+json");
     res.setHeader("Cache-Control", CACHE);
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -157,7 +157,7 @@ export function registerAgentDocRoutes(app: express.Express) {
   ] as const) {
     app.get(route, (req, res, next) => {
       if (!prefersMarkdown(req)) return next();
-      const base = baseUrl(req);
+      const base = canonicalBaseUrl(req);
       sendText(res, "text/markdown", withBase(readContent(file), base), `${base}/${file}`);
     });
   }

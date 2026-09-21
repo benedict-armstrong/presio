@@ -98,7 +98,11 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=web"
-      - "traefik.http.routers.supabase.rule=Host(`${SUPABASE_HOST}`)"
+      # SUPABASE_HOST_ALT keeps the previous API hostname routed after a domain
+      # move, so a cached service worker or an installed PWA still calling the
+      # old host keeps working instead of hard-failing. Optional, same defaulting
+      # as the app router above.
+      - "traefik.http.routers.supabase.rule=Host(`${SUPABASE_HOST}`) || Host(`${SUPABASE_HOST_ALT:-${SUPABASE_HOST}}`)"
       - "traefik.http.routers.supabase.entrypoints=websecure"
       - "traefik.http.routers.supabase.tls=true"
       - "traefik.http.services.supabase.loadbalancer.server.port=8000"
@@ -698,11 +702,18 @@ services:
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
       PORT: 3001
       ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
-      # Origin used for generated links (canonical/og:url tags, /api/present
-      # handoff URLs, OpenAPI self-references). Pinned to the configured domain
-      # so a spoofed Host header can't poison them; without it the server falls
-      # back to the request's own Host, which the client controls.
-      PUBLIC_BASE_URL: https://${APP_HOST}
+      # Origins used for generated links (canonical/og:url tags, /api/present
+      # handoff URLs, OpenAPI self-references). Pinned to the configured
+      # domains so a spoofed Host header can't poison them; without it the
+      # server falls back to the request's own Host, which the client controls.
+      #
+      # Comma-separated, in priority order. A share or handoff link follows
+      # whichever listed domain the visitor actually used, so someone on the
+      # second domain gets a link they can open; canonical/og:url and the
+      # OpenAPI and schema self-references always name the FIRST entry, so the
+      # two domains don't present as duplicate content. Defaults to the single
+      # app domain, which is the single-domain behaviour as before.
+      PUBLIC_BASE_URLS: ${PUBLIC_BASE_URLS:-https://${APP_HOST}}
       ANALYTICS_URL: ${ANALYTICS_URL:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
@@ -711,7 +722,15 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=web"
-      - "traefik.http.routers.presio.rule=Host(`${APP_HOST}`)"
+      # Two Host() matchers OR'd together — NOT Host(`a`, `b`). The multi-value
+      # form is Traefik v2 syntax; v3 rejects it ("unexpected number of
+      # parameters; got 2, expected one of [1]") and disables the whole router,
+      # which would take the app offline rather than fail visibly at deploy.
+      #
+      # APP_HOST_ALT is optional: unset, it defaults back to APP_HOST, leaving a
+      # harmless `Host(x) || Host(x)` rather than an empty Host(``) matching
+      # nothing. Verified enabled on Traefik 3.3 both ways.
+      - "traefik.http.routers.presio.rule=Host(`${APP_HOST}`) || Host(`${APP_HOST_ALT:-${APP_HOST}}`)"
       - "traefik.http.routers.presio.entrypoints=websecure"
       - "traefik.http.routers.presio.tls=true"
       - "traefik.http.services.presio.loadbalancer.server.port=3001"

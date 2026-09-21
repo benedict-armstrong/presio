@@ -68,7 +68,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
    * POST /api/present — upload a PDF; get a URL that opens a local presentation
    * (skips share). The PDF is staged briefly, then moved into the browser.
    *
-   *   curl -s -F file=@deck.pdf https://presio.xyz/api/present
+   *   curl -s -F file=@deck.pdf https://presio.ch/api/present
    *   # open the returned url
    *
    * Update mode: pass `session_id` (multipart field) plus its controller token

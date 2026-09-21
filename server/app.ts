@@ -8,7 +8,7 @@ import { fileURLToPath } from "url";
 import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAllowedOrigins, buildCspDirectives } from "./security.js";
-import { baseUrl } from "./lib/baseUrl.js";
+import { canonicalBaseUrl } from "./lib/baseUrl.js";
 import { localBlobsDir } from "./local/paths.js";
 import { isLocalMode } from "./local/mode.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
@@ -32,10 +32,11 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   // Exactly one reverse-proxy hop (Traefik) sits in front in production, so
   // trust one level of X-Forwarded-*. This is what makes `req.protocol` report
   // the scheme the *browser* used rather than the plain HTTP of the last hop —
-  // baseUrl() builds handoff links and canonical tags from it, so without this
-  // every generated link would come out `http://`. Trusting more hops would let
-  // a client dictate those headers itself. Local mode has no proxy in front, so
-  // set TRUST_PROXY=false there.
+  // baseUrl() falls back to it when no public origin is configured, so without
+  // this every generated link would come out `http://` on a deployment relying
+  // on that fallback. Trusting more hops would let a client dictate those
+  // headers itself. Local mode has no proxy in front, so set TRUST_PROXY=false
+  // there.
   app.set("trust proxy", process.env.TRUST_PROXY === "false" ? false : 1);
 
   const allowedOrigins = getAllowedOrigins();
@@ -188,7 +189,7 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
       res.status(404).type("text/plain").send("Not found");
       return;
     }
-    const base = baseUrl(req);
+    const base = canonicalBaseUrl(req);
     const url = `${base}${req.path === "/" ? "/" : req.path}`.replace(
       /[<>"&]/g,
       (c) => ({ "<": "%3C", ">": "%3E", '"': "%22", "&": "&amp;" })[c] as string

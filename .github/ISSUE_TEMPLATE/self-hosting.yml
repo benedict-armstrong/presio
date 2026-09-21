@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        For problems with the hosted service at presio.xyz, use a blank issue
+        For problems with the hosted service at presio.ch (or presio.xyz), use a blank issue
         instead — this form asks for deployment details you won't have.
 
   - type: input

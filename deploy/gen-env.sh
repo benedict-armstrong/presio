@@ -13,7 +13,13 @@ OUT="${1:-../.env}"
 
 # ---- set these (or override as OUT=... NAME=value ./deploy/gen-env.sh) ----
 : "${APP_DOMAIN:=https://presio.xyz}"
+# Optional second domain for the APP only — the API stays single-homed on
+# SUPABASE_DOMAIN. Empty (the default) produces an ordinary one-domain env.
+: "${APP_DOMAIN_ALT:=}"
 : "${SUPABASE_DOMAIN:=https://supabase.presio.xyz}"
+# Optional former API domain, kept routed so cached service workers still
+# calling the old host don't hard-fail after a move.
+: "${SUPABASE_DOMAIN_ALT:=}"
 : "${ANALYTICS_DOMAIN:=https://analytics.presio.xyz}"
 : "${GITHUB_CLIENT_ID:=REPLACE_ME}"
 : "${GITHUB_SECRET:=REPLACE_ME}"
@@ -22,7 +28,10 @@ OUT="${1:-../.env}"
 
 # ---- helpers ----
 rand()    { openssl rand -hex "${1:-32}"; }
-hostonly(){ printf '%s' "$1" | sed 's|https\?://||'; }
+# -E (POSIX ERE) rather than a BRE `\?`, which is a GNU extension: BSD/macOS
+# sed leaves it unmatched, silently yielding a host that still has its scheme
+# and a Traefik Host() rule that matches nothing.
+hostonly(){ printf '%s' "$1" | sed -E 's|https?://||'; }
 b64url()  { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 jwt() {  # $1=role  $2=secret  -> a 10-year HS256 Supabase API key
   local iat exp hdr pl
@@ -51,15 +60,20 @@ UMAMI_APP_SECRET=$(rand 32)
 override() {  # echo a replacement value for $1, or return 1 if no override
   case "$1" in
     APP_HOST)                 hostonly "$APP_DOMAIN" ;;
+    APP_HOST_ALT)             [ -n "$APP_DOMAIN_ALT" ] && hostonly "$APP_DOMAIN_ALT" || echo "" ;;
     SUPABASE_HOST)            hostonly "$SUPABASE_DOMAIN" ;;
+    SUPABASE_HOST_ALT)        [ -n "$SUPABASE_DOMAIN_ALT" ] && hostonly "$SUPABASE_DOMAIN_ALT" || echo "" ;;
     SUPABASE_PUBLIC_URL|API_EXTERNAL_URL) echo "$SUPABASE_DOMAIN" ;;
     SITE_URL)                 echo "$APP_DOMAIN" ;;
+    # The app domain first: it is the canonical origin for generated links.
+    PUBLIC_BASE_URLS)         echo "$APP_DOMAIN${APP_DOMAIN_ALT:+,$APP_DOMAIN_ALT}" ;;
     # /** wildcard suffix required: GoTrue falls back to SITE_URL for any
     # redirect URL not matching an allow-list entry exactly.
-    ADDITIONAL_REDIRECT_URLS) echo "$APP_DOMAIN/**,http://localhost:5173/**" ;;
+    ADDITIONAL_REDIRECT_URLS) echo "$APP_DOMAIN/**${APP_DOMAIN_ALT:+,$APP_DOMAIN_ALT/**},http://localhost:5173/**" ;;
     # Browsers send Origin even on same-origin fetch/WebSocket, so set this to
-    # the app URL so the server's CORS check allows it.
-    ALLOWED_ORIGIN)           echo "$APP_DOMAIN" ;;
+    # the app URL so the server's CORS check allows it. Both domains when
+    # dual-homed, or the second one's requests are refused.
+    ALLOWED_ORIGIN)           echo "$APP_DOMAIN${APP_DOMAIN_ALT:+,$APP_DOMAIN_ALT}" ;;
     ANALYTICS_URL)            echo "$ANALYTICS_DOMAIN" ;;
     GITHUB_ENABLED)           echo "$GITHUB_ENABLED" ;;
     ENABLE_EMAIL_AUTOCONFIRM) echo "$ENABLE_EMAIL_AUTOCONFIRM" ;;

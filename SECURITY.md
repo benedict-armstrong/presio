@@ -26,7 +26,7 @@ container tags and how to upgrade.
 
 ## Scope
 
-The hosted service at presio.xyz and this repository's self-hosted deployment
+The hosted service at presio.ch / presio.xyz and this repository's self-hosted deployment
 (`deploy/`, `docker-compose.yml`, `local.docker-compose.yml`) are both in
 scope. Note that in `PRESIO_MODE=local` there is deliberately no
 authentication — anyone who can reach the port can present. That mode is

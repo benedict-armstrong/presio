@@ -1497,8 +1497,11 @@ Hello world.
             >
               <GitHubIcon className="h-3.5 w-3.5" />
             </a>
+            {/* The app is served from more than one domain, so name the one
+                the visitor is actually on rather than hardcoding a host that
+                may be blocked on their network (#74). */}
             <Link to="/check" className="hover:text-foreground">
-              presio.xyz/check
+              {typeof window === "undefined" ? "/check" : `${window.location.host}/check`}
             </Link>
           </div>
         </ScrollReveal>

@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import * as z from "zod/v4";
-import { baseUrl } from "../lib/baseUrl.js";
+import { baseUrl, canonicalBaseUrl } from "../lib/baseUrl.js";
 import { createPresentHandoff, updatePresentDeck } from "../lib/presentHandoff.js";
 import { buildCheckReport } from "./check.js";
 import { resolveOptionalUserId } from "../auth.js";
@@ -137,7 +137,9 @@ function createPresioMcp(supabase: SupabaseClient, origin: string, req: express.
 
 export function registerMcpRoutes(app: express.Express, supabase: SupabaseClient, deps: McpDeps = {}) {
   app.get("/.well-known/mcp.json", (req, res) => {
-    const origin = baseUrl(req);
+    // Discovery metadata describes the server itself, so it names one origin
+    // regardless of which domain the scanner happened to ask.
+    const origin = canonicalBaseUrl(req);
     res.setHeader("Cache-Control", "public, max-age=300");
     // Public discovery metadata — readable from any origin, unlike the API.
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -161,6 +163,8 @@ export function registerMcpRoutes(app: express.Express, supabase: SupabaseClient
   });
 
   app.post("/mcp", async (req, res) => {
+    // Request-following: the handoff URL a tool hands back must be one the
+    // caller can actually open, on the domain they reached us on.
     const origin = baseUrl(req);
     const server = createPresioMcp(supabase, origin, req, deps);
     try {

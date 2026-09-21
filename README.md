@@ -1,8 +1,18 @@
 # Presio
 
-Present PDFs from your browser — try it at **[presio.xyz](https://presio.xyz)**.
+Present PDFs from your browser — try it at **[presio.ch](https://presio.ch)** or
+**[presio.xyz](https://presio.xyz)**.
 
 Upload a PDF presentation, get a short link, and control the slideshow from one browser window while viewers watch in another. Presio is a hosted service; this repository is its source code.
+
+> **Two addresses, same app.** Some networks (schools, CERN and others) block
+> the whole `.xyz` top-level domain, so Presio also answers on `presio.ch`. Use
+> whichever one reaches you.
+>
+> They do *not* share browser storage. Presio is local by default — your decks,
+> recents list, controller layout and login all live in one origin's storage —
+> so a deck imported on one address will not appear on the other, and each
+> installs as its own PWA. Pick one and stay on it.
 
 
 ![Demo](https://github.com/benedict-armstrong/presio/releases/download/demo/presio.gif)
@@ -110,7 +120,7 @@ LaTeX — use `hyperref` to create an invisible `note:` link:
 \speakernote{Remember to mention the demo.}
 ```
 
-Validate what you produced at [presio.xyz/check](https://presio.xyz/check) — it
+Validate what you produced at [presio.ch/check](https://presio.ch/check) — it
 shows per-page thumbnails and reports whether the notes and media sidecars are
 valid.
 

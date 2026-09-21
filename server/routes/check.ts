@@ -6,7 +6,7 @@ import type express from "express";
 import multer from "multer";
 import { openPdf, closePdf, readAttachments } from "../lib/pdfDoc.js";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { baseUrl } from "../lib/baseUrl.js";
+import { canonicalBaseUrl } from "../lib/baseUrl.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -192,7 +192,7 @@ export function registerCheckRoute(app: express.Express) {
    * Returns: JSON CheckReport.
    *
    * Example:
-   *   curl -s -F file=@deck.pdf https://presio.xyz/api/check | jq .
+   *   curl -s -F file=@deck.pdf https://presio.ch/api/check | jq .
    */
   app.post("/api/check", upload.single("file"), async (req, res) => {
     const file = req.file;
@@ -205,7 +205,7 @@ export function registerCheckRoute(app: express.Express) {
       return;
     }
 
-    const result = await buildCheckReport(file.buffer, baseUrl(req));
+    const result = await buildCheckReport(file.buffer, canonicalBaseUrl(req));
     if (!result.ok) {
       res.status(result.status).json({ error: result.error });
       return;
