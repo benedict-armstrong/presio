@@ -10,6 +10,7 @@ import { useJoinUrl } from "@/lib/joinUrl";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { MediaOverlay, type MediaState, type MediaTimeSync } from "@/components/MediaOverlay";
 import { AnnotationOverlay } from "@/components/AnnotationOverlay";
+import { LinkOverlay } from "@/components/LinkOverlay";
 import type { LaserPoint, Stroke } from "@/lib/annotations";
 import type { Deck } from "@/lib/deck";
 import { DownloadButton } from "@/components/DownloadButton";
@@ -157,6 +158,18 @@ export function ViewerView({
       />
 
       <AnnotationOverlay containerRef={canvasRef} remoteLaser={laser} strokes={strokes} remoteDraft={draft} />
+
+      {/* Internal links move this viewer only, and only when it is allowed to
+          navigate independently — a local viewer mirrors the controller, so it
+          gets no handler and those links stay inert. External links always
+          open. Hidden while blanked so nothing is clickable behind the cover. */}
+      {!blanked && (
+        <LinkOverlay
+          canvasContainerRef={canvasRef}
+          links={deck.linksBySlide.get(currentSlide) ?? []}
+          onGoToSlide={local ? undefined : onViewerGoTo}
+        />
+      )}
 
       <ViewerHint canNavigate={!local} />
 

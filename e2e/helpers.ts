@@ -19,8 +19,11 @@ export type Frac = [x: number, y: number];
  * makes tests fail only when run together. The harness hands out a fresh one
  * per call (see server/e2eHarness.ts).
  */
-export async function newSession(request: APIRequestContext): Promise<string> {
-  const res = await request.post("/__e2e/session");
+export async function newSession(
+  request: APIRequestContext,
+  deck: "example" | "links" = "example"
+): Promise<string> {
+  const res = await request.post(`/__e2e/session?deck=${deck}`);
   expect(res.ok(), "harness should mint an E2E session").toBeTruthy();
   const { id } = (await res.json()) as { id: string };
   return id;

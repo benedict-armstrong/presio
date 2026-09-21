@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { MediaOverlay, type MediaState, type AudioState, type AudioTarget } from "@/components/MediaOverlay";
 import { AnnotationOverlay } from "@/components/AnnotationOverlay";
+import { LinkOverlay } from "@/components/LinkOverlay";
 import { useSlidePinchZoom } from "@/hooks/useSlidePinchZoom";
 import { useIsTouchDevice } from "@/hooks/useIsMobile";
 import { AnnotationToolbar } from "@/components/AnnotationToolbar";
@@ -28,9 +29,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { MediaPlacement } from "@/lib/pdf";
+import type { PdfLink } from "@/lib/pdfLinks";
 
 interface Props {
   local?: boolean;
+  /** Link annotations on the current slide. */
+  links?: PdfLink[];
+  /** Where an internal link jumps to. The controller drives the session, so
+   *  this is the ordinary slide navigation. */
+  onLinkGoTo?: (slide: number) => void;
   mediaPlacements?: MediaPlacement[];
   mediaState?: MediaState;
   onMediaControl?: (id: string, action: "play" | "pause" | "reset") => void;
@@ -71,6 +78,8 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
     {
       local = false,
       mediaPlacements = [],
+      links = [],
+      onLinkGoTo,
       mediaState,
       onMediaControl,
       onMediaTime,
@@ -138,6 +147,15 @@ export const CurrentSlideCard = forwardRef<HTMLDivElement, Props>(
               onStrokeProgress={onStrokeProgress}
               onStrokeCommit={onStrokeCommit}
               gestureActive={gesturing}
+            />
+            {/* Inside the zoom transform so links track the slide when the
+                presenter pinches in, and above the canvas but below the
+                annotation layer. */}
+            <LinkOverlay
+              canvasContainerRef={ref as React.RefObject<HTMLDivElement | null>}
+              links={links}
+              onGoToSlide={onLinkGoTo}
+              enabled={tool === "none"}
             />
           </div>
           {mediaState && mediaPlacements.length > 0 && (

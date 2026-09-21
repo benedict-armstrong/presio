@@ -160,6 +160,7 @@ export function ControllerView({
 }: ControllerViewProps) {
   const { totalSlides, annotations } = deck;
   const mediaPlacements = deck.mediaBySlide.get(currentSlide) ?? [];
+  const slideLinks = deck.linksBySlide.get(currentSlide) ?? [];
   const isMobile = useIsMobile();
   // A window wide enough for the dashboard but not for the full toolbars: the
   // header's three columns and the footer's six controls both stop fitting
@@ -568,6 +569,8 @@ export function ControllerView({
           ref={currentCanvasRef}
           local={local}
           mediaPlacements={mediaPlacements}
+          links={slideLinks}
+          onLinkGoTo={onGoTo}
           mediaState={mediaState}
           onMediaControl={onMediaControl}
           onMediaTime={onMediaTime}

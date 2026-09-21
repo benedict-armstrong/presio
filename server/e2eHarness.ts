@@ -33,12 +33,19 @@ process.env.ALLOWED_ORIGIN = `http://localhost:${port}`;
 
 // One session shape, minted under different ids. SESSION_ID is the fixed one
 // scripts/record-demo.mts drives; the specs mint their own (see below).
-const sessionRow = (id: string) => ({
+// The link spec needs a deck that actually carries link annotations, which the
+// example deck does not. It is a second file rather than links bolted onto the
+// example, so the demo recording and the other specs keep the deck they were
+// written against.
+const linkDeckPath = path.resolve(__dirname, "../e2e/fixtures/links.pdf");
+const LINK_DECK_SLIDES = 2;
+
+const sessionRow = (id: string, deck: "example" | "links" = "example") => ({
   id,
   pdf_path: "",
-  pdf_url: "/test.pdf",
+  pdf_url: deck === "links" ? "/links.pdf" : "/test.pdf",
   filename,
-  total_slides: totalSlides,
+  total_slides: deck === "links" ? LINK_DECK_SLIDES : totalSlides,
   current_slide: 1,
   note_prefix: "note:",
   local: false,
@@ -58,6 +65,9 @@ const app = express();
 app.get("/test.pdf", (_req, res) => {
   res.sendFile(deckPath);
 });
+app.get("/links.pdf", (_req, res) => {
+  res.sendFile(linkDeckPath);
+});
 
 // Test-only: mint an isolated session.
 //
@@ -67,9 +77,10 @@ app.get("/test.pdf", (_req, res) => {
 // joining mid-test), which is the worst kind of flake. Each spec takes a fresh
 // id instead, so nothing carries between tests or across workers.
 let minted = 0;
-app.post("/__e2e/session", (_req, res) => {
+app.post("/__e2e/session", (req, res) => {
   const id = `E2E${String(minted++).padStart(3, "0")}`;
-  fake.seed(sessionRow(id));
+  const deck = req.query.deck === "links" ? "links" : "example";
+  fake.seed(sessionRow(id, deck));
   res.json({ id, controllerToken: CONTROLLER_TOKEN });
 });
 
