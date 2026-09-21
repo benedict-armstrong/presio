@@ -199,14 +199,20 @@ jobs:
       # Separate from the gate above: this exercises Traefik and the Cloudflare
       # edge, which the deploy does not control and the runner may not be able
       # to reach at all. Worth reporting, never worth failing the deploy on.
-      - name: Probe the public URL
+      # Every hostname staging answers on, so a router that silently stopped
+      # matching one of them shows up here. A dual-host rule is easy to get
+      # wrong in a way that only affects the second name.
+      - name: Probe the public URLs
         continue-on-error: true
         env:
-          HOST: https://staging.presio.xyz
+          HOSTS: https://staging.presio.ch https://staging.presio.xyz
         run: |
-          code=$(curl -s -o /tmp/probe -w '%{http_code}' --max-time 15 "$HOST/healthz" || echo "curl-failed")
-          echo "HTTP $code"
-          head -c 300 /tmp/probe 2>/dev/null || true
-          if [ "$code" != "200" ]; then
-            echo "::warning::public probe returned '$code' — staging itself verified healthy on the host"
-          fi
+          for host in $HOSTS; do
+            code=$(curl -s -o /tmp/probe -w '%{http_code}' --max-time 15 "$host/healthz" || echo "curl-failed")
+            echo "$host -> HTTP $code"
+            head -c 300 /tmp/probe 2>/dev/null || true
+            echo
+            if [ "$code" != "200" ]; then
+              echo "::warning::public probe of $host returned '$code' — staging itself verified healthy on the host"
+            fi
+          done
