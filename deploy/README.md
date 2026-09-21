@@ -191,6 +191,29 @@ lives.
 Because `VITE_SUPABASE_URL` is a **build arg**, changing it needs
 `docker compose up -d --build`. A plain restart keeps the old bundle.
 
+#### `www.` is handled at the edge, not here
+
+The app router deliberately matches the apex only. `www.` is not added to the
+`Host()` rule — that would serve the same app under four names and put the
+duplicate-content problem back. Each zone instead carries a Cloudflare
+dynamic-redirect rule in the `http_request_dynamic_redirect` phase:
+
+```
+expression: http.host eq "www.presio.ch"
+action:     redirect, 301, preserve_query_string
+target:     concat("https://presio.ch", http.request.uri.path)
+```
+
+One per zone, each pointing at **its own** apex — `www.presio.xyz` goes to
+`presio.xyz`, not to the canonical `presio.ch`. Sending it across would drop the
+visitor on a different origin, and the two domains share no browser storage, so
+their local decks, recents list, controller layout and auth session would all
+appear to have vanished. Canonical tags are what consolidate the two domains for
+search engines; redirects are not the tool for it.
+
+Note this is per zone, like the rate-limit rules below: a domain added later
+without its own rule simply has no `www` redirect.
+
 Both Traefik entrypoints refuse any source outside Cloudflare's published
 ranges (`proxy/certs/dynamic/cfonly.yml`, applied as an entrypoint-default
 middleware so every router is covered), and the host firewall is configured to
