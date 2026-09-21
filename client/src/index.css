@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* The app switches theme by toggling `.dark` on <html> (see public/theme.js),
+   but Tailwind v4's built-in `dark:` variant defaults to the
+   prefers-color-scheme media query. Left alone the two disagree: with the OS
+   in dark mode and the app toggled to light, every `dark:` utility still
+   fires on a light page. Bind the variant to the class instead. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
