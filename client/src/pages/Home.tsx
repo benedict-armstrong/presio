@@ -16,7 +16,7 @@ import { idbPut, idbGet, idbList, idbDelete } from "@/lib/localStore";
 import { newLocalDeckId } from "@/lib/localId";
 import { isDeckWatchSupported, PDF_PICKER_OPTIONS } from "@/lib/deckWatcher";
 import { getSessionAuth, setSessionAuth, endSession } from "@/lib/utils";
-import { lsRemove, lsSetString, annotationsKey, sessionKey, deckWatchKey } from "@/lib/storage";
+import { lsRemove, lsSetString, lsGet, lsSet, STORAGE_KEYS, annotationsKey, sessionKey, deckWatchKey } from "@/lib/storage";
 import { track, sha256Hex } from "@/lib/analytics";
 import { matchReupload } from "@/lib/reupload";
 import { TYPST_PACKAGE_VERSION } from "@/lib/packageVersions";
@@ -126,10 +126,10 @@ function WindowFrame({
   // so the frame is lifted instead: a layered drop shadow in light, and in dark
   // — where a drop shadow is invisible — a faint light glow doing the same job.
   // On white it is the hairline that actually defines the edge, so that stays
-  // and the ambient layers are kept light — a heavy one greys the page around
-  // the frame and swallows the caption underneath it.
+  // and the ambient layers are kept barely-there — a heavy one greys the page
+  // around the frame and swallows the caption underneath it.
   const elevation =
-    "shadow-[0_0_0_1px_rgba(15,23,42,0.06),0_1px_2px_rgba(15,23,42,0.03),0_6px_16px_-12px_rgba(15,23,42,0.10)] " +
+    "shadow-[0_0_0_1px_rgba(15,23,42,0.06),0_8px_24px_-4px_rgba(15,23,42,0.185),0_32px_72px_-16px_rgba(15,23,42,0.225)] " +
     "dark:shadow-[0_0_0_1px_rgba(255,255,255,0.12),0_8px_24px_-4px_rgba(0,0,0,0.75),0_32px_72px_-16px_rgba(0,0,0,0.9)]";
   return (
     <div className={`overflow-hidden rounded-xl bg-card ${elevation} ${className}`}>
@@ -528,6 +528,15 @@ export default function Home() {
   const code = chars.join("");
   const [pdfUrl, setPdfUrl] = useState("");
   const [urlBusy, setUrlBusy] = useState(false);
+  // "I know how Presio works": drops the headline, the demo reel and the
+  // marketing sections, leaving the drop zone centred on an empty page. Read
+  // synchronously from storage so a returning user never sees the full page
+  // flash past on the way to the stripped one.
+  const [minimal, setMinimal] = useState(() => lsGet(STORAGE_KEYS.homeMinimal, false));
+  const toggleMinimal = (on: boolean) => {
+    setMinimal(on);
+    lsSet(STORAGE_KEYS.homeMinimal, on);
+  };
   const [scrolled, setScrolled] = useState(false);
   const [exampleBusy, setExampleBusy] = useState<"typst" | "latex" | null>(null);
   const [exampleError, setExampleError] = useState("");
@@ -1084,9 +1093,24 @@ export default function Home() {
       </nav>
 
       {/* ---------------------------------------------------------------- hero */}
-      <section className="relative px-6 pb-24 pt-16">
-        <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 md:grid-cols-[0.92fr_1.08fr] md:gap-20 xl:grid-cols-[1fr_1.05fr]">
+      <section
+        className={
+          minimal
+            // Nothing follows the panel, so it centres in what's left of the
+            // viewport under the nav instead of sitting under a tall hero.
+            ? "relative flex min-h-[calc(100svh-9rem)] items-center px-6 py-10"
+            : "relative px-6 pb-24 pt-16"
+        }
+      >
+        <div
+          className={
+            minimal
+              ? "mx-auto w-full max-w-[530px]"
+              : "mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 md:grid-cols-[0.92fr_1.08fr] md:gap-20 xl:grid-cols-[1fr_1.05fr]"
+          }
+        >
           <div>
+            {!minimal && (
             <div className='max-w-xl'>
               <h1 className="mb-8 font-mono text-4xl font-semibold leading-[1.06] tracking-tight md:text-5xl">
                 Better PDF presentations.
@@ -1098,15 +1122,20 @@ export default function Home() {
               time — on this laptop, or on every screen in the room.
             </p> */}
             </div>
+            )}
 
             {/* The drop target grows with the viewport but stays in a readable
                 band: min() so the floor can never exceed the column it sits in
-                (below md that column is narrower than the floor itself). */}
-            <div className="mx-auto w-full min-w-[min(100%,320px)] max-w-[420px] py-6 md:mx-0 lg:max-w-[480px] xl:max-w-[530px]">
+                (below md that column is narrower than the floor itself). In
+                minimal mode it is the whole page, so it stays centred. */}
+            <div
+              className={`mx-auto w-full min-w-[min(100%,320px)] max-w-[420px] py-6 lg:max-w-[480px] xl:max-w-[530px] ${minimal ? "" : "md:mx-0"}`}
+            >
               {/* Live reload needs the File System Access API, which only
                   Chromium ships. Worth telling everyone else it exists —
-                  it's the difference between one drop and thirty. */}
-              {!watchSupported && (
+                  it's the difference between one drop and thirty. Minimal mode
+                  is for people who already know, so it goes with the rest. */}
+              {!watchSupported && !minimal && (
                 <div className="mb-3 flex items-start gap-2 rounded-lg border border-muted-foreground/20 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
                   <Zap size={14} className="mt-px shrink-0 text-(--home2-accent)" />
                   <p>
@@ -1326,16 +1355,30 @@ export default function Home() {
                   </ul>
                 </div>
               )}
+
+              {/* The escape hatch for returning users, and the only way back:
+                  it stays visible in minimal mode so the explainer can be
+                  brought back without clearing storage. The label names what
+                  the click does, so it flips with the mode. */}
+              <button
+                type="button"
+                onClick={() => toggleMinimal(!minimal)}
+                className="mt-8 block w-full cursor-pointer rounded-sm text-center text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--home2-accent)]"
+              >
+                {minimal ? "How does Presio work?" : "Hide distractions"}
+              </button>
             </div>
           </div>
 
           {/* The demo reel from the README. Shipped as H.264 rather than the
               34 MB GIF the README links to: same 27 s recording, ~2.9 MB, and
               it decodes on the GPU instead of the main thread. */}
-          <DemoReel />
+          {!minimal && <DemoReel />}
         </div>
       </section>
 
+      {!minimal && (
+      <>
       {/* ---------------------------------------------------------- integrations */}
       <section id="integrations" className="px-6 py-24 md:py-28">
         <ScrollReveal className="mx-auto max-w-6xl">
@@ -1482,6 +1525,9 @@ Hello world.
           </p>
         </ScrollReveal>
       </section>
+
+      </>
+      )}
 
       <footer className="px-6 py-8">
         <ScrollReveal className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 text-xs text-muted-foreground sm:flex-row">

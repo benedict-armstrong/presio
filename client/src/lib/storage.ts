@@ -45,6 +45,9 @@ export const STORAGE_KEYS = {
   // The presenter machine's LAN address, entered once on the share screen when
   // Presio is opened over localhost (see lib/joinUrl.ts).
   lanAddress: "presio_lan_address",
+  // Landing page stripped back to just the drop zone / URL / join code, for
+  // returning users who don't need the explainer again.
+  homeMinimal: "presio_home_minimal",
 } as const;
 
 export const timerKey = (id: string) => `presio_timer_${id}`;
