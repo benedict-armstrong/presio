@@ -6,6 +6,9 @@ import {
   isValidTotalSlides,
   sanitizeLaserPoint,
   sanitizeStroke,
+  isStrokeId,
+  imageChars,
+  MAX_IMAGE_CHARS_PER_SESSION,
   sanitizeAnnotations,
   MAX_STROKES_PER_SLIDE,
   type AnnotationsBySlide,
@@ -249,6 +252,7 @@ export function registerSocketHandlers(
       const bySlide = annotations.get(sessionId) ?? {};
       const existing = bySlide[slide] ?? [];
       if (existing.length >= MAX_STROKES_PER_SLIDE) return;
+      if (stroke.src && imageChars(bySlide) + stroke.src.length > MAX_IMAGE_CHARS_PER_SESSION) return;
       bySlide[slide] = [...existing, stroke];
       annotations.set(sessionId, bySlide);
       socket.to(sessionId).emit("stroke_commit", { slide, stroke });
@@ -260,6 +264,57 @@ export function registerSocketHandlers(
       const bySlide = annotations.get(sessionId);
       if (bySlide?.[slide]?.length) bySlide[slide] = bySlide[slide].slice(0, -1);
       socket.to(sessionId).emit("stroke_undo", { slide });
+    }));
+
+    // Eraser: drop specific strokes (by id) from one slide.
+    socket.on("strokes_erase", controllerOnly(socket, (sessionId, payload: { slide?: unknown; ids?: unknown }) => {
+      const slide = payload?.slide as number;
+      if (!isValidSlideNumber(slide, socket.data.totalSlides)) return;
+      if (!Array.isArray(payload.ids)) return;
+      const ids = payload.ids.slice(0, MAX_STROKES_PER_SLIDE).filter(isStrokeId);
+      if (!ids.length) return;
+      const bySlide = annotations.get(sessionId);
+      if (bySlide?.[slide]) bySlide[slide] = bySlide[slide].filter((s) => !s.id || !ids.includes(s.id));
+      socket.to(sessionId).emit("strokes_erase", { slide, ids });
+    }));
+
+    // Lasso move/resize: replace strokes (matched by id) on one slide.
+    socket.on("strokes_update", controllerOnly(socket, (sessionId, payload: { slide?: unknown; strokes?: unknown }) => {
+      const slide = payload?.slide as number;
+      if (!isValidSlideNumber(slide, socket.data.totalSlides)) return;
+      if (!Array.isArray(payload.strokes)) return;
+      const updates = new Map<string, NonNullable<ReturnType<typeof sanitizeStroke>>>();
+      for (const raw of payload.strokes.slice(0, MAX_STROKES_PER_SLIDE)) {
+        const stroke = sanitizeStroke(raw);
+        if (stroke?.id) updates.set(stroke.id, stroke);
+      }
+      if (!updates.size) return;
+      const bySlide = annotations.get(sessionId);
+      const existing = bySlide?.[slide];
+      if (!bySlide || !existing) return;
+      // An update may move or resize a stroke, never swap in new image data.
+      bySlide[slide] = existing.map((s) => {
+        const next = s.id ? updates.get(s.id) : undefined;
+        return next && next.src === s.src ? next : s;
+      });
+      socket.to(sessionId).emit("strokes_update", { slide, strokes: [...updates.values()] });
+    }));
+
+    // Undo/redo: replace one slide's strokes wholesale.
+    socket.on("slide_annotations_set", controllerOnly(socket, (sessionId, payload: { slide?: unknown; strokes?: unknown }) => {
+      const slide = payload?.slide as number;
+      if (!isValidSlideNumber(slide, socket.data.totalSlides)) return;
+      const bySlide = annotations.get(sessionId) ?? {};
+      const others = { ...bySlide };
+      delete others[slide];
+      // Same limits as a full sync, with the other slides' images counted.
+      const clean = sanitizeAnnotations({ [slide]: payload.strokes }, socket.data.totalSlides);
+      if (!clean) return;
+      const strokes = clean[slide] ?? [];
+      if (imageChars(others) + imageChars({ [slide]: strokes }) > MAX_IMAGE_CHARS_PER_SESSION) return;
+      bySlide[slide] = strokes;
+      annotations.set(sessionId, bySlide);
+      socket.to(sessionId).emit("slide_annotations_set", { slide, strokes });
     }));
 
     socket.on("annotations_clear", controllerOnly(socket, (sessionId, payload: { slide?: unknown }) => {

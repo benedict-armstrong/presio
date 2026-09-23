@@ -69,7 +69,7 @@ import { lsGet, lsSet, lsGetString, lsSetString, viewerOpenedKey, STORAGE_KEYS }
 import { type MosaicNode } from "react-mosaic-component";
 import type { MediaState, AudioState } from "@/components/MediaOverlay";
 import type { Deck } from "@/lib/deck";
-import { DEFAULT_PEN_STYLE, DEFAULT_HIGHLIGHTER_STYLE, hasAnyStrokes, type LaserPoint, type PenStyle, type Stroke, type Tool } from "@/lib/annotations";
+import { DEFAULT_PEN_STYLE, DEFAULT_HIGHLIGHTER_STYLE, DEFAULT_LASER_STYLE, type LaserStyle, hasAnyStrokes, type LaserPoint, type PenStyle, type Stroke, type Tool } from "@/lib/annotations";
 
 // How long a pending "j<number>" jump waits for another digit before it
 // commits on its own. Long enough to type a second digit, short enough that the
@@ -115,6 +115,11 @@ interface ControllerViewProps {
   onStrokeProgress: (stroke: Stroke | null) => void;
   onStrokeCommit: (stroke: Stroke) => void;
   onStrokeUndo: () => void;
+  onStrokeRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onStrokesErase: (ids: string[], continuing?: boolean) => void;
+  onStrokesUpdate: (strokes: Stroke[]) => void;
   onAnnotationsClear: () => void;
   onSaveDrawing: () => void;
   onLoadDrawing: (file: File) => void;
@@ -154,6 +159,11 @@ export function ControllerView({
   onStrokeProgress,
   onStrokeCommit,
   onStrokeUndo,
+  onStrokeRedo,
+  canUndo,
+  canRedo,
+  onStrokesErase,
+  onStrokesUpdate,
   onAnnotationsClear,
   onSaveDrawing,
   onLoadDrawing,
@@ -222,6 +232,20 @@ export function ControllerView({
   const [highlighterStyle, setHighlighterStyle] = useState<PenStyle>(() =>
     lsGet(STORAGE_KEYS.highlighterStyle, DEFAULT_HIGHLIGHTER_STYLE)
   );
+  // Pencil mode (device preference): only a stylus draws, so fingers keep
+  // panning, zooming and tapping even with a drawing tool active.
+  const [pencilMode, setPencilModeState] = useState(() => lsGetString(STORAGE_KEYS.pencilMode) === "true");
+  const setPencilMode = useCallback((on: boolean) => {
+    setPencilModeState(on);
+    lsSetString(STORAGE_KEYS.pencilMode, String(on));
+  }, []);
+  const [laserStyle, setLaserStyle] = useState<LaserStyle>(() =>
+    lsGet(STORAGE_KEYS.laserStyle, DEFAULT_LASER_STYLE)
+  );
+  const changeLaserStyle = useCallback((style: LaserStyle) => {
+    setLaserStyle(style);
+    lsSet(STORAGE_KEYS.laserStyle, style);
+  }, []);
   const activeStyle = tool === "highlighter" ? highlighterStyle : penStyle;
   const changeActiveStyle = useCallback(
     (style: PenStyle) => {
@@ -337,6 +361,9 @@ export function ControllerView({
   const [slideZoomActive, setSlideZoomActive] = useState(false);
   useSlideTapNav(currentCanvasRef, {
     enabled: tool === "none" && !slideZoomActive,
+    // In pencil mode a finger double-tap on the cursor starts writing, so a
+    // single tap waits to see whether a second one follows.
+    deferForDoubleTap: pencilMode && toolsOpen,
     onPrev: () => onGoTo(currentSlide - 1),
     onNext: () => onGoTo(currentSlide + 1),
   });
@@ -583,10 +610,19 @@ export function ControllerView({
           onLaserMove={onLaserMove}
           penStyle={activeStyle}
           onPenStyleChange={changeActiveStyle}
+          laserStyle={laserStyle}
+          pencilMode={pencilMode}
+          onPencilModeChange={setPencilMode}
+          onLaserStyleChange={changeLaserStyle}
           strokes={annotations[currentSlide] ?? []}
           onStrokeProgress={onStrokeProgress}
           onStrokeCommit={onStrokeCommit}
           onStrokeUndo={onStrokeUndo}
+          onStrokeRedo={onStrokeRedo}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onStrokesErase={onStrokesErase}
+          onStrokesUpdate={onStrokesUpdate}
           onAnnotationsClear={onAnnotationsClear}
           onZoomActiveChange={setSlideZoomActive}
         />

@@ -18,6 +18,12 @@ function strokeToSvgPath(stroke: Stroke, width: number, height: number): string 
   return parts.join(" ");
 }
 
+function dataUrlBytes(src: string): Uint8Array | null {
+  const comma = src.indexOf(",");
+  if (!src.startsWith("data:image/") || comma < 0) return null;
+  return Uint8Array.from(atob(src.slice(comma + 1)), (c) => c.charCodeAt(0));
+}
+
 // Burn the drawn strokes into the PDF pages and return the new document bytes.
 export async function renderAnnotatedPdf(
   pdfBytes: Uint8Array,
@@ -30,6 +36,15 @@ export async function renderAnnotatedPdf(
     if (!page || !strokes.length) continue;
     const { width, height } = page.getSize();
     for (const stroke of strokes) {
+      if (stroke.tool === "image") {
+        const [l, t, r, b] = stroke.points;
+        const bytes = dataUrlBytes(stroke.src ?? "");
+        if (!bytes || stroke.points.length !== 4) continue;
+        const image = stroke.src!.startsWith("data:image/png") ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+        // PDF space is y-up from the bottom-left corner.
+        page.drawImage(image, { x: l * width, y: height - b * height, width: (r - l) * width, height: (b - t) * height, opacity: stroke.opacity });
+        continue;
+      }
       if (stroke.points.length < 2) continue;
       // drawSvgPath interprets coordinates y-down from the given origin, which
       // matches our normalized top-left space when anchored at the page top.

@@ -12,8 +12,13 @@ const MAX_TAP_MS = 500;
 const INTERACTIVE_SELECTOR =
   "button, a, input, textarea, select, [role='button'], [contenteditable='true']";
 
+// With `deferForDoubleTap`, how long a tap waits for a second one.
+const DOUBLE_TAP_MS = 350;
+
 interface TapNavOptions {
   enabled: boolean;
+  /** Hold each tap briefly; a second tap cancels it (it was a double-tap). */
+  deferForDoubleTap?: boolean;
   onPrev: () => void;
   onNext: () => void;
 }
@@ -38,6 +43,7 @@ export function useSlideTapNav(
     optionsRef.current = options;
   });
   const startRef = useRef<{ id: number; x: number; y: number; t: number } | null>(null);
+  const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const el = ref.current;
@@ -48,20 +54,33 @@ export function useSlideTapNav(
       const target = e.target;
       if (target instanceof Element && target.closest(INTERACTIVE_SELECTOR)) return;
       startRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
+      // A second touch while a tap waits makes it a double-tap: drop both.
+      if (pendingRef.current !== null) {
+        clearTimeout(pendingRef.current);
+        pendingRef.current = null;
+        startRef.current = null;
+      }
     };
 
     const onPointerUp = (e: PointerEvent) => {
       const s = startRef.current;
       if (!s || s.id !== e.pointerId) return;
       startRef.current = null;
-      const { enabled, onPrev, onNext } = optionsRef.current;
+      const { enabled, deferForDoubleTap, onPrev, onNext } = optionsRef.current;
       if (!enabled) return;
       if (performance.now() - s.t > MAX_TAP_MS) return;
       if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > MAX_TAP_SLOP_PX) return;
       const rect = el.getBoundingClientRect();
       if (rect.width <= 0) return;
-      if (e.clientX < rect.left + rect.width / 2) onPrev();
-      else onNext();
+      const go = e.clientX < rect.left + rect.width / 2 ? onPrev : onNext;
+      if (!deferForDoubleTap) {
+        go();
+        return;
+      }
+      pendingRef.current = setTimeout(() => {
+        pendingRef.current = null;
+        go();
+      }, DOUBLE_TAP_MS);
     };
 
     const onPointerCancel = () => {
@@ -79,6 +98,8 @@ export function useSlideTapNav(
       el.removeEventListener("pointerup", onPointerUp);
       el.removeEventListener("pointercancel", onPointerCancel);
       el.removeEventListener("selectstart", onSelectStart);
+      if (pendingRef.current !== null) clearTimeout(pendingRef.current);
+      pendingRef.current = null;
     };
   }, [ref]);
 }

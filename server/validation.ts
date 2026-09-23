@@ -32,7 +32,9 @@ export function isValidEmail(value: unknown): value is string {
 // --- Drawing annotations ---
 
 export interface StrokeData {
-  tool: "pen" | "highlighter";
+  id?: string;
+  tool: "pen" | "highlighter" | "image";
+  src?: string;
   color: string;
   size: number;
   opacity: number;
@@ -45,6 +47,11 @@ export type AnnotationsBySlide = Record<number, StrokeData[]>;
 // worst case per session is ~total_slides × 300 strokes × 2000 points.
 export const MAX_STROKES_PER_SLIDE = 300;
 const MAX_STROKE_POINTS = 4000; // flat x/y list => 2000 points
+// Pasted images: the client downscales to fit this (data URL length), and a
+// session holds at most this much image data in total.
+export const MAX_IMAGE_SRC_CHARS = 600_000;
+export const MAX_IMAGE_CHARS_PER_SESSION = 12_000_000;
+const IMAGE_SRC = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/;
 
 // Upper bound on a deck's declared page count. total_slides is client-supplied
 // at session creation and multiplies the annotation caps above, so it must be
@@ -57,11 +64,19 @@ export function isValidTotalSlides(value: unknown): value is number {
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
+export function isStrokeId(raw: unknown): raw is string {
+  return typeof raw === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(raw);
+}
+
 // Coerce a stroke payload to known-good values, or null when malformed.
 export function sanitizeStroke(raw: unknown): StrokeData | null {
   if (typeof raw !== "object" || raw === null) return null;
   const s = raw as Partial<StrokeData>;
-  if (s.tool !== "pen" && s.tool !== "highlighter") return null;
+  if (s.tool !== "pen" && s.tool !== "highlighter" && s.tool !== "image") return null;
+  if (s.tool === "image") {
+    if (typeof s.src !== "string" || s.src.length > MAX_IMAGE_SRC_CHARS || !IMAGE_SRC.test(s.src)) return null;
+    if (!Array.isArray(s.points) || s.points.length !== 4) return null;
+  }
   if (typeof s.color !== "string" || !/^#[0-9a-f]{6}$/i.test(s.color)) return null;
   if (typeof s.size !== "number" || !Number.isFinite(s.size)) return null;
   if (typeof s.opacity !== "number" || !Number.isFinite(s.opacity)) return null;
@@ -69,7 +84,9 @@ export function sanitizeStroke(raw: unknown): StrokeData | null {
   if (s.points.length > MAX_STROKE_POINTS) return null;
   if (!s.points.every((n) => typeof n === "number" && Number.isFinite(n))) return null;
   return {
+    ...(isStrokeId(s.id) ? { id: s.id } : {}),
     tool: s.tool,
+    ...(s.tool === "image" ? { src: s.src } : {}),
     color: s.color,
     size: clamp(s.size, 0.0002, 0.05),
     opacity: clamp(s.opacity, 0.05, 1),
@@ -83,13 +100,16 @@ export function sanitizeStroke(raw: unknown): StrokeData | null {
 export function sanitizeAnnotations(raw: unknown, totalSlides: unknown): AnnotationsBySlide | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const result: AnnotationsBySlide = {};
+  let images = 0;
   for (const [key, value] of Object.entries(raw)) {
     const slide = parseInt(key, 10);
     if (!isValidSlideNumber(slide, totalSlides) || !Array.isArray(value)) continue;
     const strokes = value
       .slice(0, MAX_STROKES_PER_SLIDE)
       .map(sanitizeStroke)
-      .filter((s): s is StrokeData => s !== null);
+      .filter((s): s is StrokeData => s !== null)
+      // Images past the session budget are dropped.
+      .filter((s) => !s.src || (images += s.src.length) <= MAX_IMAGE_CHARS_PER_SESSION);
     if (strokes.length) result[slide] = strokes;
   }
   return result;
@@ -97,7 +117,7 @@ export function sanitizeAnnotations(raw: unknown, totalSlides: unknown): Annotat
 
 // A laser payload is either null (hide) or a normalized point. Returns the
 // clamped point, or undefined when the payload is malformed and should be dropped.
-export function sanitizeLaserPoint(payload: unknown): { x: number; y: number } | null | undefined {
+export function sanitizeLaserPoint(payload: unknown): { x: number; y: number; size?: number; trail?: boolean } | null | undefined {
   if (payload === null) return null;
   if (typeof payload !== "object") return undefined;
   const { x, y } = payload as { x?: unknown; y?: unknown };
@@ -105,7 +125,13 @@ export function sanitizeLaserPoint(payload: unknown): { x: number; y: number } |
     return undefined;
   }
   const clamp = (n: number) => Math.min(1, Math.max(0, n));
-  return { x: clamp(x), y: clamp(y) };
+  const { size, trail } = payload as { size?: unknown; trail?: unknown };
+  return {
+    x: clamp(x),
+    y: clamp(y),
+    ...(typeof size === "number" && Number.isFinite(size) ? { size: Math.min(0.06, Math.max(0.002, size)) } : {}),
+    ...(trail === true ? { trail: true } : {}),
+  };
 }
 
 // A slide number is valid when it's a positive integer within the deck. When
@@ -114,4 +140,11 @@ export function isValidSlideNumber(slideNumber: unknown, total: unknown): boolea
   if (!Number.isInteger(slideNumber) || (slideNumber as number) < 1) return false;
   if (typeof total === "number" && (slideNumber as number) > total) return false;
   return true;
+}
+
+// Total image data held in a session's annotations.
+export function imageChars(bySlide: AnnotationsBySlide): number {
+  let total = 0;
+  for (const strokes of Object.values(bySlide)) for (const s of strokes) total += s.src?.length ?? 0;
+  return total;
 }

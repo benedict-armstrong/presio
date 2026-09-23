@@ -12,7 +12,9 @@ const allowedOrigins = getAllowedOrigins();
 // See app.ts's corsOrigin: development and local/LAN use have no fixed origin
 // to allow ahead of time, so accept any unless ALLOWED_ORIGIN was set explicitly.
 const devOrLocal = process.env.NODE_ENV === "development" || isLocalMode;
-const io = new Server({ cors: { origin: allowedOrigins.length ? allowedOrigins : devOrLocal ? true : false } });
+// Room above Socket.IO's 1 MB default for a full drawing sync carrying pasted
+// images (capped per session in validation.ts).
+const io = new Server({ maxHttpBufferSize: 14e6, cors: { origin: allowedOrigins.length ? allowedOrigins : devOrLocal ? true : false } });
 
 const socketState = createSocketState();
 const app = createApp({ supabase, io, socketState });

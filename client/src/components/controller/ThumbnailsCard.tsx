@@ -130,6 +130,8 @@ export function ThumbnailsCard({
 // normalized coordinates lines up with the page.
 function ThumbStrokes({ strokes }: { strokes?: readonly Stroke[] }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  // Bumped when a pasted image finishes decoding, to paint it in.
+  const [loaded, setLoaded] = useState(0);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -140,8 +142,8 @@ function ThumbStrokes({ strokes }: { strokes?: readonly Stroke[] }) {
     canvas.height = Math.max(1, Math.round(box.height * dpr));
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    drawStrokes(ctx, strokes, canvas.width, canvas.height);
-  }, [strokes]);
+    drawStrokes(ctx, strokes, canvas.width, canvas.height, () => setLoaded((n) => n + 1));
+  }, [strokes, loaded]);
 
   if (!strokes?.length) return null;
   return <canvas ref={ref} className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden />;

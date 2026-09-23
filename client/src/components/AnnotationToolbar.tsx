@@ -1,13 +1,23 @@
 import { useEffect, useRef, useState } from "react";
-import { MousePointer2, Target, PenLine, Highlighter, Undo2, Trash2, GripHorizontal, GripVertical } from "lucide-react";
+import { MousePointer2, Target, PenLine, Highlighter, Undo2, Redo2, Trash2, Hand, Eraser, Lasso, ImagePlus, Circle, Spline, PenTool, GripHorizontal, GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PEN_COLORS, HIGHLIGHTER_COLORS, PEN_REFERENCE_WIDTH, type PenStyle, type Tool } from "@/lib/annotations";
+import {
+  PEN_COLORS,
+  HIGHLIGHTER_COLORS,
+  PEN_REFERENCE_WIDTH,
+  LASER_SIZES,
+  type LaserStyle,
+  type PenStyle,
+  type Tool,
+} from "@/lib/annotations";
 
 const TOOLS: { key: Tool; icon: React.ComponentType<{ size?: number }>; label: string }[] = [
   { key: "none", icon: MousePointer2, label: "Pointer (no tool)" },
   { key: "laser", icon: Target, label: "Laser pointer" },
   { key: "pen", icon: PenLine, label: "Draw" },
   { key: "highlighter", icon: Highlighter, label: "Highlight" },
+  { key: "eraser", icon: Eraser, label: "Erase" },
+  { key: "lasso", icon: Lasso, label: "Select — drag to move, corner to resize" },
 ];
 
 const PEN_SIZES = [2, 3, 5, 8];
@@ -54,14 +64,24 @@ interface Props {
   onToolChange: (tool: Tool) => void;
   penStyle: PenStyle;
   onPenStyleChange: (style: PenStyle) => void;
-  /** Whether the current slide has strokes (enables undo/clear). */
   canUndo: boolean;
+  canRedo: boolean;
+  /** Whether the current slide has strokes (enables clear). */
+  canClear: boolean;
   onUndo: () => void;
+  onRedo: () => void;
   onClear: () => void;
   /** Fade the palette out — the mouse has left the slide, so there is nothing
    *  to point at and the slide should be seen unobstructed. Never set on
    *  touch, where there is no such thing as a pointer that has left. */
   dimmed?: boolean;
+  /** Pencil mode: only a stylus draws, fingers pan and zoom. */
+  pencilMode?: boolean;
+  onPencilModeChange?: (on: boolean) => void;
+  /** Insert an image (clipboard, or a picker). */
+  onInsertImage?: () => void;
+  laserStyle?: LaserStyle;
+  onLaserStyleChange?: (style: LaserStyle) => void;
 }
 
 // Floating tool palette shown over the controller's current slide, movable by
@@ -77,11 +97,21 @@ export function AnnotationToolbar({
   penStyle,
   onPenStyleChange,
   canUndo,
+  canRedo,
+  canClear,
   onUndo,
+  onRedo,
   onClear,
   dimmed = false,
+  pencilMode = false,
+  onPencilModeChange,
+  onInsertImage,
+  laserStyle,
+  onLaserStyleChange,
 }: Props) {
-  const drawing = tool === "pen" || tool === "highlighter";
+  // Tools with an options panel; the eraser's only has the actions row.
+  const drawing = tool === "pen" || tool === "highlighter" || tool === "eraser" || tool === "laser";
+  const styled = tool === "pen" || tool === "highlighter";
   const colors = tool === "highlighter" ? HIGHLIGHTER_COLORS : PEN_COLORS;
   const sizes = tool === "highlighter" ? HIGHLIGHTER_SIZES : PEN_SIZES;
 
@@ -159,7 +189,9 @@ export function AnnotationToolbar({
     <div
       ref={rootRef}
       className={cn(
-        "absolute z-10 flex items-start gap-1 transition-opacity",
+        // Only the panels take input: the wrapper spans the tallest panel, and
+        // the empty space beside a shorter one must stay drawable.
+        "absolute z-10 flex items-start gap-1 transition-opacity pointer-events-none [&>*]:pointer-events-auto",
         horizontal && "flex-col",
         // Faded, but still live: the mouse can only reach it by coming back
         // over the slide, which un-fades it on the way in. Leaving fades
@@ -200,7 +232,8 @@ export function AnnotationToolbar({
           {horizontal ? <GripVertical size={12} /> : <GripHorizontal size={12} />}
         </div>
         {expanded ? (
-          TOOLS.map(({ key, icon: Icon, label }) => (
+          <>
+          {TOOLS.map(({ key, icon: Icon, label }) => (
             <IconButton
               key={key}
               title={label}
@@ -210,7 +243,32 @@ export function AnnotationToolbar({
             >
               <Icon size={15} />
             </IconButton>
-          ))
+          ))}
+          {onPencilModeChange && (
+            <IconButton
+              title={
+                pencilMode
+                  ? "Pencil only: fingers pan and zoom. Tap to draw with pencil and finger"
+                  : "Pencil and finger draw. Tap for pencil only"
+              }
+              onClick={() => onPencilModeChange(!pencilMode)}
+              testId="pencil-mode"
+            >
+              {pencilMode ? <PenTool size={15} /> : <Hand size={15} />}
+            </IconButton>
+          )}
+          <IconButton title="Undo (or double-tap with two fingers)" disabled={!canUndo} onClick={onUndo} testId="pen-undo">
+            <Undo2 size={15} />
+          </IconButton>
+          <IconButton title="Redo" disabled={!canRedo} onClick={onRedo} testId="pen-redo">
+            <Redo2 size={15} />
+          </IconButton>
+          {onInsertImage && (
+            <IconButton title="Insert image (or paste with ⌘V)" onClick={onInsertImage} testId="tool-image">
+              <ImagePlus size={15} />
+            </IconButton>
+          )}
+          </>
         ) : (
           <IconButton
             title={`${activeTool.label} — tap to show all tools`}
@@ -223,11 +281,60 @@ export function AnnotationToolbar({
         )}
       </div>
 
-      {drawing && expanded && optionsOpen && (
+      {tool === "laser" && expanded && optionsOpen && laserStyle && onLaserStyleChange && (
+        <div
+          data-testid="laser-options"
+          className="flex flex-col gap-1.5 rounded-md border bg-background/85 backdrop-blur p-1.5 shadow-sm"
+        >
+          <div className="flex items-center gap-0.5">
+            <IconButton
+              title="Point"
+              active={!laserStyle.trail}
+              onClick={() => onLaserStyleChange({ ...laserStyle, trail: false })}
+              testId="laser-mode-dot"
+            >
+              <Circle size={14} />
+            </IconButton>
+            <IconButton
+              title="Fading line"
+              active={laserStyle.trail}
+              onClick={() => onLaserStyleChange({ ...laserStyle, trail: true })}
+              testId="laser-mode-trail"
+            >
+              <Spline size={14} />
+            </IconButton>
+          </div>
+          <div className="flex items-center justify-between gap-1 border-t pt-1">
+            {LASER_SIZES.map((px) => {
+              const size = px / PEN_REFERENCE_WIDTH;
+              const active = Math.abs(laserStyle.size - size) < 0.0005;
+              return (
+                <button
+                  key={px}
+                  type="button"
+                  title={`${px}px`}
+                  data-testid={`laser-size-${px}`}
+                  aria-pressed={active}
+                  onClick={() => onLaserStyleChange({ ...laserStyle, size })}
+                  className={cn(
+                    "inline-flex items-center justify-center size-6 rounded transition-colors hover:bg-accent",
+                    active && "bg-accent ring-1 ring-ring"
+                  )}
+                >
+                  <span className="rounded-full bg-red-500" style={{ width: 3 + px / 2.5, height: 3 + px / 2.5 }} />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {drawing && tool !== "laser" && expanded && optionsOpen && (
         <div
           data-testid="pen-options"
           className="flex flex-col gap-1.5 rounded-md border bg-background/85 backdrop-blur p-1.5 shadow-sm"
         >
+          {styled && (<>
           <div className="grid grid-cols-3 gap-1">
             {colors.map((color) => (
               <button
@@ -272,13 +379,12 @@ export function AnnotationToolbar({
               );
             })}
           </div>
-          <div className="flex items-center gap-0.5 border-t pt-1">
-            <IconButton title="Undo last stroke" disabled={!canUndo} onClick={onUndo} testId="pen-undo">
-              <Undo2 size={14} />
-            </IconButton>
-            <IconButton title="Clear drawings on this slide" disabled={!canUndo} onClick={onClear} testId="pen-clear">
+          </>)}
+          <div className={cn("flex items-center gap-0.5", styled && "border-t pt-1")}>
+            <IconButton title="Clear drawings on this slide" disabled={!canClear} onClick={onClear} testId="pen-clear">
               <Trash2 size={14} />
             </IconButton>
+
           </div>
         </div>
       )}

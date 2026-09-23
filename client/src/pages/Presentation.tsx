@@ -6,7 +6,7 @@ import { loadDeckInfo, type Deck, type DeckInfo } from "@/lib/deck";
 import { useRenderTargetWidth } from "@/hooks/useRenderTargetWidth";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
-import { hasAnyStrokes, parseDrawing, serializeDrawing, type AnnotationsBySlide, type LaserPoint, type Stroke } from "@/lib/annotations";
+import { hasAnyStrokes, parseDrawing, serializeDrawing, withStrokeIds, type AnnotationsBySlide, type LaserPoint, type Stroke } from "@/lib/annotations";
 import {
   lsGet,
   lsSet,
@@ -37,6 +37,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ControllerView } from "./ControllerView";
 import { ViewerView } from "./ViewerView";
+
+
+// Undo/redo: each entry is a slide's strokes as they were before a change.
+type SlideHistory = { undo: Stroke[][]; redo: Stroke[][] };
+const MAX_HISTORY = 100;
 
 export default function Presentation() {
   const { id } = useParams<{ id: string }>();
@@ -76,11 +81,13 @@ export default function Presentation() {
   // Committed drawings per slide. The controller seeds from localStorage so a
   // reload (or a server restart, via annotations_sync) doesn't lose them.
   const [annotations, setAnnotations] = useState<AnnotationsBySlide>(() =>
-    requestedRole === "controller" ? lsGet(annotationsKey(id!), {}) : {}
+    requestedRole === "controller" ? withStrokeIds(lsGet(annotationsKey(id!), {})) : {}
   );
   // In-progress stroke streamed from the controller (viewer windows).
   const [remoteDraft, setRemoteDraft] = useState<{ slide: number; stroke: Stroke | null } | null>(null);
   const annotationsRef = useLatestRef(annotations);
+  // Controller-only undo/redo stacks per slide (see recordHistory).
+  const [history, setHistory] = useState<Record<number, SlideHistory>>({});
 
   // Everything extracted from the loaded PDF (notes, media, attachments…),
   // re-derived whenever the document is swapped (e.g. after a notes edit).
@@ -248,6 +255,24 @@ export default function Presentation() {
       prev[slide]?.length ? { ...prev, [slide]: prev[slide].slice(0, -1) } : prev
     );
   }, []);
+  const applyErase = useCallback((slide: number, ids: readonly string[]) => {
+    setAnnotations((prev) =>
+      prev[slide]?.some((s) => s.id && ids.includes(s.id))
+        ? { ...prev, [slide]: prev[slide].filter((s) => !s.id || !ids.includes(s.id)) }
+        : prev
+    );
+  }, []);
+  const applyUpdate = useCallback((slide: number, updates: readonly Stroke[]) => {
+    const byId = new Map(updates.filter((s) => s.id).map((s) => [s.id!, s]));
+    setAnnotations((prev) =>
+      prev[slide]?.some((s) => s.id && byId.has(s.id))
+        ? { ...prev, [slide]: prev[slide].map((s) => (s.id && byId.get(s.id)) || s) }
+        : prev
+    );
+  }, []);
+  const applySet = useCallback((slide: number, strokes: Stroke[]) => {
+    setAnnotations((prev) => ({ ...prev, [slide]: strokes }));
+  }, []);
   const applyClear = useCallback((slide: number) => {
     setAnnotations((prev) => (prev[slide]?.length ? { ...prev, [slide]: [] } : prev));
   }, []);
@@ -275,6 +300,7 @@ export default function Presentation() {
 
       setFilename(filename);
       setAnnotations({});
+      setHistory({});
       lsRemove(annotationsKey(id!));
       // Whatever notes were edited here lived in the outgoing PDF's bytes.
       setNotesEdited(false);
@@ -449,6 +475,9 @@ export default function Presentation() {
       else if (type === "stroke_progress") setRemoteDraft(payload);
       else if (type === "stroke_commit") applyCommit(payload.slide, payload.stroke);
       else if (type === "stroke_undo") applyUndo(payload.slide);
+      else if (type === "strokes_erase") applyErase(payload.slide, payload.ids);
+      else if (type === "strokes_update") applyUpdate(payload.slide, payload.strokes);
+      else if (type === "slide_annotations_set") applySet(payload.slide, payload.strokes);
       else if (type === "annotations_clear") applyClear(payload.slide);
       else if (type === "annotations_state") setAnnotations(payload);
       else if (type === "deck_update") void applyDeckUpdate(payload);
@@ -623,6 +652,18 @@ export default function Presentation() {
       applyUndo(slide);
     });
 
+    socket.on("strokes_erase", ({ slide, ids }: { slide: number; ids: string[] }) => {
+      applyErase(slide, ids);
+    });
+
+    socket.on("strokes_update", ({ slide, strokes }: { slide: number; strokes: Stroke[] }) => {
+      applyUpdate(slide, strokes);
+    });
+
+    socket.on("slide_annotations_set", ({ slide, strokes }: { slide: number; strokes: Stroke[] }) => {
+      applySet(slide, strokes);
+    });
+
     socket.on("annotations_clear", ({ slide }: { slide: number }) => {
       applyClear(slide);
     });
@@ -675,6 +716,9 @@ export default function Presentation() {
       socket.off("stroke_progress");
       socket.off("stroke_commit");
       socket.off("stroke_undo");
+      socket.off("strokes_erase");
+      socket.off("strokes_update");
+      socket.off("slide_annotations_set");
       socket.off("annotations_clear");
       socket.off("annotations_state");
       socket.off("deck_updated");
@@ -683,7 +727,7 @@ export default function Presentation() {
       socket.off("session_ended");
       socket.disconnect();
     };
-  }, [id, local, requestedRole, navigate, setSearchParams, applyRole, applyCommit, applyUndo, applyClear, applyDeckUpdate, annotationsRef, stateRef]);
+  }, [id, local, requestedRole, navigate, setSearchParams, applyRole, applyCommit, applyUndo, applyErase, applyUpdate, applySet, applyClear, applyDeckUpdate, annotationsRef, stateRef]);
 
   // Report the settled role to analytics. The `?role=` query param is already
   // in every tracked URL, but Umami's Pages report keys on the path alone, so
@@ -1226,8 +1270,55 @@ export default function Presentation() {
     [currentSlide, broadcast]
   );
 
+  // Undo/redo, per slide: every change stores the slide's strokes from before
+  // it, and undo/redo swap those back in wholesale (slide_annotations_set), so
+  // erasing, moving and clearing are undoable like drawing.
+  const recordHistory = useCallback(
+    (slide: number) => {
+      const before = annotationsRef.current[slide] ?? [];
+      setHistory((h) => ({
+        ...h,
+        [slide]: { undo: [...(h[slide]?.undo ?? []), before].slice(-MAX_HISTORY), redo: [] },
+      }));
+    },
+    [annotationsRef]
+  );
+
+  const setSlideStrokes = useCallback(
+    (slide: number, strokes: Stroke[]) => {
+      applySet(slide, strokes);
+      const payload = { slide, strokes };
+      broadcast(
+        { type: "slide_annotations_set", payload },
+        { event: "slide_annotations_set", payload }
+      );
+    },
+    [broadcast, applySet]
+  );
+
+  const stepHistory = useCallback(
+    (from: "undo" | "redo") => {
+      const to = from === "undo" ? "redo" : "undo";
+      const h = history[currentSlide];
+      const target = h?.[from].at(-1);
+      if (!h || !target) return;
+      const current = annotationsRef.current[currentSlide] ?? [];
+      setHistory((prev) => ({
+        ...prev,
+        [currentSlide]: { [from]: h[from].slice(0, -1), [to]: [...h[to], current] } as SlideHistory,
+      }));
+      setSlideStrokes(currentSlide, target);
+    },
+    [history, currentSlide, annotationsRef, setSlideStrokes]
+  );
+  const onStrokeUndo = useCallback(() => stepHistory("undo"), [stepHistory]);
+  const onStrokeRedo = useCallback(() => stepHistory("redo"), [stepHistory]);
+  const canUndo = !!history[currentSlide]?.undo.length;
+  const canRedo = !!history[currentSlide]?.redo.length;
+
   const onStrokeCommit = useCallback(
     (stroke: Stroke) => {
+      recordHistory(currentSlide);
       applyCommit(currentSlide, stroke);
       const payload = { slide: currentSlide, stroke };
       broadcast(
@@ -1235,24 +1326,41 @@ export default function Presentation() {
         { event: "stroke_commit", payload }
       );
     },
-    [currentSlide, broadcast, applyCommit]
+    [currentSlide, broadcast, applyCommit, recordHistory]
   );
 
-  const onStrokeUndo = useCallback(() => {
-    applyUndo(currentSlide);
-    const payload = { slide: currentSlide };
-    broadcast({ type: "stroke_undo", payload }, { event: "stroke_undo", payload });
-  }, [currentSlide, broadcast, applyUndo]);
+  // `continuing`: more erasing within the same eraser drag — one undo step.
+  const onStrokesErase = useCallback(
+    (ids: string[], continuing = false) => {
+      if (!continuing) recordHistory(currentSlide);
+      applyErase(currentSlide, ids);
+      const payload = { slide: currentSlide, ids };
+      broadcast({ type: "strokes_erase", payload }, { event: "strokes_erase", payload });
+    },
+    [currentSlide, broadcast, applyErase, recordHistory]
+  );
+
+  const onStrokesUpdate = useCallback(
+    (strokes: Stroke[]) => {
+      recordHistory(currentSlide);
+      applyUpdate(currentSlide, strokes);
+      const payload = { slide: currentSlide, strokes };
+      broadcast({ type: "strokes_update", payload }, { event: "strokes_update", payload });
+    },
+    [currentSlide, broadcast, applyUpdate, recordHistory]
+  );
 
   const onAnnotationsClear = useCallback(() => {
+    recordHistory(currentSlide);
     applyClear(currentSlide);
     const payload = { slide: currentSlide };
     broadcast({ type: "annotations_clear", payload }, { event: "annotations_clear", payload });
-  }, [currentSlide, broadcast, applyClear]);
+  }, [currentSlide, broadcast, applyClear, recordHistory]);
 
   const onAnnotationsReplace = useCallback(
     (bySlide: AnnotationsBySlide) => {
       setAnnotations(bySlide);
+      setHistory({});
       broadcast(
         { type: "annotations_state", payload: bySlide },
         { event: "annotations_sync", payload: bySlide }
@@ -1435,6 +1543,11 @@ export default function Presentation() {
         onStrokeProgress={onStrokeProgress}
         onStrokeCommit={onStrokeCommit}
         onStrokeUndo={onStrokeUndo}
+        onStrokeRedo={onStrokeRedo}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onStrokesErase={onStrokesErase}
+        onStrokesUpdate={onStrokesUpdate}
         onAnnotationsClear={onAnnotationsClear}
         onSaveDrawing={onSaveDrawing}
         onLoadDrawing={onLoadDrawing}

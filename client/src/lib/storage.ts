@@ -30,8 +30,13 @@ export const STORAGE_KEYS = {
   // Last-used drawing color/width for the annotation tools.
   penStyle: "presio_pen_style",
   highlighterStyle: "presio_highlighter_style",
+  // Laser pointer size and dot/line mode.
+  laserStyle: "presio_laser_style",
   // Whether the floating drawing/laser toolbar is shown on the current slide.
   annotationToolbar: "presio_annotation_toolbar",
+  // Pencil mode: only a stylus draws, fingers pan/zoom. Switched on the first
+  // time a pen touches the slide; can be turned off from the pen options.
+  pencilMode: "presio_pencil_mode",
   // Whether the timer card also shows the current wall-clock time.
   timerShowClock: "presio_timer_show_clock",
   // Timer mode/duration/warning — a device preference, not synced anywhere.

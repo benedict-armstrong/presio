@@ -22,6 +22,9 @@ interface PinchZoomOptions {
    * and double-tap-to-reset are off. Two fingers still pinch and pan.
    */
   drawing: boolean;
+  /** Double-tap returns to fit (default). Off while double-tap is taken by
+   *  something else — the pencil-mode eraser toggle. */
+  doubleTapReset?: boolean;
   /** Reports whether a gesture is in progress or the slide is zoomed. */
   onActiveChange?: (active: boolean) => void;
 }
@@ -36,13 +39,14 @@ interface PinchZoomOptions {
 // that should move with the slide content.
 export function useSlidePinchZoom(
   ref: RefObject<HTMLElement | null>,
-  { drawing, onActiveChange }: PinchZoomOptions
+  { drawing, doubleTapReset = true, onActiveChange }: PinchZoomOptions
 ) {
   const [zoom, setZoom] = useState<SlideZoom>(IDENTITY);
   // Latest values for the listeners; kept in refs so they are bound once and
   // always see current state without re-binding every render.
   const zoomRef = useRef(zoom);
   const drawingRef = useRef(drawing);
+  const doubleTapResetRef = useRef(doubleTapReset);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinchBase = useRef<{ dist: number; midX: number; midY: number; zoom: SlideZoom } | null>(null);
   const panLast = useRef<{ x: number; y: number } | null>(null);
@@ -55,6 +59,9 @@ export function useSlidePinchZoom(
   useEffect(() => {
     drawingRef.current = drawing;
   }, [drawing]);
+  useEffect(() => {
+    doubleTapResetRef.current = doubleTapReset;
+  }, [doubleTapReset]);
 
   // Keep the scaled content covering the surface: at origin 0 0 the content
   // spans [x, x + scale*size], which must include [0, size].
@@ -79,6 +86,7 @@ export function useSlidePinchZoom(
     const el = ref.current;
     if (!el) return;
     const tracked = pointers.current;
+    const penDown = new Set<number>();
 
     // Capturing on the surface retargets the pointer away from the annotation
     // overlay, so it only happens once this hook actually owns the gesture.
@@ -91,7 +99,20 @@ export function useSlidePinchZoom(
     };
 
     const onPointerDown = (e: PointerEvent) => {
-      if (e.pointerType !== "touch") return;
+      if (e.pointerType === "pen") {
+        // The pencil wins over any fingers already down — usually that is the
+        // palm resting before the tip lands — and keeps winning until lifted.
+        penDown.add(e.pointerId);
+        tracked.clear();
+        setGesturing(false);
+        pinchBase.current = null;
+        panLast.current = null;
+        lastTap.current = null;
+        return;
+      }
+      if (e.pointerType !== "touch" || penDown.size > 0) return;
+      // A finger on the lasso selection is moving it, not panning the slide.
+      if (e.target instanceof Element && e.target.closest("[data-lasso-box]")) return;
       tracked.set(e.pointerId, { x: e.clientX, y: e.clientY });
       setGesturing(tracked.size >= 2);
       if (tracked.size === 2) {
@@ -138,6 +159,7 @@ export function useSlidePinchZoom(
     };
 
     const onPointerUp = (e: PointerEvent) => {
+      if (penDown.delete(e.pointerId)) return;
       if (!tracked.delete(e.pointerId)) return;
       const wasPinching = !!pinchBase.current;
       setGesturing(tracked.size >= 2);
@@ -151,7 +173,7 @@ export function useSlidePinchZoom(
       }
       // Double-tap resets — but only while zoomed and with no drawing tool
       // active, so taps keep reaching slide navigation and the pen untouched.
-      if (zoomRef.current.scale > 1 && !wasPinching && !drawingRef.current) {
+      if (zoomRef.current.scale > 1 && !wasPinching && !drawingRef.current && doubleTapResetRef.current) {
         const now = performance.now();
         const prev = lastTap.current;
         if (
@@ -171,6 +193,7 @@ export function useSlidePinchZoom(
     };
 
     const onPointerCancel = (e: PointerEvent) => {
+      if (penDown.delete(e.pointerId)) return;
       tracked.delete(e.pointerId);
       setGesturing(tracked.size >= 2);
       pinchBase.current = null;

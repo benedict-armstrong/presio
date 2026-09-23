@@ -157,7 +157,7 @@ export async function inkPixels(page: Page): Promise<number> {
   return page
     .getByTestId("annotation-overlay")
     .first()
-    .locator("canvas")
+    .getByTestId("annotation-strokes")
     .evaluate((el) => {
       const c = el as HTMLCanvasElement;
       const ctx = c.getContext("2d");
