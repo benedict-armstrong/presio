@@ -18,13 +18,22 @@ export interface PluginEntry {
   builtin: boolean;
 }
 
-/** Shipped with the app; off until the presenter turns one on. */
-const BUILTIN_URLS = ["/plugins/join-code/"];
+/** Shipped with the app, by URL, with whether each is on until the presenter
+ *  says otherwise. The timer was a core card before plugins existed. */
+const BUILTINS: Record<string, { enabled: boolean }> = {
+  "/plugins/timer/": { enabled: true },
+  "/plugins/join-code/": { enabled: false },
+};
+const BUILTIN_URLS = Object.keys(BUILTINS);
 
 // The "plugins" setting maps URL -> { enabled }. Built-ins appear in it only
 // once toggled; everything else is in it because it was added.
 function entriesFrom(list: CoreSettings["plugins"]): PluginEntry[] {
-  const builtins = BUILTIN_URLS.map((url) => ({ url, enabled: !!list[url]?.enabled, builtin: true }));
+  const builtins = BUILTIN_URLS.map((url) => ({
+    url,
+    enabled: list[url]?.enabled ?? BUILTINS[url].enabled,
+    builtin: true,
+  }));
   const added = Object.entries(list)
     .filter(([url]) => !BUILTIN_URLS.includes(url))
     .map(([url, { enabled }]) => ({ url, enabled, builtin: false }));

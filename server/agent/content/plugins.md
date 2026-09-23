@@ -90,12 +90,23 @@ presio.settings.get(name)                  // this plugin's setting (presenter's
 presio.settings.all
 presio.settings.onChange(settings => {})
 
+presio.storage.get(key)                    // presenter: this plugin's state for this session
+presio.storage.set(key, value)             // JSON, 16 KB per plugin; set(key) removes
+presio.storage.all
+presio.storage.onChange(storage => {})     // another surface of this plugin changed it
+
 presio.onButton(id, () => {})              // a contributed button was pressed
 presio.ui.setButton(id, { active, label, disabled })  // presenter: update it
 
 presio.deck.attachments()   // → Promise<[{ filename, bytes: Uint8Array }]> ("deck" permission)
 presio.ui.setVisible(bool)  // viewer surface: show/hide the layer
 ```
+
+Storage: `presio.storage` is the presenter's per-session state on their own
+device. It survives a reload and is shared by the plugin's surfaces there
+(e.g. a background and a tile), but never leaves the device — use messages
+for anything viewers need. On audience devices it is empty and `set` does
+nothing.
 
 Messaging:
 
@@ -122,4 +133,7 @@ Messaging:
 
 The built-in Join Code plugin is a complete example:
 [manifest](BASE/plugins/join-code/presio-plugin.json),
-[index.html](BASE/plugins/join-code/index.html).
+[index.html](BASE/plugins/join-code/index.html). The built-in Timer
+([manifest](BASE/plugins/timer/presio-plugin.json),
+[index.html](BASE/plugins/timer/index.html)) shows a tile and a background
+sharing `presio.storage`.

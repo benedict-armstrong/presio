@@ -14,7 +14,7 @@ export interface CardEntry {
 
 // Desktop body: the draggable/resizable tiling dashboard. Each tile's header is
 // our own toolbar (also the drag handle) with the card title, an optional action
-// (e.g. timer settings), and a hide button.
+// (e.g. the notes text size), and a hide button.
 export function ControllerDashboard({
   value,
   onChange,

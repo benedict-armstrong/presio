@@ -47,23 +47,25 @@ test("the talk timer starts, counts, and resets", async ({ browser, request }) =
   const controller = await openController(ctx, sessionId);
   await waitForSlide(controller);
 
-  const elapsed = controller.getByTestId("timer-elapsed");
+  // The timer is a built-in plugin: its card is a sandboxed frame.
+  const tile = controller.frameLocator('[data-testid="plugin-frame-timer-tile"]');
+  const elapsed = tile.getByTestId("timer-elapsed");
   await expect(elapsed).toHaveText("00:00");
 
-  await controller.getByRole("button", { name: "Start", exact: true }).click();
+  await tile.getByRole("button", { name: "Start", exact: true }).click();
 
   // Running, not just relabelled: the readout has to actually move.
   await expect(elapsed).not.toHaveText("00:00", { timeout: 5_000 });
-  await expect(controller.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+  await expect(tile.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
 
-  await controller.getByRole("button", { name: "Stop", exact: true }).click();
+  await tile.getByRole("button", { name: "Stop", exact: true }).click();
   const stopped = await elapsed.textContent();
 
   // Stopped means stopped — the clock must hold where it was left.
   await controller.waitForTimeout(1500);
   await expect(elapsed).toHaveText(stopped ?? "");
 
-  await controller.getByRole("button", { name: "Reset", exact: true }).click();
+  await tile.getByRole("button", { name: "Reset", exact: true }).click();
   await expect(elapsed).toHaveText("00:00");
 
   await ctx.close();

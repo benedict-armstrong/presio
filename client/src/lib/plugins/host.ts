@@ -5,6 +5,7 @@
 // BroadcastChannel, see usePluginHost) to its frames on other devices.
 
 import type { PdfAttachment } from "@/lib/pdf";
+import { lsGet, lsSet, pluginStateKey } from "@/lib/storage";
 import type { LoadedPlugin, PluginSurface } from "./manifest";
 
 export type PluginRole = "presenter" | "audience";
@@ -41,6 +42,8 @@ interface Conn {
 }
 
 const TYPE_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
+/** What one plugin may keep in presio.storage for one session, as JSON. */
+const STORAGE_LIMIT = 16 * 1024;
 const NO_BUTTONS: Record<string, ButtonState> = {};
 const retainKey = (plugin: string, type: string) => `${plugin}\u0000${type}`;
 
@@ -89,7 +92,39 @@ export class PluginHost {
 
   frameContext(plugin: LoadedPlugin, surface: PluginSurface) {
     const pluginId = plugin.manifest.id;
-    return { pluginId, surface, ...this.ctx, settings: this.settings.get(pluginId) ?? {} };
+    return {
+      pluginId,
+      surface,
+      ...this.ctx,
+      settings: this.settings.get(pluginId) ?? {},
+      storage: this.readStorage(pluginId),
+    };
+  }
+
+  // --- presio.storage: the presenter's per-session plugin state ---
+
+  private readStorage(pluginId: string): Record<string, unknown> {
+    if (this.ctx.role !== "presenter") return {};
+    const all = lsGet<Record<string, Record<string, unknown>>>(pluginStateKey(this.ctx.session.id), {});
+    const mine = all?.[pluginId];
+    return typeof mine === "object" && mine !== null && !Array.isArray(mine) ? mine : {};
+  }
+
+  private onStorageSet(conn: Conn, key: unknown, value: unknown) {
+    // A local deck's viewer window shares this browser's storage; only the
+    // presenter's frames write it.
+    if (this.ctx.role !== "presenter" || typeof key !== "string" || !TYPE_RE.test(key)) return;
+    const pluginId = conn.plugin.manifest.id;
+    const next = { ...this.readStorage(pluginId) };
+    if (value === undefined) delete next[key];
+    else next[key] = value;
+    if (JSON.stringify(next).length > STORAGE_LIMIT) return;
+    const storeKey = pluginStateKey(this.ctx.session.id);
+    const all = lsGet<Record<string, unknown>>(storeKey, {});
+    lsSet(storeKey, { ...all, [pluginId]: next });
+    for (const other of this.conns) {
+      if (other !== conn && other.plugin.manifest.id === pluginId) other.port.postMessage({ type: "storage", storage: next });
+    }
   }
 
   /** A plugin's resolved settings changed (or arrived from the presenter). */
@@ -192,6 +227,8 @@ export class PluginHost {
         if (other !== conn && other.plugin.manifest.id === event.plugin) this.deliver(other, event);
       }
       this.outbound(event);
+    } else if (m?.type === "storage") {
+      this.onStorageSet(conn, m.key, m.value);
     } else if (m?.type === "visible") {
       conn.onVisible?.(m.visible === true);
     } else if (m?.type === "button") {

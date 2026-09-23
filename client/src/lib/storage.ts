@@ -6,7 +6,7 @@
 // hand-rolled `try { JSON.parse(localStorage.getItem(...)) } catch {}` dance
 // that was duplicated across the app.
 
-/** Static localStorage keys. Per-session keys (timer, session auth) are built
+/** Static localStorage keys. Per-session keys (plugin state, session auth) are built
  *  from an id, so they're kept as factory functions rather than constants. */
 export const STORAGE_KEYS = {
   // The user's settings document (lib/settings.ts). Preferences live there;
@@ -33,7 +33,8 @@ export const STORAGE_KEYS = {
   newsletterDelayOverride: "presio_newsletter_delay_ms",
 } as const;
 
-export const timerKey = (id: string) => `presio_timer_${id}`;
+/** Plugins' presio.storage for one session: { [pluginId]: { [key]: value } }. */
+export const pluginStateKey = (id: string) => `presio_plugin_state_${id}`;
 export const annotationsKey = (id: string) => `presio_annotations_${id}`;
 export const sessionKey = (id: string) => `session_${id}`;
 /** Live-reload preference for a local deck: "off" | "prompt" | "auto". A device
@@ -90,12 +91,12 @@ export function lsRemove(key: string): void {
 /** Move a deck's per-session state from one id to another. Sharing a local deck
  *  mints its real join code server-side, so the deck is re-keyed — and anything
  *  stored under the old id would be silently lost at exactly the moment the
- *  presenter shares. Drawings are the one that hurts; the timer and the
+ *  presenter shares. Drawings are the one that hurts; plugin state and the
  *  viewer-opened flag are moved for the same reason (a running timer resetting,
  *  or the "open the viewer" prompt reappearing, mid-presentation). */
 export function rekeySessionStorage(oldId: string, newId: string): void {
   if (oldId === newId) return;
-  for (const key of [annotationsKey, timerKey, viewerOpenedKey]) {
+  for (const key of [annotationsKey, pluginStateKey, viewerOpenedKey]) {
     const value = lsGetString(key(oldId), "");
     if (value) lsSetString(key(newId), value);
     lsRemove(key(oldId));

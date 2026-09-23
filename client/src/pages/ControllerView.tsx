@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { cn, getSessionAuth, setSessionAuth } from "@/lib/utils";
 import { Settings, Check, Option, Plus, Share2, ExternalLink, QrCode, Save, FolderOpen, PenLine, User, LayoutGrid, Puzzle, KeyRound, Keyboard, FileJson } from "lucide-react";
@@ -24,7 +24,6 @@ import { CurrentSlideCard } from "@/components/controller/CurrentSlideCard";
 import { NextSlideCard } from "@/components/controller/NextSlideCard";
 import { SpeakerNotesCard, NotesSizeAction } from "@/components/controller/SpeakerNotesCard";
 import { ThumbnailsCard } from "@/components/controller/ThumbnailsCard";
-import { TimerCard, TimerAction, TimerSettingsDialog, MobileTimer, type TimerSettings } from "@/components/controller/TimerCard";
 import { ShortcutsEditor } from "@/components/controller/ShortcutsEditor";
 import { ControllerHeader } from "@/components/controller/ControllerHeader";
 import { ControllerNav, SlideCounter } from "@/components/controller/ControllerNav";
@@ -46,7 +45,7 @@ import {
   DEFAULT_KEYMAP,
   matchesBinding,
 } from "@/lib/keymap";
-import { getSetting, setSetting, useSetting } from "@/lib/settings";
+import { getSetting, useSetting } from "@/lib/settings";
 import {
   CARD_KEYS,
   CARD_LABELS,
@@ -185,7 +184,6 @@ export function ControllerView({
   // Which Settings page is showing; kept across opens so the dialog comes back
   // where the presenter left it.
   const [settingsCategory, setSettingsCategory] = useState<string | undefined>(undefined);
-  const [timerSettingsOpen, setTimerSettingsOpen] = useState(false);
   const [keymap, setKeymap] = useSetting("keybindings");
   const [viewerBlocked, setViewerBlocked] = useState(false);
   const [viewerPromptDismissed, setViewerPromptDismissed] = useState(false);
@@ -207,21 +205,6 @@ export function ControllerView({
   }, [setToolsOpen]);
   // Speaker-notes text size multiplier.
   const [notesScale, changeNotesScale] = useSetting("notes.fontScale");
-  // Optional wall-clock display on the timer card.
-  const [showClock, changeShowClock] = useSetting("timer.showClock");
-  // Timer mode/duration/warning: three settings, edited together as one form.
-  const [timerMode] = useSetting("timer.mode");
-  const [timerDuration] = useSetting("timer.duration");
-  const [timerThreshold] = useSetting("timer.warningThreshold");
-  const timerSettings = useMemo<TimerSettings>(
-    () => ({ mode: timerMode, duration: timerDuration, threshold: timerThreshold }),
-    [timerMode, timerDuration, timerThreshold]
-  );
-  const changeTimerSettings = useCallback((s: TimerSettings) => {
-    setSetting("timer.mode", s.mode);
-    setSetting("timer.duration", s.duration);
-    setSetting("timer.warningThreshold", s.threshold);
-  }, []);
   // Drawing color/width per tool, remembered across presentations.
   const [penStyle, setPenStyle] = useSetting("drawing.pen");
   const [highlighterStyle, setHighlighterStyle] = useSetting("drawing.highlighter");
@@ -619,10 +602,6 @@ export function ControllerView({
     nextSlide: {
       content: <NextSlideCard deck={deck} currentSlide={currentSlide} />,
     },
-    timer: {
-      content: <TimerCard id={id} settings={timerSettings} showClock={showClock} />,
-      action: <TimerAction open={timerSettingsOpen} onToggle={() => setTimerSettingsOpen(!timerSettingsOpen)} />,
-    },
     notes: {
       content: (
         <SpeakerNotesCard
@@ -741,7 +720,6 @@ export function ControllerView({
       {isMobile ? (
         <div className="border-t px-3 py-3 space-y-2">
           <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
-            <MobileTimer id={id} settings={timerSettings} />
             <SlideCounter
               className="text-xs text-muted-foreground"
               currentSlide={currentSlide}
@@ -1033,16 +1011,6 @@ export function ControllerView({
               ),
             },
           ]}
-        />
-      )}
-
-      {timerSettingsOpen && (
-        <TimerSettingsDialog
-          settings={timerSettings}
-          onSettingsChange={changeTimerSettings}
-          showClock={showClock}
-          onShowClockChange={changeShowClock}
-          onClose={() => setTimerSettingsOpen(false)}
         />
       )}
 

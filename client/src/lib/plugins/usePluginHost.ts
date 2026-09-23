@@ -82,7 +82,13 @@ function useLocallyActivePlugins(enabled: boolean, readAll: () => Promise<PdfAtt
         }
       }
       if (cancelled) return;
-      setPlugins(loaded);
+      // Keep the objects of plugins that didn't change: a new one for the
+      // same plugin would remount its frames (this runs again once the deck's
+      // attachments are read).
+      setPlugins((prev) => {
+        const next = loaded.map((p) => prev.find((q) => q.hash === p.hash && q.manifest.id === p.manifest.id) ?? p);
+        return next.length === prev.length && next.every((p, i) => p === prev[i]) ? prev : next;
+      });
       setErrors(failed);
     })();
     return () => { cancelled = true; };

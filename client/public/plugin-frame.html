@@ -29,6 +29,7 @@
     var messageListeners = [];
     var contextListeners = [];
     var settingsListeners = [];
+    var storageListeners = [];
     var buttonListeners = {};
     // Messages that arrive before the plugin subscribes (retained state is
     // replayed right after boot) wait here instead of being dropped.
@@ -68,6 +69,9 @@
       } else if (m.type === "settings") {
         ctx.settings = m.settings;
         each(settingsListeners, ctx.settings);
+      } else if (m.type === "storage") {
+        ctx.storage = m.storage;
+        each(storageListeners, Object.assign({}, ctx.storage));
       } else if (m.type === "button") {
         each(buttonListeners[m.id] || [], m.id);
       } else if (m.type === "message") {
@@ -127,6 +131,23 @@
         get: function (name) { return ctx.settings[name]; },
         get all() { return Object.assign({}, ctx.settings); },
         onChange: function (cb) { return subscribe(settingsListeners, cb); },
+      },
+      /**
+       * Presenter only: small JSON values kept on this device for this
+       * session. They survive a reload and are shared with this plugin's
+       * other surfaces here; they never leave the device. `set(key)` with no
+       * value removes one.
+       */
+      storage: {
+        get: function (key) { return ctx.storage[key]; },
+        get all() { return Object.assign({}, ctx.storage); },
+        set: function (key, value) {
+          if (value === undefined) delete ctx.storage[key];
+          else ctx.storage[key] = value;
+          post({ type: "storage", key: key, value: value });
+        },
+        /** Another surface of this plugin changed a value. */
+        onChange: function (cb) { return subscribe(storageListeners, cb); },
       },
       /** A contributed button (contributes.buttons) was pressed. Delivered to
        *  the background surface, or the tile when there is none. */

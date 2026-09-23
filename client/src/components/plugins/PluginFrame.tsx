@@ -48,6 +48,10 @@ export function PluginFrame({
       );
     };
     frame.addEventListener("load", boot);
+    // A rerun of this effect finds the frame already booted, on the port the
+    // cleanup just closed. Load it afresh rather than leave it running deaf.
+    if (frame.dataset.booted) frame.src = "/plugin-frame.html";
+    frame.dataset.booted = "1";
     return () => {
       frame.removeEventListener("load", boot);
       disconnect?.();

@@ -1,6 +1,6 @@
 // User settings: one JSON document, in the spirit of VS Code's settings.json.
 //
-// Keys are dotted ("timer.mode"), and the document holds only what differs
+// Keys are dotted ("notes.fontScale"), and the document holds only what differs
 // from the defaults, so an exported file reads as "what this presenter
 // changed". Presio's own settings are declared in CORE_SETTINGS below; plugins
 // contribute theirs through their manifest, namespaced by plugin id
@@ -61,10 +61,6 @@ export type ThemeSetting = "system" | "light" | "dark";
 export interface CoreSettings {
   theme: ThemeSetting;
   keybindings: Keymap;
-  "timer.mode": "up" | "down";
-  "timer.duration": number | null;
-  "timer.warningThreshold": number | null;
-  "timer.showClock": boolean;
   "notes.fontScale": number;
   "drawing.toolbar": boolean;
   "drawing.pen": PenStyle;
@@ -124,29 +120,6 @@ export const CORE_SETTINGS: { [K in CoreSettingKey]: CoreSpec<CoreSettings[K]> }
     default: DEFAULT_KEYMAP,
     sanitize: sanitizeKeymap,
     description: "Controller keyboard shortcuts, per action: a list of { key, meta? }.",
-  },
-  "timer.mode": {
-    type: "enum",
-    values: ["up", "down"],
-    default: "up",
-    description: "Count the talk up from zero, or down from timer.duration.",
-  },
-  "timer.duration": {
-    type: "number",
-    default: null,
-    minimum: 1,
-    description: "Countdown length in seconds (timer.mode \"down\").",
-  },
-  "timer.warningThreshold": {
-    type: "number",
-    default: null,
-    minimum: 1,
-    description: "Seconds at which the timer turns to a warning: remaining time counting down, elapsed time counting up.",
-  },
-  "timer.showClock": {
-    type: "boolean",
-    default: false,
-    description: "Also show the wall-clock time on the timer card.",
   },
   "notes.fontScale": {
     type: "number",
@@ -370,13 +343,18 @@ function migrateLegacySettings(): Doc {
 
   put("theme", read("theme") ?? undefined);
   put("keybindings", json("presio_keymap"));
+  // The timer is a built-in plugin now; its settings are the plugin's, in
+  // minutes where they used to be seconds. Read back through the manifest's
+  // specs, so anything off is dropped there.
   const timer = json("presio_timer_settings");
   if (isRecord(timer)) {
-    put("timer.mode", timer.mode);
-    put("timer.duration", timer.duration);
-    put("timer.warningThreshold", timer.threshold);
+    if (timer.mode === "down") out["timer.mode"] = "down";
+    for (const [from, to] of [["duration", "timer.durationMinutes"], ["threshold", "timer.warningMinutes"]]) {
+      const seconds = timer[from];
+      if (typeof seconds === "number" && seconds > 0) out[to] = seconds / 60;
+    }
   }
-  if (read("presio_timer_show_clock") !== null) put("timer.showClock", read("presio_timer_show_clock") === "true");
+  if (read("presio_timer_show_clock") === "true") out["timer.showClock"] = true;
   put("notes.fontScale", json("presio_notes_font_scale"));
   if (read("presio_annotation_toolbar") !== null) put("drawing.toolbar", read("presio_annotation_toolbar") !== "false");
   put("drawing.pen", json("presio_pen_style"));
