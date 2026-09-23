@@ -20,8 +20,12 @@ export type PluginSurface =
   | "viewer";
 
 export type PluginPermission =
-  /** Read the deck's embedded attachments (presio.deck.attachments()). */
-  "deck";
+  /** Read the deck: its embedded attachments and the PDF's bytes
+   *  (presio.deck.attachments() / bytes()). */
+  | "deck"
+  /** Save an edited PDF over the deck, from the presenter's device
+   *  (presio.deck.save()). */
+  | "editDeck";
 
 /** Where a contributed button can go. */
 export type ButtonLocation =
@@ -75,7 +79,7 @@ export interface LoadedPlugin {
 const SURFACES: PluginSurface[] = ["background", "tile", "viewer"];
 const BUTTON_LOCATIONS: ButtonLocation[] = ["controller.toolbar"];
 const NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
-const PERMISSIONS: PluginPermission[] = ["deck"];
+const PERMISSIONS: PluginPermission[] = ["deck", "editDeck"];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** Validate a parsed presio-plugin.json, throwing a readable error. */

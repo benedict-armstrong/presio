@@ -1,6 +1,6 @@
 // User settings: one JSON document, in the spirit of VS Code's settings.json.
 //
-// Keys are dotted ("notes.fontScale"), and the document holds only what differs
+// Keys are dotted ("drawing.toolbar"), and the document holds only what differs
 // from the defaults, so an exported file reads as "what this presenter
 // changed". Presio's own settings are declared in CORE_SETTINGS below; plugins
 // contribute theirs through their manifest, namespaced by plugin id
@@ -61,7 +61,6 @@ export type ThemeSetting = "system" | "light" | "dark";
 export interface CoreSettings {
   theme: ThemeSetting;
   keybindings: Keymap;
-  "notes.fontScale": number;
   "drawing.toolbar": boolean;
   "drawing.pen": PenStyle;
   "drawing.highlighter": PenStyle;
@@ -120,13 +119,6 @@ export const CORE_SETTINGS: { [K in CoreSettingKey]: CoreSpec<CoreSettings[K]> }
     default: DEFAULT_KEYMAP,
     sanitize: sanitizeKeymap,
     description: "Controller keyboard shortcuts, per action: a list of { key, meta? }.",
-  },
-  "notes.fontScale": {
-    type: "number",
-    default: 1,
-    minimum: 0.75,
-    maximum: 2.5,
-    description: "Speaker notes text size multiplier.",
   },
   "drawing.toolbar": {
     type: "boolean",
@@ -355,7 +347,9 @@ function migrateLegacySettings(): Doc {
     }
   }
   if (read("presio_timer_show_clock") === "true") out["timer.showClock"] = true;
-  put("notes.fontScale", json("presio_notes_font_scale"));
+  // Likewise the notes plugin's text size.
+  const notesScale = json("presio_notes_font_scale");
+  if (typeof notesScale === "number" && notesScale !== 1) out["notes.fontScale"] = notesScale;
   if (read("presio_annotation_toolbar") !== null) put("drawing.toolbar", read("presio_annotation_toolbar") !== "false");
   put("drawing.pen", json("presio_pen_style"));
   put("drawing.highlighter", json("presio_highlighter_style"));

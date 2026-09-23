@@ -19,9 +19,10 @@ export interface PluginEntry {
 }
 
 /** Shipped with the app, by URL, with whether each is on until the presenter
- *  says otherwise. The timer was a core card before plugins existed. */
+ *  says otherwise. The timer and notes were core cards before plugins existed. */
 const BUILTINS: Record<string, { enabled: boolean }> = {
   "/plugins/timer/": { enabled: true },
+  "/plugins/notes/": { enabled: true },
   "/plugins/join-code/": { enabled: false },
 };
 const BUILTIN_URLS = Object.keys(BUILTINS);

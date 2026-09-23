@@ -4,7 +4,6 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { loadPdf, loadPdfData, freshPdfUrl, loadLatestPdf, renderPage, clearCache, openPdf, destroyPdf } from "@/lib/pdf";
 import { loadDeckInfo, type Deck, type DeckInfo } from "@/lib/deck";
 import { useRenderTargetWidth } from "@/hooks/useRenderTargetWidth";
-import { setSlideNotes } from "@/lib/notesAttach";
 import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
 import { hasAnyStrokes, parseDrawing, serializeDrawing, type AnnotationsBySlide, type LaserPoint, type Stroke } from "@/lib/annotations";
 import {
@@ -168,12 +167,14 @@ export default function Presentation() {
   const deckWatchModeRef = useLatestRef(deckWatchMode);
   // A detected deck change waiting on the presenter: "watch" from the file
   // watcher (prompt mode only), "remote" from the URL-republish poller. Both
-  // clear drawings and Presio-edited notes, so both get the same warning.
+  // clear drawings and edits saved into the deck here, so both get the same
+  // warning.
   const [reloadPrompt, setReloadPrompt] = useState<"watch" | "remote" | null>(null);
   const [applyingWatch, setApplyingWatch] = useState(false);
-  // Speaker notes edited in Presio live in the current PDF's bytes, so a
-  // recompiled file replaces them. Tracked to warn before that happens.
-  const [notesEdited, setNotesEdited] = useState(false);
+  // Edits a plugin saved into the deck (e.g. speaker notes) live in the
+  // current PDF's bytes, so a recompiled file replaces them. Tracked to warn
+  // before that happens.
+  const [deckEdited, setDeckEdited] = useState(false);
 
   // A URL-backed deck's source PDF was republished (remote-version polling
   // below); held until the presenter applies it or the poller replaces it
@@ -286,8 +287,8 @@ export default function Presentation() {
       setFilename(filename);
       setAnnotations({});
       lsRemove(annotationsKey(id!));
-      // Whatever notes were edited here lived in the outgoing PDF's bytes.
-      setNotesEdited(false);
+      // Whatever was saved into the deck here lived in the outgoing PDF's bytes.
+      setDeckEdited(false);
       setTotalSlides(totalSlides);
       setCurrentSlide((slide) => Math.min(Math.max(slide, 1), totalSlides));
       const done = (async () => {
@@ -998,15 +999,20 @@ export default function Presentation() {
     }
   }, [remoteUpdate, applyingWatch, id, pdfWriteAuth]);
 
-  // Persist edited speaker notes by writing them back into the PDF as a JSON
-  // sidecar (matching presio's format), then swap in the updated document so
-  // further edits build on it. Local sessions update IndexedDB; synced ones
-  // re-upload to the owner's stored PDF.
-  const saveNotes = useCallback(
-    async (slide: number, text: string) => {
-      if (!pdf) return;
-      const original = await pdf.getData();
-      const updated = await setSlideNotes(original, slide, text);
+  // Save an edited PDF over the deck (a plugin's presio.deck.save), then swap
+  // in the updated document so further edits build on it. Local sessions
+  // update IndexedDB; synced ones re-upload to the owner's stored PDF. Only
+  // edits in place: a different page count is a replace, not an edit.
+  const saveDeck = useCallback(
+    async (updated: Uint8Array) => {
+      if (!pdf) throw new Error("The deck hasn't loaded yet");
+      // A copy: pdf.js transfers what it's given to its worker, detaching it.
+      const doc = await loadPdfData(updated.slice()).catch(() => {
+        throw new Error("That isn't a PDF Presio can open");
+      });
+      if (doc.numPages !== pdf.numPages) {
+        throw new Error("An edited deck must keep the same slides");
+      }
       // Coerce to a plain ArrayBuffer slice so Blob's BlobPart typing is happy.
       const buf = updated.buffer.slice(
         updated.byteOffset,
@@ -1029,25 +1035,14 @@ export default function Presentation() {
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || "Failed to save notes");
+          throw new Error(body.error || "Failed to save the deck");
         }
       }
 
       // These edits live in this PDF's bytes, so a recompiled file would drop
       // them. Remembered so the live-reload prompt can say so.
-      setNotesEdited(true);
+      setDeckEdited(true);
 
-      // Reflect the edit immediately; the deck re-derives from the new pdf.
-      setDeckInfo((info) => {
-        if (!info) return info;
-        const notes = new Map(info.notes);
-        const trimmed = text.trim();
-        if (trimmed) notes.set(slide, trimmed);
-        else notes.delete(slide);
-        return { ...info, notes };
-      });
-
-      const doc = await loadPdfData(updated);
       setPdf(doc);
       if (local) {
         const url = URL.createObjectURL(blob);
@@ -1058,6 +1053,9 @@ export default function Presentation() {
     },
     [pdf, local, id, filename, pdfWriteAuth]
   );
+  useEffect(() => {
+    plugins.host.setDeckWriter(role === "controller" ? saveDeck : null);
+  }, [plugins.host, role, saveDeck]);
 
   // Replace this presentation's PDF with a new file, keeping the session id,
   // code, controller token and passphrase. Mirrors saveNotes' local/synced
@@ -1393,7 +1391,7 @@ export default function Presentation() {
           annotatedSlides={
             Object.values(annotations).filter((strokes) => strokes.length > 0).length
           }
-          notesEdited={notesEdited}
+          deckEdited={deckEdited}
           busy={applyingWatch}
           onConfirm={reloadPrompt === "watch" ? applyDeckWatchUpdate : applyRemoteDeckUpdate}
           // Dismissed, not declined: the header keeps the "Deck updated" chip
@@ -1410,7 +1408,6 @@ export default function Presentation() {
         onSyncAll={syncAll}
         onEnd={endPresentation}
         onSynced={() => setLocal(false)}
-        onSaveNotes={saveNotes}
         onReplacePdf={replacePdf}
         currentCanvasRef={currentCanvasRef}
         blanked={blanked}

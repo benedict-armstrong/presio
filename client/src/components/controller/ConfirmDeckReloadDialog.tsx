@@ -9,7 +9,7 @@ export function ConfirmDeckReloadDialog({
   filename,
   source,
   annotatedSlides,
-  notesEdited,
+  deckEdited,
   busy,
   onConfirm,
   onClose,
@@ -19,8 +19,8 @@ export function ConfirmDeckReloadDialog({
   source: "watch" | "remote";
   /** How many slides carry drawings right now (0 = nothing to lose). */
   annotatedSlides: number;
-  /** Whether speaker notes were edited in Presio since this deck was loaded. */
-  notesEdited: boolean;
+  /** Whether edits were saved into this deck in Presio since it was loaded. */
+  deckEdited: boolean;
   busy: boolean;
   onConfirm: () => void;
   onClose: () => void;
@@ -31,7 +31,7 @@ export function ConfirmDeckReloadDialog({
       `your drawings on ${annotatedSlides} ${annotatedSlides === 1 ? "slide" : "slides"}`
     );
   }
-  if (notesEdited) losses.push("the speaker notes you edited here");
+  if (deckEdited) losses.push("the edits you saved into it here");
 
   return (
     <DialogOverlay onClose={onClose}>

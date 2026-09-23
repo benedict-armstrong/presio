@@ -49,7 +49,9 @@ index.html
     audience phones), hidden until the plugin calls `presio.ui.setVisible(true)`.
 - `activation` — `"always"`, or `"attachment:<glob>"` to run only for decks
   whose PDF embeds a matching attachment (e.g. `"attachment:poll-*.json"`).
-- `permissions` — `"deck"` to read the PDF's embedded attachments.
+- `permissions` — `"deck"` to read the PDF (its bytes and embedded
+  attachments); `"editDeck"` to save an edited PDF over it from the presenter's
+  device.
 - `contributes.buttons` — up to 4 buttons Presio draws natively. `location`:
   `controller.toolbar` (the controller's bottom bar). `icon` is one of
   `qr-code bar-chart message users timer bell star sparkles hand check eye
@@ -67,7 +69,8 @@ index.html
 The HTML runs in a sandboxed iframe with an opaque origin and **no network**:
 no `fetch`, no external scripts, styles, images or fonts, no storage, no access
 to the page around it. Inline everything (a single-file build, e.g.
-`vite-plugin-singlefile`, works). `data:` and `blob:` URLs are fine.
+`vite-plugin-singlefile`, works — React and any npm package are fine once
+bundled in). `data:` and `blob:` URLs are fine.
 
 The same file runs on every surface; branch on `presio.surface`.
 
@@ -88,6 +91,7 @@ presio.onMessage(({ type, payload, from, sender }) => {})
 
 presio.settings.get(name)                  // this plugin's setting (presenter's value)
 presio.settings.all
+presio.settings.set(name, value)           // presenter: → Promise, as if changed in Settings
 presio.settings.onChange(settings => {})
 
 presio.storage.get(key)                    // presenter: this plugin's state for this session
@@ -99,6 +103,9 @@ presio.onButton(id, () => {})              // a contributed button was pressed
 presio.ui.setButton(id, { active, label, disabled })  // presenter: update it
 
 presio.deck.attachments()   // → Promise<[{ filename, bytes: Uint8Array }]> ("deck" permission)
+presio.deck.bytes()         // → Promise<Uint8Array>, the PDF itself ("deck")
+presio.deck.save(bytes)     // presenter: → Promise; same pages, saved where the deck lives ("editDeck")
+presio.deck.onChange(() => {})  // the deck was swapped: an edit, a replace, a live reload
 presio.ui.setVisible(bool)  // viewer surface: show/hide the layer
 ```
 
@@ -134,6 +141,7 @@ Messaging:
 The built-in Join Code plugin is a complete example:
 [manifest](BASE/plugins/join-code/presio-plugin.json),
 [index.html](BASE/plugins/join-code/index.html). The built-in Timer
-([manifest](BASE/plugins/timer/presio-plugin.json),
-[index.html](BASE/plugins/timer/index.html)) shows a tile and a background
-sharing `presio.storage`.
+([manifest](BASE/plugins/timer/presio-plugin.json)) shows a tile and a
+background sharing `presio.storage`, and Speaker Notes
+([manifest](BASE/plugins/notes/presio-plugin.json)) reads notes out of the PDF
+and saves edits back with `presio.deck.save` — both React, bundled to one file.

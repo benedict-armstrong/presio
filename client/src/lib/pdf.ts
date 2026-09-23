@@ -1,6 +1,5 @@
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
-import { typstAstToMarkdown } from "./typstNotes";
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -84,10 +83,10 @@ export async function readAttachments(pdf: PDFDocumentProxy): Promise<PdfAttachm
 // whose scale collided with the main view turned the thumbnail black.
 const pageCache = new Map<string, HTMLCanvasElement>();
 
-// Which document pageCache currently holds renders for. Editing speaker notes
-// rewrites the PDF and swaps in a new PDFDocumentProxy; without this the next
-// render of the same page+scale returned the *previous* document's canvas.
-// (notesCache/mediaCache below already key on document identity this way.)
+// Which document pageCache currently holds renders for. Saving an edited deck
+// (a plugin's presio.deck.save) swaps in a new PDFDocumentProxy;
+// without this the next render of the same page+scale returned the *previous*
+// document's canvas. (mediaCache below keys on document identity this way too.)
 let pageCachePdf: PDFDocumentProxy | null = null;
 
 /** Blit a cached source canvas into a new, independently-mountable canvas. */
@@ -206,66 +205,6 @@ export async function renderPage(
 
   pageCache.set(key, canvas);
   return copyCanvas(canvas);
-}
-
-let notesCache: Map<number, string> | null = null;
-let notesCachePdf: PDFDocumentProxy | null = null;
-
-async function loadNotesFromAttachments(pdf: PDFDocumentProxy): Promise<Map<number, string>> {
-  if (notesCachePdf === pdf && notesCache) return notesCache;
-
-  const map = new Map<number, string>();
-  for (const { filename, content } of await readAttachments(pdf)) {
-    const match = filename.match(/^notes-slide-(\d+)\.json$/);
-    if (!match) continue;
-    try {
-      const data = JSON.parse(new TextDecoder().decode(content));
-      const slideNum = parseInt(match[1], 10);
-      let rendered: string;
-      if (typeof data.notes === "string") {
-        rendered = data.notes;
-      } else if (Array.isArray(data.notes)) {
-        rendered = data.notes
-          .map((n: unknown) => typstAstToMarkdown(n))
-          .filter((s: string) => s.length > 0)
-          .join("\n\n---\n\n");
-      } else {
-        rendered = typstAstToMarkdown(data.notes);
-      }
-      map.set(slideNum, rendered);
-    } catch { /* skip malformed */ }
-  }
-
-  notesCache = map;
-  notesCachePdf = pdf;
-  return map;
-}
-
-async function extractNotesFromAnnotations(
-  pdf: PDFDocumentProxy,
-  pageNum: number,
-  prefix = "note:"
-): Promise<string> {
-  const page = await pdf.getPage(pageNum);
-  const annotations = await page.getAnnotations();
-  const notes: string[] = [];
-  for (const ann of annotations) {
-    const url: string | undefined = ann.url || ann.unsafeUrl;
-    if (url && url.startsWith(prefix)) {
-      notes.push(decodeURIComponent(url.slice(prefix.length)));
-    }
-  }
-  return notes.join("\n\n");
-}
-
-export async function extractSpeakerNotes(
-  pdf: PDFDocumentProxy,
-  pageNum: number,
-  prefix = "note:"
-): Promise<string> {
-  const map = await loadNotesFromAttachments(pdf);
-  if (map.has(pageNum)) return map.get(pageNum)!;
-  return extractNotesFromAnnotations(pdf, pageNum, prefix);
 }
 
 export type MediaKind = "file" | "url" | "youtube" | "vimeo";

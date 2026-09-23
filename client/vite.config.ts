@@ -4,6 +4,7 @@ import fs from "fs"
 import path from "path"
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { builtinPlugins } from './plugins/build'
 
 // Bake the built asset list into the shipped service worker so a fresh install
 // precaches the whole app up front. The pdf.js worker and its wasm helper are
@@ -54,7 +55,7 @@ function precacheServiceWorker(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), precacheServiceWorker()],
+  plugins: [react(), builtinPlugins(), precacheServiceWorker()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

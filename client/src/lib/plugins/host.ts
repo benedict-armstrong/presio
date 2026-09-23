@@ -6,6 +6,7 @@
 
 import type { PdfAttachment } from "@/lib/pdf";
 import { lsGet, lsSet, pluginStateKey } from "@/lib/storage";
+import { sanitizeSettingValue, setPluginSetting } from "@/lib/settings";
 import type { LoadedPlugin, PluginSurface } from "./manifest";
 
 export type PluginRole = "presenter" | "audience";
@@ -53,6 +54,8 @@ export class PluginHost {
   private ctx: PluginContext;
   private outbound: (event: WireEvent) => void = () => {};
   private attachments: () => Promise<PdfAttachment[]> = async () => [];
+  private deckBytes: () => Promise<Uint8Array | null> = async () => null;
+  private saveDeck: ((bytes: Uint8Array) => Promise<void>) | null = null;
   private settings = new Map<string, Record<string, unknown>>();
   private buttons = new Map<string, Record<string, ButtonState>>();
   private buttonListeners = new Set<() => void>();
@@ -66,8 +69,20 @@ export class PluginHost {
     this.outbound = send;
   }
 
-  setAttachmentSource(read: () => Promise<PdfAttachment[]>) {
-    this.attachments = read;
+  /**
+   * The deck plugins with the "deck" permission read: its attachments and its
+   * bytes. A new source means a new document, which frames hear about.
+   */
+  setDeckSource(attachments: () => Promise<PdfAttachment[]>, bytes: () => Promise<Uint8Array | null>) {
+    const changed = this.deckBytes !== bytes;
+    this.attachments = attachments;
+    this.deckBytes = bytes;
+    if (changed) for (const conn of this.conns) conn.port.postMessage({ type: "deck" });
+  }
+
+  /** How an edited deck is saved; null where this device can't. */
+  setDeckWriter(save: ((bytes: Uint8Array) => Promise<void>) | null) {
+    this.saveDeck = save;
   }
 
   get context(): PluginContext {
@@ -234,7 +249,7 @@ export class PluginHost {
     } else if (m?.type === "button") {
       this.onButtonState(conn, m.id, m.state);
     } else if (m?.type === "request") {
-      void this.answer(conn, m.id, m.kind);
+      void this.answer(conn, m.id, m.kind, m.args);
     }
   }
 
@@ -254,18 +269,58 @@ export class PluginHost {
     this.buttonListeners.forEach((l) => l());
   }
 
-  private async answer(conn: Conn, id: unknown, kind: unknown) {
+  private async answer(conn: Conn, id: unknown, kind: unknown, args: unknown) {
     const reply = (result: unknown, error?: string) => conn.port.postMessage({ type: "reply", id, result, error });
-    if (kind !== "attachments") return reply(null, `Unknown request "${String(kind)}"`);
-    if (!conn.plugin.manifest.permissions.includes("deck")) {
-      return reply(null, 'Reading the deck needs the "deck" permission in presio-plugin.json');
-    }
-    try {
-      // Copies, so a plugin can't mutate the bytes the app itself renders from.
-      const list = await this.attachments();
-      reply(list.map(({ filename, content }) => ({ filename, bytes: content.slice() })));
-    } catch {
-      reply(null, "Couldn't read the deck's attachments");
+    const a = (typeof args === "object" && args !== null ? args : {}) as Record<string, unknown>;
+    const { manifest } = conn.plugin;
+    switch (kind) {
+      case "attachments": {
+        if (!manifest.permissions.includes("deck")) {
+          return reply(null, 'Reading the deck needs the "deck" permission in presio-plugin.json');
+        }
+        try {
+          // Copies, so a plugin can't mutate the bytes the app itself renders from.
+          const list = await this.attachments();
+          return reply(list.map(({ filename, content }) => ({ filename, bytes: content.slice() })));
+        } catch {
+          return reply(null, "Couldn't read the deck's attachments");
+        }
+      }
+      case "deckBytes": {
+        if (!manifest.permissions.includes("deck")) {
+          return reply(null, 'Reading the deck needs the "deck" permission in presio-plugin.json');
+        }
+        try {
+          const bytes = await this.deckBytes();
+          if (!bytes) return reply(null, "The deck hasn't loaded yet");
+          return reply(bytes.slice());
+        } catch {
+          return reply(null, "Couldn't read the deck");
+        }
+      }
+      case "saveDeck": {
+        if (!manifest.permissions.includes("editDeck")) {
+          return reply(null, 'Saving the deck needs the "editDeck" permission in presio-plugin.json');
+        }
+        if (this.ctx.role !== "presenter" || !this.saveDeck) return reply(null, "The deck can't be edited from here");
+        if (!(a.bytes instanceof Uint8Array)) return reply(null, "save() takes the PDF as a Uint8Array");
+        try {
+          await this.saveDeck(a.bytes);
+          return reply(null);
+        } catch (e) {
+          return reply(null, e instanceof Error ? e.message : "Couldn't save the deck");
+        }
+      }
+      case "setSetting": {
+        const spec = typeof a.name === "string" ? manifest.contributes.settings[a.name] : undefined;
+        if (this.ctx.role !== "presenter") return reply(null, "Only the presenter can change settings");
+        if (!spec) return reply(null, `No setting "${String(a.name)}" in presio-plugin.json`);
+        if (sanitizeSettingValue(spec, a.value) === undefined) return reply(null, `Invalid value for "${a.name as string}"`);
+        setPluginSetting(manifest.id, a.name as string, spec, a.value);
+        return reply(null);
+      }
+      default:
+        return reply(null, `Unknown request "${String(kind)}"`);
     }
   }
 }

@@ -11,7 +11,8 @@ import { pluginLabel, type InstalledPlugin } from "@/lib/plugins/installed";
 // URL. The Settings dialog lists them in its sidebar.
 
 const PERMISSION_LABELS: Record<string, string> = {
-  deck: "Reads the deck's attachments",
+  deck: "Reads the deck: its pages and attachments",
+  editDeck: "Saves changes into your deck",
 };
 
 const SURFACE_LABELS: Record<string, string> = {

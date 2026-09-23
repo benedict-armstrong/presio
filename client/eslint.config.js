@@ -20,4 +20,10 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // Built-in plugins are bundled whole on each load (plugins/build.ts);
+    // there's no fast refresh to keep working.
+    files: ['plugins/**/*.{ts,tsx}'],
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
 ])

@@ -61,10 +61,11 @@
       "type": "array",
       "items": {
         "enum": [
-          "deck"
+          "deck",
+          "editDeck"
         ]
       },
-      "description": "deck: read the PDF's embedded attachments."
+      "description": "deck: read the PDF (its bytes and embedded attachments). editDeck: save an edited PDF over the deck (presenter's device only)."
     },
     "contributes": {
       "type": "object",

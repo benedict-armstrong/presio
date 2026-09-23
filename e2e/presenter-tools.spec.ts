@@ -15,12 +15,14 @@ test("speaker notes follow the deck and come from the PDF's own attachments", as
   const controller = await openController(ctx, sessionId);
   await waitForSlide(controller);
 
-  const notes = controller.getByTestId("speaker-notes");
+  // Notes are a built-in plugin: its card is a sandboxed frame.
+  const tile = controller.frameLocator('[data-testid="plugin-frame-notes-tile"]');
+  const notes = tile.getByTestId("speaker-notes");
 
   // The fixture deck carries notes on slides 2 and 3 only, so slide 1 offers
   // the empty-state instead of a notes body.
+  await expect(tile.getByText("Click to add speaker notes.")).toBeVisible();
   await expect(notes).toHaveCount(0);
-  await expect(controller.getByText("Click to add speaker notes.")).toBeVisible();
 
   await controller.locator("body").click();
   await controller.keyboard.press("ArrowRight");
@@ -35,7 +37,7 @@ test("speaker notes follow the deck and come from the PDF's own attachments", as
   // Notes are the presenter's alone — they must never reach the projector.
   const viewer = await openViewer(ctx, sessionId);
   await waitForSlide(viewer);
-  await expect(viewer.getByTestId("speaker-notes")).toHaveCount(0);
+  await expect(viewer.locator('[data-testid^="plugin-frame-notes"]')).toHaveCount(0);
   await expect(viewer.getByText("This GIF is embedded directly")).toHaveCount(0);
 
   await ctx.close();

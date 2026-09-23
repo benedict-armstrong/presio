@@ -1,0 +1,12 @@
+/* Shared look for built-in plugins' tiles: Presio's own palette, keyed to
+   presio.theme (mount() keeps the class on <html> current). */
+html, body, #root { margin: 0; height: 100%; background: transparent; }
+body { font-family: system-ui, -apple-system, sans-serif; color: var(--fg); }
+:root.light { --fg: #0a0a0a; --muted: #71717a; --border: #e4e4e7; --hover: #f4f4f5; --field: #fff; --accent: #18181b; --on-accent: #fafafa; --danger: #dc2626; }
+:root.dark { --fg: #fafafa; --muted: #a1a1aa; --border: #27272a; --hover: #27272a; --field: #09090b; --accent: #fafafa; --on-accent: #18181b; --danger: #f87171; }
+button { font: 500 13px/1 system-ui, -apple-system, sans-serif; height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--fg); cursor: pointer; }
+button:hover:not(:disabled) { background: var(--hover); }
+button:disabled { opacity: .5; cursor: default; }
+button.outline { border-color: var(--border); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+button.primary:hover:not(:disabled) { background: var(--accent); opacity: .9; }

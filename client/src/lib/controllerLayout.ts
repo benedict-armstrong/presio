@@ -1,7 +1,7 @@
 // Controller dashboard card layout: configuration + persistence.
 //
 // The controller is a tiling window manager (react-mosaic) of cards: current
-// slide, next slide, notes, thumbnails, and plugins' tiles. Cards always tile to fill the
+// slide, next slide, thumbnails, and plugins' tiles. Cards always tile to fill the
 // screen, so removing or resizing one makes its neighbours grow rather than
 // leaving a hole. The layout is a tree (`MosaicNode`); a card is visible iff it
 // appears as a leaf in that tree. This module owns the card catalog, the
@@ -34,7 +34,6 @@ interface CardConfig {
 const CARD_CONFIGS: CardConfig[] = [
   { key: "currentSlide", label: "Current Slide" },
   { key: "nextSlide", label: "Next Slide" },
-  { key: "notes", label: "Speaker Notes" },
   { key: "thumbnails", label: "Thumbnails" },
 ];
 
@@ -44,10 +43,11 @@ export const CARD_LABELS: Record<string, string> = Object.fromEntries(
 );
 
 /** Plugins with a tile surface get a card of their own, keyed by plugin id.
- *  Switching a plugin on adds its tile; only the built-in timer's is in a
- *  default layout, where the timer card was before it became a plugin. */
+ *  Switching a plugin on adds its tile; only built-ins that used to be cards
+ *  (the timer, speaker notes) are in the default layouts, where they were. */
 export const pluginTileKey = (pluginId: string) => `plugin:${pluginId}`;
 const TIMER_TILE = pluginTileKey("timer");
+const NOTES_TILE = pluginTileKey("notes");
 const PLUGIN_TILE_RE = /^plugin:[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** Whether a leaf can be a card: a built-in one, or a plugin's. Saved layouts
@@ -84,7 +84,7 @@ export const DEFAULT_LAYOUT: MosaicNode<string> = {
               children: ["nextSlide", TIMER_TILE],
               splitPercentages: [65, 35],
             },
-            "notes",
+            NOTES_TILE,
           ],
           splitPercentages: [62, 38],
         },
@@ -103,7 +103,7 @@ export const DEFAULT_LAYOUT: MosaicNode<string> = {
 export const MOBILE_LAYOUT: MosaicNode<string> = {
   type: "split",
   direction: "column",
-  children: ["currentSlide", "nextSlide", "notes"],
+  children: ["currentSlide", "nextSlide", NOTES_TILE],
   splitPercentages: [56, 26, 18],
 };
 
@@ -118,7 +118,7 @@ export const MOBILE_LANDSCAPE_LAYOUT: MosaicNode<string> = {
     {
       type: "split",
       direction: "column",
-      children: ["nextSlide", "notes"],
+      children: ["nextSlide", NOTES_TILE],
       splitPercentages: [55, 45],
     },
   ],
@@ -180,11 +180,11 @@ function sanitize(node: unknown): MosaicNode<string> | null {
     ? convertLegacyToNary(node as MosaicNode<string>)
     : (node as MosaicNode<string> | null);
 
-  return prune(renameLeaf(value, "timer", TIMER_TILE), isCardKey);
+  return prune(renameLeaf(renameLeaf(value, "timer", TIMER_TILE), "notes", NOTES_TILE), isCardKey);
 }
 
-/** The same tree with one card key replaced: the timer card became the timer
- *  plugin's tile, and a saved layout should keep it where it was. */
+/** The same tree with one card key replaced: the timer and notes cards became
+ *  plugins' tiles, and a saved layout should keep them where they were. */
 function renameLeaf(node: MosaicNode<string> | null, from: string, to: string): MosaicNode<string> | null {
   if (typeof node === "string") return node === from ? to : node;
   if (isSplitNode(node)) return { ...node, children: node.children.map((c) => renameLeaf(c, from, to)!) };

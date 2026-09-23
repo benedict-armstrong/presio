@@ -56,6 +56,11 @@ function useAttachmentReader(pdf: PDFDocumentProxy | null) {
   }, [pdf]);
 }
 
+/** The deck's PDF bytes, for plugins that read the file themselves. */
+function useBytesReader(pdf: PDFDocumentProxy | null) {
+  return useMemo(() => async () => (pdf ? pdf.getData() : null), [pdf]);
+}
+
 /** Enabled plugins from this browser's registry that the deck activates. */
 function useLocallyActivePlugins(enabled: boolean, readAll: () => Promise<PdfAttachment[]>) {
   const entries = usePluginEntries();
@@ -135,7 +140,8 @@ export function usePluginHost({
   });
 
   const readAll = useAttachmentReader(pdf);
-  useEffect(() => host.setAttachmentSource(readAll), [host, readAll]);
+  const readBytes = useBytesReader(pdf);
+  useEffect(() => host.setDeckSource(readAll, readBytes), [host, readAll, readBytes]);
 
   // Server viewers get their plugin list from the session; everyone else
   // (the presenter, and a local deck's viewer window) from this browser.

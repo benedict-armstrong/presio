@@ -22,7 +22,6 @@ import { supabase } from "@/lib/supabaseClient";
 import { useClaim } from "@/lib/useClaim";
 import { CurrentSlideCard } from "@/components/controller/CurrentSlideCard";
 import { NextSlideCard } from "@/components/controller/NextSlideCard";
-import { SpeakerNotesCard, NotesSizeAction } from "@/components/controller/SpeakerNotesCard";
 import { ThumbnailsCard } from "@/components/controller/ThumbnailsCard";
 import { ShortcutsEditor } from "@/components/controller/ShortcutsEditor";
 import { ControllerHeader } from "@/components/controller/ControllerHeader";
@@ -92,7 +91,6 @@ interface ControllerViewProps {
   onSyncAll: () => void;
   onEnd: () => void;
   onSynced: () => void;
-  onSaveNotes: (slide: number, notes: string) => Promise<void>;
   onReplacePdf: (file: File, handle?: FileSystemFileHandle) => Promise<void>;
   currentCanvasRef: React.RefObject<HTMLDivElement | null>;
   blanked: boolean;
@@ -135,7 +133,6 @@ export function ControllerView({
   onSyncAll,
   onEnd,
   onSynced,
-  onSaveNotes,
   onReplacePdf,
   currentCanvasRef,
   blanked,
@@ -203,8 +200,6 @@ export function ControllerView({
     setToolsOpen(next);
     if (!next) setTool("none");
   }, [setToolsOpen]);
-  // Speaker-notes text size multiplier.
-  const [notesScale, changeNotesScale] = useSetting("notes.fontScale");
   // Drawing color/width per tool, remembered across presentations.
   const [penStyle, setPenStyle] = useSetting("drawing.pen");
   const [highlighterStyle, setHighlighterStyle] = useSetting("drawing.highlighter");
@@ -601,17 +596,6 @@ export function ControllerView({
     },
     nextSlide: {
       content: <NextSlideCard deck={deck} currentSlide={currentSlide} />,
-    },
-    notes: {
-      content: (
-        <SpeakerNotesCard
-          notes={deck.notes.get(currentSlide) ?? ""}
-          currentSlide={currentSlide}
-          onSave={onSaveNotes}
-          fontScale={notesScale}
-        />
-      ),
-      action: <NotesSizeAction scale={notesScale} onChange={changeNotesScale} />,
     },
     thumbnails: {
       content: <ThumbnailsCard deck={deck} currentSlide={currentSlide} onGoTo={onGoTo} />,

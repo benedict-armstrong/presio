@@ -30,6 +30,7 @@
     var contextListeners = [];
     var settingsListeners = [];
     var storageListeners = [];
+    var deckListeners = [];
     var buttonListeners = {};
     // Messages that arrive before the plugin subscribes (retained state is
     // replayed right after boot) wait here instead of being dropped.
@@ -38,11 +39,11 @@
     var nextRequest = 1;
 
     function post(m) { port.postMessage(m); }
-    function request(kind) {
+    function request(kind, args) {
       var id = nextRequest++;
       return new Promise(function (resolve, reject) {
         requests[id] = { resolve: resolve, reject: reject };
-        post({ type: "request", id: id, kind: kind });
+        post({ type: "request", id: id, kind: kind, args: args || null });
       });
     }
     function each(list, arg) {
@@ -72,6 +73,8 @@
       } else if (m.type === "storage") {
         ctx.storage = m.storage;
         each(storageListeners, Object.assign({}, ctx.storage));
+      } else if (m.type === "deck") {
+        each(deckListeners, undefined);
       } else if (m.type === "button") {
         each(buttonListeners[m.id] || [], m.id);
       } else if (m.type === "message") {
@@ -130,6 +133,9 @@
       settings: {
         get: function (name) { return ctx.settings[name]; },
         get all() { return Object.assign({}, ctx.settings); },
+        /** Presenter: change one of this plugin's settings, as the presenter
+         *  could in Settings. Resolves once it's stored. */
+        set: function (name, value) { return request("setSetting", { name: name, value: value }); },
         onChange: function (cb) { return subscribe(settingsListeners, cb); },
       },
       /**
@@ -158,6 +164,13 @@
       deck: {
         /** [{ filename, bytes: Uint8Array }] — needs the "deck" permission. */
         attachments: function () { return request("attachments"); },
+        /** The PDF itself, as a Uint8Array — needs the "deck" permission. */
+        bytes: function () { return request("deckBytes"); },
+        /** Presenter: replace the deck with an edited PDF (same pages), saved
+         *  wherever the deck lives — needs the "editDeck" permission. */
+        save: function (bytes) { return request("saveDeck", { bytes: bytes }); },
+        /** The deck was swapped (an edit, a replace, a live reload). */
+        onChange: function (cb) { return subscribe(deckListeners, cb); },
       },
       ui: {
         /** Viewer surface: show or hide this plugin's full-screen layer. */
