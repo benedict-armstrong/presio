@@ -44,6 +44,17 @@ export const CARD_LABELS: Record<string, string> = Object.fromEntries(
   CARD_CONFIGS.map((c) => [c.key, c.label]),
 );
 
+/** Plugins with a tile surface get a card of their own, keyed by plugin id.
+ *  They are never in a default layout: switching the plugin on adds one. */
+export const pluginTileKey = (pluginId: string) => `plugin:${pluginId}`;
+const PLUGIN_TILE_RE = /^plugin:[a-z0-9][a-z0-9-]{0,63}$/;
+
+/** Whether a leaf can be a card: a built-in one, or a plugin's. Saved layouts
+ *  keep plugin tiles even while that plugin isn't running (see restrictLayout). */
+function isCardKey(key: string): boolean {
+  return CARD_KEYS.includes(key) || PLUGIN_TILE_RE.test(key);
+}
+
 /** Which form factor a layout belongs to. The phone and the desktop keep
  *  separate trees (and separate defaults): the same arrangement can't serve
  *  both, and a card moved on one shouldn't move on the other. */
@@ -168,7 +179,19 @@ function sanitize(node: unknown): MosaicNode<string> | null {
     ? convertLegacyToNary(node as MosaicNode<string>)
     : (node as MosaicNode<string> | null);
 
-  return prune(value);
+  return prune(value, isCardKey);
+}
+
+/**
+ * The saved layout narrowed to the cards that can render right now: a plugin
+ * tile stays in the stored tree while its plugin is off or still loading, but
+ * the dashboard can't draw it. Nothing is saved from here.
+ */
+export function restrictLayout(
+  node: MosaicNode<string> | null,
+  available: readonly string[],
+): MosaicNode<string> | null {
+  return prune(node, (key) => available.includes(key));
 }
 
 /**
@@ -179,8 +202,11 @@ function sanitize(node: unknown): MosaicNode<string> | null {
  * (v7 ships normalizeMosaicTree for this, but does not re-export it from the
  * package index.)
  */
-function prune(node: MosaicNode<string> | null | undefined): MosaicNode<string> | null {
-  if (typeof node === "string") return CARD_KEYS.includes(node) ? node : null;
+function prune(
+  node: MosaicNode<string> | null | undefined,
+  keep: (key: string) => boolean,
+): MosaicNode<string> | null {
+  if (typeof node === "string") return keep(node) ? node : null;
   if (node == null) return null;
 
   if (isSplitNode(node)) {
@@ -189,7 +215,7 @@ function prune(node: MosaicNode<string> | null | undefined): MosaicNode<string> 
     const kept: MosaicNode<string>[] = [];
     const shares: number[] = [];
     node.children.forEach((child, i) => {
-      const pruned = prune(child);
+      const pruned = prune(child, keep);
       if (pruned == null) return;
       kept.push(pruned);
       shares.push(node.splitPercentages?.[i] ?? 100 / node.children.length);
@@ -206,7 +232,7 @@ function prune(node: MosaicNode<string> | null | undefined): MosaicNode<string> 
   }
 
   if (isTabsNode(node)) {
-    const tabs = node.tabs.filter((t) => CARD_KEYS.includes(t));
+    const tabs = node.tabs.filter(keep);
     if (tabs.length === 0) return null;
     // A tab strip needs at least two tabs; one is just the card itself.
     if (tabs.length === 1) return tabs[0];
@@ -230,7 +256,7 @@ function rescale(shares: number[]): number[] {
 
 /** Keys currently shown as tiles, in the tree's canonical order. */
 export function visibleKeys(node: MosaicNode<string> | null): string[] {
-  return getLeaves(node).filter((k) => CARD_KEYS.includes(k));
+  return getLeaves(node).filter(isCardKey);
 }
 
 /** Path to a card, as the numeric child indices v7 addresses nodes by. */
@@ -261,7 +287,7 @@ function findPath(
 /** Add a card as a new full-height column on the right edge. No-op if already
  *  present or the key is unknown. */
 export function addLeaf(node: MosaicNode<string> | null, key: string): MosaicNode<string> {
-  if (!CARD_KEYS.includes(key)) return node ?? key;
+  if (!isCardKey(key)) return node ?? key;
   if (node == null) return key;
   if (findPath(node, key)) return node;
   return {

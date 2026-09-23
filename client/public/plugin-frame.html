@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- Presio plugin sandbox. Loaded in an iframe with sandbox="allow-scripts"
+     (an opaque origin: no access to the app's storage, cookies or tokens) and
+     this no-network policy, which the server also sends as a header — see
+     PLUGIN_FRAME_CSP in server/security.ts. Keep the two in step. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<script>
+// The host posts one "presio:boot" message carrying a MessagePort, the
+// plugin's HTML and the starting context. This installs `window.presio` on
+// top of that port and then replaces this document with the plugin's.
+// document.open() keeps the global object (so `presio` survives) but drops
+// window event listeners, which is why everything after boot talks over the
+// port rather than window.onmessage.
+(function () {
+  window.addEventListener("message", function onBoot(e) {
+    if (e.source !== window.parent) return;
+    var d = e.data;
+    if (!d || d.type !== "presio:boot" || !e.ports || !e.ports[0]) return;
+    window.removeEventListener("message", onBoot);
+    boot(e.ports[0], d);
+  });
+
+  function boot(port, d) {
+    var ctx = d.context;
+    var slideListeners = [];
+    var messageListeners = [];
+    var contextListeners = [];
+    var settingsListeners = [];
+    var buttonListeners = {};
+    // Messages that arrive before the plugin subscribes (retained state is
+    // replayed right after boot) wait here instead of being dropped.
+    var pending = [];
+    var requests = {};
+    var nextRequest = 1;
+
+    function post(m) { port.postMessage(m); }
+    function request(kind) {
+      var id = nextRequest++;
+      return new Promise(function (resolve, reject) {
+        requests[id] = { resolve: resolve, reject: reject };
+        post({ type: "request", id: id, kind: kind });
+      });
+    }
+    function each(list, arg) {
+      list.slice().forEach(function (cb) {
+        try { cb(arg); } catch (err) { console.error(err); }
+      });
+    }
+    function subscribe(list, cb) {
+      list.push(cb);
+      return function () {
+        var i = list.indexOf(cb);
+        if (i >= 0) list.splice(i, 1);
+      };
+    }
+
+    port.onmessage = function (e) {
+      var m = e.data;
+      if (m.type === "slide") {
+        ctx.slide = m.slide;
+        each(slideListeners, ctx.slide);
+      } else if (m.type === "context") {
+        ctx = m.context;
+        each(contextListeners, api);
+      } else if (m.type === "settings") {
+        ctx.settings = m.settings;
+        each(settingsListeners, ctx.settings);
+      } else if (m.type === "button") {
+        each(buttonListeners[m.id] || [], m.id);
+      } else if (m.type === "message") {
+        if (messageListeners.length) each(messageListeners, m.message);
+        else pending.push(m.message);
+      } else if (m.type === "reply") {
+        var r = requests[m.id];
+        delete requests[m.id];
+        if (!r) return;
+        if (m.error) r.reject(new Error(m.error));
+        else r.resolve(m.result);
+      }
+    };
+
+    var api = {
+      get pluginId() { return ctx.pluginId; },
+      /** "background" (hidden, presenter's device), "tile" (presenter's
+       *  dashboard card) or "viewer" (every viewer screen). */
+      get surface() { return ctx.surface; },
+      /** "presenter" or "audience": who is holding this device. */
+      get role() { return ctx.role; },
+      /** "light" or "dark": the app theme, for surfaces drawn inside its chrome. */
+      get theme() { return ctx.theme; },
+      /** { id, local, joinUrl } — joinUrl is null when the deck isn't shared. */
+      get session() { return ctx.session; },
+      slide: {
+        get current() { return ctx.slide.current; },
+        get total() { return ctx.slide.total; },
+        onChange: function (cb) { return subscribe(slideListeners, cb); },
+      },
+      /** Called with the whole API whenever session or role info changes. */
+      onContextChange: function (cb) { return subscribe(contextListeners, cb); },
+      /**
+       * Message this plugin's other instances. From the presenter it reaches
+       * every device; from the audience, only the presenter. `retain: true`
+       * (presenter only) keeps the latest message of this type for devices
+       * that join later — use it for state, not events.
+       */
+      send: function (type, payload, opts) {
+        post({ type: "send", msgType: type, payload: payload === undefined ? null : payload, retain: !!(opts && opts.retain) });
+      },
+      /** cb({ type, payload, from: "presenter" | "audience", sender? }) */
+      onMessage: function (cb) {
+        var off = subscribe(messageListeners, cb);
+        var queued = pending;
+        pending = [];
+        queued.forEach(function (m) {
+          try { cb(m); } catch (err) { console.error(err); }
+        });
+        return off;
+      },
+      /**
+       * The plugin's settings (declared in contributes.settings), as the
+       * presenter set them — viewers see the presenter's values.
+       */
+      settings: {
+        get: function (name) { return ctx.settings[name]; },
+        get all() { return Object.assign({}, ctx.settings); },
+        onChange: function (cb) { return subscribe(settingsListeners, cb); },
+      },
+      /** A contributed button (contributes.buttons) was pressed. Delivered to
+       *  the background surface, or the tile when there is none. */
+      onButton: function (id, cb) {
+        buttonListeners[id] = buttonListeners[id] || [];
+        return subscribe(buttonListeners[id], cb);
+      },
+      deck: {
+        /** [{ filename, bytes: Uint8Array }] — needs the "deck" permission. */
+        attachments: function () { return request("attachments"); },
+      },
+      ui: {
+        /** Viewer surface: show or hide this plugin's full-screen layer. */
+        setVisible: function (visible) { post({ type: "visible", visible: !!visible }); },
+        /** Presenter: update a contributed button — { active, label, disabled }. */
+        setButton: function (id, state) { post({ type: "button", id: id, state: state || {} }); },
+      },
+    };
+    Object.defineProperty(window, "presio", { value: api });
+
+    document.open();
+    document.write(d.html);
+    document.close();
+    post({ type: "ready" });
+  }
+})();
+</script>
+</head>
+<body></body>
+</html>

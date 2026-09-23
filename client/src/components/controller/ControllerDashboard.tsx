@@ -7,6 +7,8 @@ import "@/pages/controllerMosaic.css";
 
 export interface CardEntry {
   content: ReactNode;
+  /** Header title; built-in cards take theirs from CARD_LABELS. */
+  title?: string;
   action?: ReactNode;
 }
 
@@ -33,10 +35,10 @@ export function ControllerDashboard({
         renderTile={(key, path) => (
           <MosaicWindow<string>
             path={path}
-            title={CARD_LABELS[key]}
+            title={cards[key].title ?? CARD_LABELS[key]}
             renderToolbar={() => (
               <div className="flex items-center justify-between w-full px-3 py-1.5 cursor-move select-none">
-                <span className="text-xs text-muted-foreground font-semibold">{CARD_LABELS[key]}</span>
+                <span className="text-xs text-muted-foreground font-semibold">{cards[key].title ?? CARD_LABELS[key]}</span>
                 <div className="flex items-center gap-1">
                   {cards[key].action}
                   <button

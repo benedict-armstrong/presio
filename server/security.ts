@@ -41,8 +41,30 @@ export function buildCspDirectives() {
     // `https:` lets the client fetch externally-hosted PDFs ("bring your own
     // storage") from any HTTPS origin via pdf.js. img-src/media-src already
     // allow https:, so this keeps connect-src consistent with them.
-    "connect-src": ["'self'", "blob:", "data:", "ws:", "wss:", "https:", "https://vimeo.com", ...(supabaseHost ? [supabaseHost] : [])],
+    // The loopback origins let a presenter load a plugin they're developing
+    // from their own dev server (Settings → Plugins → dev URL) against any
+    // Presio deployment, the way a VS Code extension is run from source.
+    "connect-src": ["'self'", "blob:", "data:", "ws:", "wss:", "https:", "https://vimeo.com", "http://localhost:*", "http://127.0.0.1:*", ...(supabaseHost ? [supabaseHost] : [])],
     "worker-src": ["'self'", "blob:"],
     "upgrade-insecure-requests": null,
   };
 }
+
+// The page every plugin runs in (client/public/plugin-frame.html), loaded in a
+// sandboxed iframe with an opaque origin. Plugins are single-file HTML, so
+// inline script and style are allowed — and nothing else: no network in any
+// form (fetch, images, fonts, navigation), so a plugin that was handed the deck
+// has no way to send it anywhere. Mirrored by the page's own <meta> policy,
+// which is what applies under the Vite dev server.
+export const PLUGIN_FRAME_CSP = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",
+  "style-src 'unsafe-inline'",
+  "img-src data: blob:",
+  "font-src data:",
+  "media-src data: blob:",
+  "connect-src 'none'",
+  "form-action 'none'",
+  "base-uri 'none'",
+  "frame-ancestors 'self'",
+].join("; ");

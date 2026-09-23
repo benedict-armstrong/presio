@@ -1,0 +1,35 @@
+{
+  "id": "join-code",
+  "name": "Join Code",
+  "version": "1.1.0",
+  "author": "Presio",
+  "description": "Put the session's join code up on every viewer screen from a button in the controller's bottom bar.",
+  "main": "index.html",
+  "surfaces": ["background", "viewer"],
+  "activation": ["always"],
+  "permissions": [],
+  "contributes": {
+    "buttons": [
+      {
+        "id": "toggle",
+        "label": "Join code",
+        "icon": "qr-code",
+        "tooltip": "Show the join code on every viewer screen",
+        "location": "controller.toolbar"
+      }
+    ],
+    "settings": {
+      "heading": {
+        "type": "string",
+        "default": "Join this presentation",
+        "maxLength": 80,
+        "description": "Text above the code."
+      },
+      "showUrl": {
+        "type": "boolean",
+        "default": true,
+        "description": "Show the join link under the code."
+      }
+    }
+  }
+}

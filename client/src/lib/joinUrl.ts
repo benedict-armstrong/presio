@@ -23,7 +23,7 @@
 // itself being loopback, which presio.xyz never is.
 
 import { useCallback, useEffect, useState } from "react";
-import { lsGetString, lsSetString, lsRemove, STORAGE_KEYS } from "@/lib/storage";
+import { getSetting, setSetting } from "@/lib/settings";
 
 /** How long to wait for a probe. A firewall DROP sends no RST, so an unguarded
  *  fetch hangs until the TCP timeout (~75s) — the difference between an instant
@@ -49,12 +49,10 @@ export function needsLanOverride(): boolean {
   return typeof window !== "undefined" && isLoopbackHostname(window.location.hostname);
 }
 
-const getLanAddress = () => lsGetString(STORAGE_KEYS.lanAddress);
+const getLanAddress = () => getSetting("share.lanAddress");
 
 function setLanAddress(value: string) {
-  const trimmed = value.trim();
-  if (trimmed) lsSetString(STORAGE_KEYS.lanAddress, trimmed);
-  else lsRemove(STORAGE_KEYS.lanAddress);
+  setSetting("share.lanAddress", value.trim());
 }
 
 /** The origin share links should point at: the stored LAN address if the

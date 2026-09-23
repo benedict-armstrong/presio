@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://presio.xyz/schema/plugin-manifest.json",
+  "title": "Presio plugin manifest",
+  "description": "presio-plugin.json, served next to the plugin's HTML. See /plugins.md.",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "version"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+      "description": "Stable identifier; also the message namespace."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "main": {
+      "type": "string",
+      "default": "index.html",
+      "description": "The plugin's single-file HTML, relative to the manifest."
+    },
+    "surfaces": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "background",
+          "tile",
+          "viewer"
+        ]
+      },
+      "description": "background: hidden on the presenter's device; handles buttons and state. tile: a card of its own on the presenter's dashboard. viewer: a full-screen layer on every viewer screen, hidden until the plugin shows it."
+    },
+    "activation": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(always|attachment:.+)$"
+      },
+      "description": "When the plugin runs: \"always\", or \"attachment:<glob>\" for decks embedding a matching attachment."
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "deck"
+        ]
+      },
+      "description": "deck: read the PDF's embedded attachments."
+    },
+    "contributes": {
+      "type": "object",
+      "properties": {
+        "buttons": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label",
+              "location"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 24
+              },
+              "icon": {
+                "enum": [
+                  "qr-code",
+                  "bar-chart",
+                  "message",
+                  "users",
+                  "timer",
+                  "bell",
+                  "star",
+                  "sparkles",
+                  "hand",
+                  "check",
+                  "eye",
+                  "megaphone"
+                ]
+              },
+              "tooltip": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "location": {
+                "enum": [
+                  "controller.toolbar"
+                ]
+              }
+            }
+          },
+          "description": "Buttons Presio draws natively; presses reach the background surface (or the tile)."
+        },
+        "settings": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "type",
+              "default"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "boolean",
+                  "number",
+                  "string",
+                  "enum"
+                ]
+              },
+              "default": {},
+              "description": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "minimum": {
+                "type": "number"
+              },
+              "maximum": {
+                "type": "number"
+              },
+              "maxLength": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "description": "Settings stored as \"<id>.<name>\" in the presenter's settings file."
+        }
+      }
+    }
+  }
+}

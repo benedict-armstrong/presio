@@ -16,7 +16,8 @@ import { idbPut, idbGet, idbList, idbDelete } from "@/lib/localStore";
 import { newLocalDeckId } from "@/lib/localId";
 import { isDeckWatchSupported, PDF_PICKER_OPTIONS } from "@/lib/deckWatcher";
 import { getSessionAuth, setSessionAuth, endSession } from "@/lib/utils";
-import { lsRemove, lsSetString, lsGet, lsSet, STORAGE_KEYS, annotationsKey, sessionKey, deckWatchKey } from "@/lib/storage";
+import { lsRemove, lsSetString, annotationsKey, sessionKey, deckWatchKey } from "@/lib/storage";
+import { useSetting } from "@/lib/settings";
 import { track, sha256Hex } from "@/lib/analytics";
 import { matchReupload } from "@/lib/reupload";
 import { TYPST_PACKAGE_VERSION } from "@/lib/packageVersions";
@@ -532,11 +533,7 @@ export default function Home() {
   // marketing sections, leaving the drop zone centred on an empty page. Read
   // synchronously from storage so a returning user never sees the full page
   // flash past on the way to the stripped one.
-  const [minimal, setMinimal] = useState(() => lsGet(STORAGE_KEYS.homeMinimal, false));
-  const toggleMinimal = (on: boolean) => {
-    setMinimal(on);
-    lsSet(STORAGE_KEYS.homeMinimal, on);
-  };
+  const [minimal, toggleMinimal] = useSetting("home.minimal");
   const [scrolled, setScrolled] = useState(false);
   const [exampleBusy, setExampleBusy] = useState<"typst" | "latex" | null>(null);
   const [exampleError, setExampleError] = useState("");

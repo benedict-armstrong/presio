@@ -15,6 +15,8 @@ import type { LaserPoint, Stroke } from "@/lib/annotations";
 import type { Deck } from "@/lib/deck";
 import { DownloadButton } from "@/components/DownloadButton";
 import { ViewerHint } from "@/components/ViewerHint";
+import { ViewerPluginLayer } from "@/components/plugins/ViewerPluginLayer";
+import type { PluginHostState } from "@/lib/plugins/usePluginHost";
 
 export function ViewerView({
   id,
@@ -33,6 +35,7 @@ export function ViewerView({
   laser,
   strokes,
   draft,
+  plugins,
 }: {
   id: string;
   local: boolean;
@@ -50,6 +53,7 @@ export function ViewerView({
   laser: LaserPoint | null;
   strokes: readonly Stroke[];
   draft: Stroke | null;
+  plugins: PluginHostState;
 }) {
   const { totalSlides } = deck;
   const mediaPlacements = deck.mediaBySlide.get(currentSlide) ?? [];
@@ -182,6 +186,8 @@ export function ViewerView({
           </p>
         </div>
       )}
+
+      <ViewerPluginLayer host={plugins.host} plugins={plugins.plugins} />
 
       {showCode && !local && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6 bg-black/95">

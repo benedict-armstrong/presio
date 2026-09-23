@@ -65,6 +65,16 @@ self.addEventListener("fetch", (event) => {
 
   // Navigations (and other shell files like icons): network-first with cache
   // fallback so the app still opens without a connection.
+  // The plugin sandbox page is navigated to (it's an iframe), but it isn't the
+  // shell: caching it under "/" would boot the app as a blank plugin frame.
+  // Served from its own precached entry when offline instead.
+  if (request.mode === "navigate" && url.pathname === "/plugin-frame.html") {
+    event.respondWith(
+      fetch(request).catch(async () => (await caches.match(url.pathname)) || Response.error())
+    );
+    return;
+  }
+
   if (request.mode === "navigate") {
     event.respondWith(
       caches.open(CACHE).then(async (cache) => {

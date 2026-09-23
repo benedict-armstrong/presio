@@ -35,6 +35,7 @@ import { ConfirmDeckReloadDialog } from "@/components/controller/ConfirmDeckRelo
 import { track, sha256Hex } from "@/lib/analytics";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { usePluginHost } from "@/lib/plugins/usePluginHost";
 import { ControllerView } from "./ControllerView";
 import { ViewerView } from "./ViewerView";
 
@@ -111,6 +112,15 @@ export default function Presentation() {
   const isViewer = role === "viewer";
   const outOfSync = isViewer && viewerSlide !== null;
   const displaySlide = outOfSync ? viewerSlide! : currentSlide;
+
+  const plugins = usePluginHost({
+    id: id!,
+    local,
+    isPresenter: role === "controller",
+    pdf,
+    currentSlide: displaySlide,
+    totalSlides,
+  });
 
   // Latest broadcastable state, for replying to a local window's state_request
   // without re-subscribing the channel on every slide change.
@@ -1369,6 +1379,7 @@ export default function Presentation() {
         laser={laser}
         strokes={annotations[displaySlide] ?? []}
         draft={remoteDraft && remoteDraft.slide === displaySlide ? remoteDraft.stroke : null}
+        plugins={plugins}
       />
     );
   }
@@ -1438,6 +1449,7 @@ export default function Presentation() {
         onAnnotationsClear={onAnnotationsClear}
         onSaveDrawing={onSaveDrawing}
         onLoadDrawing={onLoadDrawing}
+        plugins={plugins}
       />
     </>
   );

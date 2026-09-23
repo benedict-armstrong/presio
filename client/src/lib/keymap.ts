@@ -1,6 +1,5 @@
-// Controller keyboard shortcuts: types, defaults, persistence, and matching.
-
-import { lsGet, lsSet, STORAGE_KEYS } from "./storage";
+// Controller keyboard shortcuts: types, defaults, and matching. The user's
+// bindings are the "keybindings" setting (lib/settings.ts).
 
 export interface KeyBinding {
   key: string;
@@ -41,16 +40,6 @@ export const DEFAULT_KEYMAP: Keymap = {
   // A prefix, not a one-shot action: it arms digit capture (see ControllerView).
   jumpToSlide: [{ key: "j" }],
 };
-
-export function loadKeymap(): Keymap {
-  // Merge over defaults so a stored map missing a newer action still binds it.
-  const saved = lsGet<Partial<Keymap> | null>(STORAGE_KEYS.keymap, null);
-  return saved ? { ...DEFAULT_KEYMAP, ...saved } : DEFAULT_KEYMAP;
-}
-
-export function saveKeymap(km: Keymap) {
-  lsSet(STORAGE_KEYS.keymap, km);
-}
 
 export function matchesBinding(e: KeyboardEvent, bindings: KeyBinding[]): boolean {
   return bindings.some((b) => {

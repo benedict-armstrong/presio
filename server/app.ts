@@ -7,7 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getAllowedOrigins, buildCspDirectives } from "./security.js";
+import { getAllowedOrigins, buildCspDirectives, PLUGIN_FRAME_CSP } from "./security.js";
 import { canonicalBaseUrl } from "./lib/baseUrl.js";
 import { localBlobsDir } from "./local/paths.js";
 import { isLocalMode } from "./local/mode.js";
@@ -73,6 +73,14 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
     })
   );
   app.use(cors({ origin: corsOrigin }));
+
+  // The plugin sandbox page swaps the app's policy for its own no-network one
+  // (see PLUGIN_FRAME_CSP). Set after helmet so it replaces, not joins, the
+  // app policy — two policies would intersect and block the inline scripts.
+  app.use("/plugin-frame.html", (_req, res, next) => {
+    res.setHeader("Content-Security-Policy", PLUGIN_FRAME_CSP);
+    next();
+  });
 
   // There is deliberately no HTTP rate limiter here. Rate limiting belongs at
   // the edge: the app used to key one on `req.ip`, but with Cloudflare and then

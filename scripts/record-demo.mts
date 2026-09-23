@@ -111,10 +111,14 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
   const viewer = await viewerCtx.newPage();
   const viewerStart = Date.now();
 
-  // ThemeProvider reads localStorage on mount, so pinning it here avoids
-  // recording whatever the machine's OS preference happens to be.
+  // The theme is a setting (the settings document in localStorage), so
+  // pinning it here avoids recording whatever the machine's OS preference
+  // happens to be.
   for (const page of [controller, viewer]) {
-    await page.addInitScript((t) => localStorage.setItem("theme", t), theme);
+    await page.addInitScript(
+      (t) => localStorage.setItem("presio_settings", JSON.stringify({ theme: t })),
+      theme
+    );
   }
   await controller.addInitScript(
     ([id, token]) => {

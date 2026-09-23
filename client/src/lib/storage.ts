@@ -9,7 +9,9 @@
 /** Static localStorage keys. Per-session keys (timer, session auth) are built
  *  from an id, so they're kept as factory functions rather than constants. */
 export const STORAGE_KEYS = {
-  keymap: "presio_keymap",
+  // The user's settings document (lib/settings.ts). Preferences live there;
+  // the keys below are app state.
+  settings: "presio_settings",
   // Mosaic binary-tree layout for the controller dashboard. A card is "visible"
   // iff it appears as a leaf in the tree, so visibility no longer needs its own
   // key (replaces the legacy controllerLayout/controllerCards array format).
@@ -25,29 +27,10 @@ export const STORAGE_KEYS = {
   // Whether the add-to-home-screen prompt has been seen/actioned. Shown on
   // touch devices while presenting, never on the landing page.
   installPromptSeen: "presio_install_prompt_seen",
-  // Hidden ?desktop=1 escape hatch: force the desktop layout on mobile.
-  forceDesktop: "presio_force_desktop",
-  // Last-used drawing color/width for the annotation tools.
-  penStyle: "presio_pen_style",
-  highlighterStyle: "presio_highlighter_style",
-  // Whether the floating drawing/laser toolbar is shown on the current slide.
-  annotationToolbar: "presio_annotation_toolbar",
-  // Whether the timer card also shows the current wall-clock time.
-  timerShowClock: "presio_timer_show_clock",
-  // Timer mode/duration/warning — a device preference, not synced anywhere.
-  timerSettings: "presio_timer_settings",
-  // Font-size multiplier for the speaker notes card.
-  notesFontScale: "presio_notes_font_scale",
   // Email list prompt: "subscribed" | "dismissed" (absent = not asked yet).
   newsletterStatus: "presio_newsletter_status",
   // Test hook: override the prompt delay (ms).
   newsletterDelayOverride: "presio_newsletter_delay_ms",
-  // The presenter machine's LAN address, entered once on the share screen when
-  // Presio is opened over localhost (see lib/joinUrl.ts).
-  lanAddress: "presio_lan_address",
-  // Landing page stripped back to just the drop zone / URL / join code, for
-  // returning users who don't need the explainer again.
-  homeMinimal: "presio_home_minimal",
 } as const;
 
 export const timerKey = (id: string) => `presio_timer_${id}`;

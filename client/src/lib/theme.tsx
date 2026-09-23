@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { ThemeContext, type Theme } from "./useTheme";
+import { useSetting } from "./settings";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem("theme") as Theme) || "system"
-  );
+  const [theme, setTheme] = useSetting("theme");
 
   useEffect(() => {
     const root = document.documentElement;
@@ -15,7 +14,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     };
 
     apply(theme);
-    localStorage.setItem("theme", theme);
 
     if (theme === "system") {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
