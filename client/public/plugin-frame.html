@@ -42,6 +42,12 @@
     var nextRequest = 1;
 
     function post(m) { port.postMessage(m); }
+    function withBase(html, baseUrl) {
+      if (!baseUrl || /<base[\s>]/i.test(html)) return html;
+      var tag = '<base href="' + baseUrl.replace(/"/g, "&quot;") + '">';
+      var head = /<head[^>]*>/i.exec(html);
+      return head ? html.replace(head[0], head[0] + tag) : tag + html;
+    }
     function request(kind, args) {
       var id = nextRequest++;
       return new Promise(function (resolve, reject) {
@@ -124,6 +130,8 @@
 
     var api = {
       get pluginId() { return ctx.pluginId; },
+      /** The plugin's own folder (where presio-plugin.json is), absolute. */
+      get baseUrl() { return ctx.baseUrl; },
       /** "background" (hidden, presenter's device), "tile" (presenter's
        *  dashboard card), "viewer" (full screen on every viewer) or "slide"
        *  (over the slide itself, on the presenter's current slide and every
@@ -287,7 +295,9 @@
     Object.defineProperty(window, "presio", { value: api });
 
     document.open();
-    document.write(d.html);
+    // Relative URLs in the plugin (its scripts, styles, images) are its own:
+    // resolve them against its folder, not against this page.
+    document.write(withBase(d.html, ctx.baseUrl));
     document.close();
     // Keys pressed while this frame has focus (after a click on one of its
     // buttons) are the page's shortcuts all the same: replay the ones the

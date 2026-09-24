@@ -174,7 +174,22 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
 
   // index: false so "/" falls through to the catch-all below and gets its
   // canonical/og:url tags like every other route.
-  app.use(express.static(clientDist, { index: false }));
+  // Built-in plugins (client/plugins/build.ts): their chunks are named by
+  // content hash, so viewers and the edge may keep them for good; the index
+  // and manifest are what changes, so those are always revalidated.
+  const pluginDir = path.join(clientDist, "plugins") + path.sep;
+  app.use(
+    express.static(clientDist, {
+      index: false,
+      setHeaders: (res, filePath) => {
+        if (!filePath.startsWith(pluginDir)) return;
+        res.setHeader(
+          "Cache-Control",
+          /-[A-Za-z0-9_-]{8,}\.(js|css)$/.test(filePath) ? "public, max-age=31536000, immutable" : "no-cache"
+        );
+      },
+    })
+  );
 
   // Pages with a markdown mirror advertise it via rel="alternate".
   const MD_MIRRORS: Record<string, string> = {

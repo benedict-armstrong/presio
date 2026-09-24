@@ -3,7 +3,6 @@
 // baking the drawing into a downloaded PDF. It keeps the same model as the
 // slide surface, from the same messages (see model.ts).
 
-import { bakeDrawing } from "./bake";
 import { Drawing, publish, type Tool } from "./model";
 import { drawStrokes } from "./render";
 
@@ -90,5 +89,6 @@ export function runBackground() {
   presio.settings.onChange(showButton);
   showButton();
 
-  presio.deck.onExport((bytes) => bakeDrawing(bytes, drawing));
+  // pdf-lib only loads when a download asks for it.
+  presio.deck.onExport(async (bytes) => (await import("./bake")).bakeDrawing(bytes, drawing));
 }

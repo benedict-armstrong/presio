@@ -7,7 +7,6 @@ import { createApp } from "./app.js";
 import { getAllowedOrigins } from "./security.js";
 import { isLocalMode } from "./local/mode.js";
 import { registerSocketHandlers, createSocketState, clearSessionState } from "./socket.js";
-import { MAX_SOCKET_MESSAGE_BYTES } from "./validation.js";
 
 const allowedOrigins = getAllowedOrigins();
 // See app.ts's corsOrigin: development and local/LAN use have no fixed origin
@@ -15,7 +14,6 @@ const allowedOrigins = getAllowedOrigins();
 const devOrLocal = process.env.NODE_ENV === "development" || isLocalMode;
 const io = new Server({
   cors: { origin: allowedOrigins.length ? allowedOrigins : devOrLocal ? true : false },
-  maxHttpBufferSize: MAX_SOCKET_MESSAGE_BYTES,
 });
 
 const socketState = createSocketState();

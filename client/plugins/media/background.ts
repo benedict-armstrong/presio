@@ -2,7 +2,6 @@
 // Slide and the thumbnails show them), autoplay on arriving at a slide, the
 // keyboard shortcuts, and baking media into a downloaded PDF.
 
-import { bakeMedia } from "./bake";
 import { isPlayable, readPlacements, release, type Placement, type Placements } from "./placements";
 import { poster } from "./posters";
 import { parseState, parseTime, sendState, type MediaState, type TimeMessage } from "./protocol";
@@ -86,5 +85,6 @@ export function runBackground() {
     if (p) state = sendState(presio.slide.current, p.id, "reset", state);
   });
 
-  presio.deck.onExport((bytes) => bakeMedia(bytes, placements));
+  // pdf-lib only loads when a download asks for it.
+  presio.deck.onExport(async (bytes) => (await import("./bake")).bakeMedia(bytes, placements));
 }

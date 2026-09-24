@@ -11,7 +11,6 @@ import { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createApp } from "./app.js";
 import { registerSocketHandlers, createSocketState } from "./socket.js";
-import { MAX_SOCKET_MESSAGE_BYTES } from "./validation.js";
 import { FakeSupabase } from "./test/fakeSupabase.js";
 import { PORT, SESSION_ID, CONTROLLER_TOKEN, TOTAL_SLIDES } from "../e2e/constants.js";
 
@@ -58,7 +57,7 @@ const sessionRow = (id: string, deck: "example" | "links" = "example") => ({
 
 const fake = new FakeSupabase([sessionRow(SESSION_ID)]);
 
-const io = new Server({ maxHttpBufferSize: MAX_SOCKET_MESSAGE_BYTES });
+const io = new Server();
 const inner = createApp({ supabase: fake as unknown as SupabaseClient, io });
 
 // Wrap createApp so the example PDF route is matched before its catch-all.

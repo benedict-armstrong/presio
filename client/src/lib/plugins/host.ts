@@ -253,6 +253,7 @@ export class PluginHost {
       settings: this.settings.get(pluginId) ?? {},
       storage: this.readStorage(pluginId),
       clockOffset: this.clock,
+      baseUrl: plugin.baseUrl,
       view: FULL_VIEW,
       hovered: false,
     };

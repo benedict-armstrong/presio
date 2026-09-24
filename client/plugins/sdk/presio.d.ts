@@ -31,6 +31,8 @@ interface PresioMessage {
 
 interface Presio {
   readonly pluginId: string;
+  /** The plugin's own folder, absolute: relative URLs resolve against it. */
+  readonly baseUrl: string;
   readonly surface: "background" | "tile" | "viewer" | "slide";
   readonly role: "presenter" | "audience";
   readonly theme: "light" | "dark";

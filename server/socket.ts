@@ -6,13 +6,12 @@ import {
   isValidTotalSlides,
   jsonSize,
   sanitizePluginEvent,
-  sanitizePluginBundle,
+  sanitizePublishedPlugin,
   sanitizePluginSettings,
   MAX_PLUGINS_PER_SESSION,
   MAX_RETAINED_PER_PLUGIN,
   MAX_RETAINED_BYTES_PER_PLUGIN,
-  PLUGIN_ID_RE,
-  type PluginBundle,
+  type PublishedPlugin,
   type Retain,
 } from "./validation.js";
 
@@ -36,8 +35,9 @@ export interface SocketState {
   blankedSessions: Set<string>;
   // Sessions currently showing the join code / QR on all viewers (transient).
   codeSessions: Set<string>;
-  // Plugin bundles the controller published for viewers to run, per session.
-  pluginBundles: Map<string, Map<string, PluginBundle>>;
+  // The plugins the controller published for viewers to run (where to load
+  // each and its hash), per session.
+  publishedPlugins: Map<string, Map<string, PublishedPlugin>>;
   // Retained presenter plugin messages per session, keyed plugin + type.
   pluginRetained: Map<string, Map<string, RetainedPluginEvent>>;
   // The presenter's settings for each plugin, which viewers run with.
@@ -49,7 +49,7 @@ export function createSocketState(): SocketState {
     controllers: new Map(),
     blankedSessions: new Set(),
     codeSessions: new Set(),
-    pluginBundles: new Map(),
+    publishedPlugins: new Map(),
     pluginRetained: new Map(),
     pluginSettings: new Map(),
   };
@@ -60,7 +60,7 @@ export function clearSessionState(state: SocketState, sessionId: string) {
   state.controllers.delete(sessionId);
   state.blankedSessions.delete(sessionId);
   state.codeSessions.delete(sessionId);
-  state.pluginBundles.delete(sessionId);
+  state.publishedPlugins.delete(sessionId);
   state.pluginRetained.delete(sessionId);
   state.pluginSettings.delete(sessionId);
 }
@@ -143,14 +143,14 @@ export function registerSocketHandlers(
   supabase: SupabaseClient,
   state: SocketState
 ) {
-  const { controllers, blankedSessions, codeSessions, pluginBundles, pluginRetained, pluginSettings } = state;
+  const { controllers, blankedSessions, codeSessions, publishedPlugins, pluginRetained, pluginSettings } = state;
 
   // What a joining (or re-joining) socket needs to mount the session's
-  // plugins: which bundles exist (by hash, fetched separately so the
-  // reconcile watchdog's re-joins stay cheap), the presenter's settings for
-  // each, and the retained messages.
+  // plugins: which ones run and where each loads from (by URL and hash; the
+  // viewer fetches them itself), the presenter's settings for each, and the
+  // retained messages.
   const pluginsState = (sessionId: string) => ({
-    plugins: [...(pluginBundles.get(sessionId)?.values() ?? [])].map(({ manifest, hash }) => ({ manifest, hash })),
+    plugins: [...(publishedPlugins.get(sessionId)?.values() ?? [])],
     settings: Object.fromEntries(pluginSettings.get(sessionId) ?? []),
     retained: [...(pluginRetained.get(sessionId)?.values() ?? [])].map(({ plugin, type, payload, retain }) => ({ plugin, type, payload, retain })),
   });
@@ -315,16 +315,17 @@ export function registerSocketHandlers(
 
     // --- Plugins ---
 
-    // The controller publishes the plugins that have to run on viewers,
-    // replacing whatever it published before.
-    socket.on("plugins_publish", controllerOnly(socket, (sessionId, payload: { bundles?: unknown }) => {
-      if (!Array.isArray(payload?.bundles)) return;
-      const next = new Map<string, PluginBundle>();
-      for (const raw of payload.bundles.slice(0, MAX_PLUGINS_PER_SESSION)) {
-        const bundle = sanitizePluginBundle(raw);
-        if (bundle) next.set(bundle.manifest.id, bundle);
+    // The controller publishes the plugins that have to run on viewers —
+    // where each loads from and its hash, never the plugin itself (viewers
+    // fetch that directly) — replacing whatever it published before.
+    socket.on("plugins_publish", controllerOnly(socket, (sessionId, payload: { plugins?: unknown }) => {
+      if (!Array.isArray(payload?.plugins)) return;
+      const next = new Map<string, PublishedPlugin>();
+      for (const raw of payload.plugins.slice(0, MAX_PLUGINS_PER_SESSION)) {
+        const plugin = sanitizePublishedPlugin(raw);
+        if (plugin) next.set(plugin.manifest.id, plugin);
       }
-      pluginBundles.set(sessionId, next);
+      publishedPlugins.set(sessionId, next);
       io.to(sessionId).emit("plugins_state", pluginsState(sessionId));
     }));
 
@@ -339,17 +340,6 @@ export function registerSocketHandlers(
       pluginSettings.set(sessionId, bySession);
       socket.to(sessionId).emit("plugin_settings", update);
     }));
-
-    // A viewer fetching a published bundle's HTML, on first sight or when its
-    // hash changed.
-    socket.on("plugin_fetch", (payload: { id?: unknown }, ack?: (bundle: { html: string; hash: string } | null) => void) => {
-      if (typeof ack !== "function") return;
-      const { sessionId } = socket.data;
-      const id = payload?.id;
-      if (!sessionId || typeof id !== "string" || !PLUGIN_ID_RE.test(id)) return ack(null);
-      const bundle = pluginBundles.get(sessionId)?.get(id);
-      ack(bundle ? { html: bundle.html, hash: bundle.hash } : null);
-    });
 
     // Plugin messages. The presenter's go to everyone else in the room (and
     // are kept for late joiners when retained); the audience's go to the
@@ -371,7 +361,7 @@ export function registerSocketHandlers(
       }
 
       // Audience: only to a plugin the presenter actually published.
-      if (!pluginBundles.get(sessionId)?.has(plugin)) return;
+      if (!publishedPlugins.get(sessionId)?.has(plugin)) return;
       if (!allowAudiencePluginEvent(socket)) return;
       const controller = controllers.get(sessionId);
       if (!controller) return;

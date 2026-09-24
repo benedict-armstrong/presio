@@ -12,7 +12,6 @@
 import { Drawing, encodePoints, decodePoints, MAX_STROKE_POINTS, newId, opacityOf, parseBegin, parseFile, publish, serializeFile, type Stroke, type Tool } from "./model";
 import { drawStrokes, LiveStroke } from "./render";
 import { Palette, type PenStyle } from "./palette";
-import { bakeDrawing } from "./bake";
 
 // How long a viewer keeps showing a laser dot that stopped moving (covers a
 // lost "hide").
@@ -445,7 +444,8 @@ export function runSlide() {
     showPalette();
   } else {
     // A viewer's own download gets what's drawn too.
-    presio.deck.onExport((bytes) => bakeDrawing(bytes, drawing));
+    // pdf-lib only loads when a download asks for it.
+    presio.deck.onExport(async (bytes) => (await import("./bake")).bakeDrawing(bytes, drawing));
   }
 
   presio.ui.onViewChange((view) => {

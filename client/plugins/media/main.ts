@@ -4,9 +4,9 @@
 // on two surfaces: the presenter's background (background.ts) and the slide
 // itself, everywhere (slide.ts).
 
-import { runBackground } from "./background";
-import { runSlide } from "./slide";
 import "./media.css";
 
-if (presio.surface === "background") runBackground();
-else if (presio.surface === "slide") runSlide();
+// Each surface loads only its own code (a separate chunk, see
+// plugins/build.ts): viewers never download the presenter's background.
+if (presio.surface === "background") void import("./background").then((m) => m.runBackground());
+else if (presio.surface === "slide") void import("./slide").then((m) => m.runSlide());

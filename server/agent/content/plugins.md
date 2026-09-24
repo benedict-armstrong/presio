@@ -2,8 +2,8 @@
 
 A Presio plugin adds a feature to a live presentation — a button in the
 presenter's bottom bar, a keyboard shortcut, a card on their dashboard, a layer
-on every viewer's screen or on the slide itself, its own settings. It is one
-self-contained HTML file plus a manifest, served from any https URL (or from
+on every viewer's screen or on the slide itself, its own settings. It is an
+HTML page plus a manifest, served from any https URL (or from
 `http://localhost` while you build it).
 
 Like a VS Code extension, a plugin never edits Presio's interface: it
@@ -101,10 +101,21 @@ Audiences are protected differently: on a deployment with a viewer origin
 (e.g. `viewer.presio.ch`), viewer surfaces run there, where nothing of an
 audience member's own Presio account is stored.
 
-Plugins are still delivered as one HTML file — inline your scripts and styles
-(a single-file build, e.g. `vite-plugin-singlefile`, works; React and any npm
-package are fine once bundled in), or load them from your own server with
-absolute URLs.
+## Files and loading
+
+The manifest's `main` page is written into the frame with its document base
+set to the plugin's own folder (`presio.baseUrl`), so its scripts, styles,
+images and any chunks it imports load from your server with ordinary relative
+URLs. Split what only some surfaces need into separate chunks (a dynamic
+`import()`), so viewers download only the code their surface runs — e.g. a
+PDF library used only for a download.
+
+Nothing goes through Presio's server: every device loads the plugin from its
+URL directly, like a web page, so your server must send CORS headers (and
+should cache hashed files). The presenter publishes the plugin's URL and the
+SHA-256 of its `main` page; a viewer only runs the plugin if the page it
+loads matches, so everyone runs the same version. Built-in plugins are served
+by Presio itself, on the app and viewer origins alike.
 
 The same file runs on every surface; branch on `presio.surface`. Keys pressed
 while a frame has focus (after a click on one of its buttons) are handed on to
@@ -204,8 +215,15 @@ Messaging:
 2. In Presio, open a deck as the controller → **Settings → Plugins**, paste
    `http://localhost:5174/` and **Add**. Reload the presentation to pick up
    edits.
-3. For a shared deck, open the viewer link on another device: viewers receive
-   the plugin from the presenter's session — they install nothing.
+3. For a shared deck, open the viewer link on another device: viewers load the
+   plugin from the URL the presenter added — they install nothing. So a plugin
+   served on `localhost` only reaches viewers on the same machine (the viewer
+   window); for phones, serve it where they can reach it. With Presio itself
+   running locally over http, that can be your LAN address (`npx vite --host`,
+   then add `http://<your-ip>:5174/`); a hosted Presio is https, so there it
+   takes an https URL — a tunnel (e.g. `cloudflared tunnel --url
+   http://localhost:5174`) or a real host.
+   Reload the viewers after editing, or they'll refuse the changed plugin.
 
 ## Example
 
@@ -215,7 +233,8 @@ The built-in Join Code plugin is a complete example:
 ([manifest](BASE/plugins/timer/presio-plugin.json)) shows a tile and a
 background sharing `presio.storage`, and Speaker Notes
 ([manifest](BASE/plugins/notes/presio-plugin.json)) reads notes out of the PDF
-and saves edits back with `presio.deck.save` — both React, bundled to one file.
+and saves edits back with `presio.deck.save` — both React. Media and Drawing
+load each surface's code as its own chunk, and pdf-lib only for a download.
 Media ([manifest](BASE/plugins/media/presio-plugin.json)) plays the GIFs,
 videos and YouTube/Vimeo embeds a deck carries: a `slide` surface with the
 players (controls drawn on each item for the presenter, claimed with

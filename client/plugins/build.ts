@@ -1,9 +1,16 @@
 // Built-in plugins written in TypeScript (+ React). Each client/plugins/<name>/
-// holds a presio-plugin.json and a main.tsx or main.ts; this bundles it (and
-// the CSS it imports) into the one self-contained HTML file the plugin frame
-// requires, served at /plugins/<name>/ beside its manifest — built on request
-// by the dev server, emitted into dist by `vite build`. Plain plugins that
-// need no build still live in public/plugins/.
+// holds a presio-plugin.json and a main.tsx or main.ts; this builds it as ES
+// modules served at /plugins/<name>/ beside its manifest — built on request by
+// the dev server, emitted into dist by `vite build`. Plain plugins that need no
+// build still live in public/plugins/.
+//
+// The build is split, not one file: index.html only loads the entry script,
+// and whatever the entry imports dynamically — a surface's own code, pdf-lib
+// for a download — is a separate chunk fetched only by the frames that need
+// it. So a viewer never downloads the presenter's code. Chunk names carry a
+// content hash (the server caches them for good); the frame resolves the
+// relative URLs against the plugin's own folder (its <base>, see
+// plugin-frame.html).
 
 import fs from "fs"
 import path from "path"
@@ -11,7 +18,7 @@ import { build, type Plugin } from "vite"
 import react from "@vitejs/plugin-react"
 
 const ROOT = import.meta.dirname
-const URL_RE = /^\/plugins\/([a-z0-9-]+)\/(index\.html|presio-plugin\.json)$/
+const URL_RE = /^\/plugins\/([a-z0-9-]+)\/([A-Za-z0-9._-]+)$/
 
 function pluginNames(): string[] {
   return fs
@@ -25,56 +32,80 @@ function entry(name: string): string {
   return fs.existsSync(tsx) ? tsx : path.join(ROOT, name, "main.ts")
 }
 
-/**
- * Whether viewers run it. The presenter publishes those over the session's
- * socket, which caps a bundle's size (MAX_PLUGIN_HTML_BYTES on the server), so
- * they're minified in dev too.
- */
-function publishes(name: string): boolean {
-  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, name, "presio-plugin.json"), "utf8"))
-  const surfaces: unknown[] = Array.isArray(manifest.surfaces) ? manifest.surfaces : []
-  return surfaces.includes("viewer") || surfaces.includes("slide")
-}
-
-/** One plugin as a single HTML document: its script and styles inlined. */
-async function bundle(name: string, dev: boolean): Promise<string> {
+/** One plugin's files, by name relative to its folder: index.html, the
+ *  manifest, and the scripts and styles it loads. */
+async function bundle(name: string, dev: boolean): Promise<Map<string, string | Uint8Array>> {
   const result = await build({
     configFile: false,
     envDir: false,
     root: path.join(ROOT, name),
+    // Relative, so chunks find each other and their CSS under the plugin's
+    // own folder wherever that is served.
+    base: "./",
     logLevel: "warn",
     plugins: [react()],
     define: { "process.env.NODE_ENV": JSON.stringify(dev ? "development" : "production") },
     build: {
       write: false,
-      minify: !dev || publishes(name),
-      lib: { entry: entry(name), formats: ["iife"], name: "presioPlugin" },
+      minify: !dev,
+      modulePreload: false,
+      rollupOptions: {
+        input: entry(name),
+        output: {
+          format: "es",
+          entryFileNames: "main-[hash].js",
+          chunkFileNames: "[name]-[hash].js",
+          assetFileNames: "[name]-[hash][extname]",
+        },
+      },
     },
   })
-  const outputs = (Array.isArray(result) ? result : [result]).flatMap((r) => ("output" in r ? r.output : []))
-  let js = ""
-  let css = ""
-  for (const out of outputs) {
-    if (out.type === "chunk") js += out.code
-    else if (out.fileName.endsWith(".css")) css += String(out.source)
+  const files = new Map<string, string | Uint8Array>()
+  let main = ""
+  const styles: string[] = []
+  for (const out of (Array.isArray(result) ? result : [result]).flatMap((r) => ("output" in r ? r.output : []))) {
+    if (out.type === "chunk") {
+      files.set(out.fileName, out.code)
+      if (out.isEntry) {
+        main = out.fileName
+        // CSS the entry imports: linked from index.html, so it applies before
+        // the first render instead of flashing in.
+        styles.push(...(out.viteMetadata?.importedCss ?? []))
+      }
+    } else {
+      files.set(out.fileName, out.source)
+    }
   }
-  // Inline, so nothing in them may close the tag they sit in.
-  const safe = (text: string, tag: string) => text.replace(new RegExp(`</${tag}`, "gi"), `<\\/${tag}`)
-  return `<!doctype html>
+  files.set(
+    "index.html",
+    `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-<style>${safe(css, "style")}</style>
+${styles.map((href) => `<link rel="stylesheet" href="${href}">`).join("\n")}
 </head>
 <body>
 <div id="root"></div>
-<script>${safe(js, "script")}</script>
+<script type="module" src="${main}"></script>
 </body>
 </html>
 `
+  )
+  files.set("presio-plugin.json", fs.readFileSync(path.join(ROOT, name, "presio-plugin.json"), "utf8"))
+  return files
+}
+
+const TYPES: Record<string, string> = {
+  ".html": "text/html",
+  ".json": "application/json",
+  ".js": "text/javascript",
+  ".css": "text/css",
 }
 
 export function builtinPlugins(): Plugin {
+  // Dev: each plugin's latest build, redone whenever its index.html is asked
+  // for (so a reload picks up edits); its chunks are served from here.
+  const latest = new Map<string, Map<string, string | Uint8Array>>()
   return {
     name: "presio-builtin-plugins",
     configureServer(server) {
@@ -82,15 +113,19 @@ export function builtinPlugins(): Plugin {
         const match = URL_RE.exec((req.url ?? "").split("?")[0])
         if (!match || !pluginNames().includes(match[1])) return next()
         const [, name, file] = match
-        const body =
-          file === "index.html"
-            ? bundle(name, true)
-            : fs.promises.readFile(path.join(ROOT, name, "presio-plugin.json"), "utf8")
-        body.then(
-          (text) => {
-            res.setHeader("Content-Type", file === "index.html" ? "text/html" : "application/json")
+        const files =
+          file === "index.html" || !latest.has(name)
+            ? bundle(name, true).then((built) => (latest.set(name, built), built))
+            : Promise.resolve(latest.get(name)!)
+        files.then(
+          (built) => {
+            const body = file === "presio-plugin.json"
+              ? fs.readFileSync(path.join(ROOT, name, "presio-plugin.json"), "utf8")
+              : built.get(file)
+            if (body === undefined) return next()
+            res.setHeader("Content-Type", TYPES[path.extname(file)] ?? "application/octet-stream")
             res.setHeader("Cache-Control", "no-cache")
-            res.end(text)
+            res.end(body)
           },
           (err) => next(err)
         )
@@ -98,12 +133,9 @@ export function builtinPlugins(): Plugin {
     },
     async generateBundle() {
       for (const name of pluginNames()) {
-        this.emitFile({ type: "asset", fileName: `plugins/${name}/index.html`, source: await bundle(name, false) })
-        this.emitFile({
-          type: "asset",
-          fileName: `plugins/${name}/presio-plugin.json`,
-          source: fs.readFileSync(path.join(ROOT, name, "presio-plugin.json"), "utf8"),
-        })
+        for (const [file, source] of await bundle(name, false)) {
+          this.emitFile({ type: "asset", fileName: `plugins/${name}/${file}`, source })
+        }
       }
     },
   }

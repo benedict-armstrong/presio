@@ -62,7 +62,9 @@ export function removePlugin(url: string) {
 
 /**
  * Normalize a presenter-entered plugin location to a base URL, or throw.
- * https anywhere, or plain http on this machine for a dev server.
+ * https anywhere; plain http on this machine for a dev server, or anywhere
+ * when Presio itself is on http (a local deployment, where a LAN address lets
+ * phones reach the dev server too — an https page couldn't load it at all).
  */
 export function normalizePluginUrl(input: string): string {
   let url: URL;
@@ -72,7 +74,8 @@ export function normalizePluginUrl(input: string): string {
     throw new Error("Enter a full URL, e.g. http://localhost:5174/");
   }
   const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1";
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+  const httpOk = loopback || window.location.protocol === "http:";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && httpOk)) {
     throw new Error("Plugin URLs must be https (or http on localhost)");
   }
   url.hash = "";
@@ -94,9 +97,12 @@ export async function addPlugin(input: string): Promise<{ url: string; plugin: L
 /**
  * Fetch a plugin's manifest and HTML. Always revalidated rather than cached
  * at install: a dev server's plugin should pick up edits on the next load.
+ *
+ * `expectedHash` is for viewers loading what the presenter published: the
+ * plugin only runs if its HTML is the presenter's, byte for byte.
  */
-export async function loadPlugin(baseUrl: string): Promise<LoadedPlugin> {
-  const base = new URL(baseUrl, window.location.href);
+export async function loadPlugin(url: string, expectedHash?: string): Promise<LoadedPlugin> {
+  const base = new URL(url, window.location.href);
   const res = await fetch(new URL("presio-plugin.json", base), { cache: "no-cache" });
   if (!res.ok) throw new Error(`Couldn't load presio-plugin.json (HTTP ${res.status})`);
   const manifest = parseManifest(await res.json().catch(() => {
@@ -106,5 +112,6 @@ export async function loadPlugin(baseUrl: string): Promise<LoadedPlugin> {
   if (!htmlRes.ok) throw new Error(`Couldn't load ${manifest.main} (HTTP ${htmlRes.status})`);
   const html = await htmlRes.text();
   const hash = await sha256Hex(new TextEncoder().encode(html).buffer as ArrayBuffer);
-  return { manifest, html, hash };
+  if (expectedHash && hash !== expectedHash) throw new Error("This plugin changed since the presenter loaded it");
+  return { manifest, url, baseUrl: base.href, html, hash };
 }

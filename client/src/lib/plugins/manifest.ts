@@ -92,8 +92,13 @@ export const PLUGIN_ICONS = [
 /** A plugin ready to mount: its manifest and HTML. */
 export interface LoadedPlugin {
   manifest: PluginManifest;
+  /** Where it was loaded from, as registered: a path on this origin for
+   *  built-ins (so viewers load them from theirs), or an absolute URL. */
+  url: string;
+  /** The same, absolute: the base its relative URLs resolve against. */
+  baseUrl: string;
   html: string;
-  /** SHA-256 of `html`, as the server computes it for published bundles. */
+  /** SHA-256 of `html`: what viewers check what they load against. */
   hash: string;
 }
 

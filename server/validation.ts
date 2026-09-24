@@ -1,4 +1,3 @@
-import { createHash } from "crypto";
 
 // Pure validation/sanitization helpers, factored out of the request/socket
 // handlers so they can be unit-tested without a server or Supabase.
@@ -52,19 +51,14 @@ export function isValidSlideNumber(slideNumber: unknown, total: unknown): boolea
 //
 // The server never runs plugin code or looks inside plugin messages: it relays
 // them between the presenter and the audience, keeps the presenter's "retained"
-// messages for late joiners, and hands viewers the plugin bundles the presenter
-// published. These caps bound what a controller or viewer can make it hold.
+// messages for late joiners, and tells viewers which plugins the presenter
+// published (where to load them — never the plugins themselves). These caps
+// bound what a controller or viewer can make it hold.
 
 export const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const PLUGIN_TYPE_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
 export const MAX_PLUGIN_PAYLOAD_BYTES = 16 * 1024;
-export const MAX_PLUGIN_HTML_BYTES = 512 * 1024;
 export const MAX_PLUGINS_PER_SESSION = 8;
-// The largest socket message the server accepts. The presenter publishes every
-// viewer-side bundle in one plugins_publish, and two built-ins (media, drawing)
-// carry pdf-lib, so socket.io's 1 MB default is too tight; this fits every
-// plugin slot's worst case with room for escaping.
-export const MAX_SOCKET_MESSAGE_BYTES = MAX_PLUGINS_PER_SESSION * MAX_PLUGIN_HTML_BYTES * 1.25;
 // Retained messages are a plugin's state for late joiners, one message per
 // piece of it — a drawing keeps each slide's strokes in a few. So a plugin may
 // keep many, and the byte budget is what bounds memory: 2 MB per plugin (a
@@ -95,9 +89,12 @@ export interface PluginManifest {
   permissions: string[];
 }
 
-export interface PluginBundle {
+/** A plugin the presenter runs on viewers: where they load it from, and the
+ *  hash of its HTML, which viewers check what they load against. The server
+ *  never carries the plugin itself. */
+export interface PublishedPlugin {
   manifest: PluginManifest;
-  html: string;
+  url: string;
   hash: string;
 }
 
@@ -136,12 +133,12 @@ export function sanitizePluginSettings(raw: unknown): { plugin: string; settings
 const shortString = (v: unknown, max: number): string | undefined =>
   typeof v === "string" && v.length <= max ? v : undefined;
 
-// A published bundle: the manifest fields viewers need to label and mount the
-// plugin, plus its single-file HTML. Only the controller can publish, but it is
-// still client input, so everything is re-checked and re-built here.
-export function sanitizePluginBundle(raw: unknown): PluginBundle | null {
+// A published plugin: the manifest fields viewers need to label and mount it,
+// where to load it from and the hash its page must match. Only the controller
+// can publish, but it is still client input, so everything is re-checked here.
+export function sanitizePublishedPlugin(raw: unknown): PublishedPlugin | null {
   if (typeof raw !== "object" || raw === null) return null;
-  const b = raw as { manifest?: Record<string, unknown>; html?: unknown };
+  const b = raw as { manifest?: Record<string, unknown>; url?: unknown; hash?: unknown };
   const m = b.manifest;
   if (typeof m !== "object" || m === null) return null;
   if (typeof m.id !== "string" || !PLUGIN_ID_RE.test(m.id)) return null;
@@ -152,7 +149,11 @@ export function sanitizePluginBundle(raw: unknown): PluginBundle | null {
   if (!shortList(m.surfaces)) return null;
   const permissions = m.permissions === undefined ? [] : m.permissions;
   if (!shortList(permissions)) return null;
-  if (typeof b.html !== "string" || Buffer.byteLength(b.html, "utf8") > MAX_PLUGIN_HTML_BYTES) return null;
+  // A path on this deployment (built-ins, loaded by each viewer from its own
+  // origin) or a web URL — nothing a browser would run as a script.
+  const url = typeof b.url === "string" && b.url.length <= 2048 ? b.url : "";
+  if (!/^(\/(?!\/)|https?:\/\/)/i.test(url)) return null;
+  if (typeof b.hash !== "string" || !/^[0-9a-f]{64}$/.test(b.hash)) return null;
   return {
     manifest: {
       id: m.id,
@@ -163,9 +164,7 @@ export function sanitizePluginBundle(raw: unknown): PluginBundle | null {
       surfaces: (m.surfaces as string[]).slice(0, 8),
       permissions: (permissions as string[]).slice(0, 8),
     },
-    html: b.html,
-    // Computed here rather than trusted from the client: viewers use it to
-    // decide whether the copy they already mounted is still current.
-    hash: createHash("sha256").update(b.html).digest("hex"),
+    url,
+    hash: b.hash,
   };
 }

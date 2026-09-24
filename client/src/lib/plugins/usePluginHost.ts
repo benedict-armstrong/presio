@@ -18,8 +18,12 @@ import { loadPlugin, usePluginEntries } from "./registry";
 import { clockOffset, onClockSample } from "@/lib/clock";
 import { resolvePluginSettings, useSettingsDocument } from "@/lib/settings";
 
+/** A plugin viewers run: where to load it, and what it must hash to. */
 interface PublishedPlugin {
   manifest: Pick<PluginManifest, "id" | "name" | "version" | "author" | "description" | "surfaces" | "permissions">;
+  /** As the presenter registered it: built-ins by path, so each viewer
+   *  loads them from its own origin; others by absolute URL. */
+  url: string;
   hash: string;
 }
 
@@ -230,11 +234,25 @@ export function usePluginHost({
     // while the socket can't take it: a late one is worse than none.
     host.setOutbound((event) => (event.volatile ? socket.volatile : socket).emit("plugin_event", event));
 
+    // Only where to find each plugin: viewers load it themselves (cached like
+    // any web page), never through the server.
     const publish = () => {
-      const bundles = pluginsRef.current
+      const plugins = pluginsRef.current
         .filter((p) => runsOnViewers(p.manifest))
-        .map(({ manifest, html }) => ({ manifest, html }));
-      socket.emit("plugins_publish", { bundles });
+        .map(({ manifest, url, hash }): PublishedPlugin => ({
+          manifest: {
+            id: manifest.id,
+            name: manifest.name,
+            version: manifest.version,
+            author: manifest.author,
+            description: manifest.description,
+            surfaces: manifest.surfaces,
+            permissions: manifest.permissions,
+          },
+          url,
+          hash,
+        }));
+      socket.emit("plugins_publish", { plugins });
     };
 
     const onEvent = (event: WireEvent) => host.receive(event);
@@ -274,28 +292,30 @@ export function usePluginHost({
       // Fetch only what changed; the watchdog re-joins every 30s.
       const current = new Map(pluginsRef.current.map((p) => [p.manifest.id, p]));
       const next: LoadedPlugin[] = [];
-      for (const { manifest, hash } of state.plugins) {
+      for (const { manifest, url, hash } of state.plugins) {
         const have = current.get(manifest.id);
         if (have?.hash === hash) {
           next.push(have);
           continue;
         }
-        const bundle = await new Promise<{ html: string; hash: string } | null>((resolve) =>
-          socket.emit("plugin_fetch", { id: manifest.id }, resolve)
-        );
-        if (!bundle) continue;
-        next.push({
-          // Viewers get the published subset of the manifest; contributions
-          // are the presenter's business (their settings arrive as values).
-          manifest: {
-            ...manifest,
-            main: "index.html",
-            activation: ["always"],
-            contributes: { buttons: [], keybindings: [], settings: {} },
-          } as LoadedPlugin["manifest"],
-          html: bundle.html,
-          hash: bundle.hash,
-        });
+        try {
+          const loaded = await loadPlugin(url, hash);
+          next.push({
+            ...loaded,
+            // Run as published: contributions are the presenter's business
+            // (their settings arrive as values), and the deck already
+            // activated it there.
+            manifest: {
+              ...loaded.manifest,
+              activation: ["always"],
+              contributes: { buttons: [], keybindings: [], settings: {} },
+            },
+          });
+        } catch (e) {
+          // Unreachable from here (a presenter's localhost dev server), or
+          // changed since: this viewer goes without it.
+          console.warn(`Plugin ${manifest.id} not loaded:`, e);
+        }
       }
       const changed =
         next.length !== pluginsRef.current.length || next.some((p, i) => p !== pluginsRef.current[i]);
