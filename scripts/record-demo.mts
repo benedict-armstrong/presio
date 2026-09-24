@@ -44,7 +44,7 @@ function sleep(ms: number) {
 
 // Boot the E2E harness on its own port, serving the demo deck.
 //
-// Each pass gets a FRESH harness. Annotations live in the session the harness
+// Each pass gets a FRESH harness. Drawings live in the session the harness
 // holds, so a second pass against the same one starts with the first pass's
 // strokes already drawn — they appear on the slide the moment it opens instead
 // of being drawn on camera.
@@ -54,7 +54,7 @@ async function startHarness(port: number) {
   }
 
   // Refuse to record against a server this run did not start. A harness
-  // orphaned by an earlier run keeps its session — annotations included — so
+  // orphaned by an earlier run keeps its session — drawings included — so
   // reusing one silently records a slide with the previous run's strokes
   // already on it. The readiness probe below cannot tell the two apart.
   const base = `http://localhost:${port}`;
@@ -147,11 +147,13 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
   // before T0 so it reads as a live talk rather than a fresh page.
   await controller.getByRole("button", { name: "Start", exact: true }).click().catch(() => {});
 
-  // The tool palette collapses to a grip when idle; make sure it is expanded so
-  // the laser and pen buttons are hittable once the clock starts.
-  const anyTool = controller.getByTestId("tool-laser").or(controller.getByTestId("tool-collapsed"));
+  // The tool palette is the built-in drawing plugin's, in its layer over the
+  // slide. Make sure it's showing so the laser and pen buttons are hittable
+  // once the clock starts.
+  const palette = controller.frameLocator('[data-testid="plugin-frame-drawing-slide"]').first();
+  const anyTool = palette.getByTestId("tool-laser").or(palette.getByTestId("tool-collapsed"));
   if (!(await anyTool.first().isVisible().catch(() => false))) {
-    await controller.getByTestId("toolbar-toggle").click().catch(() => {});
+    await controller.getByTestId("plugin-button-drawing-palette").click().catch(() => {});
     await anyTool.first().waitFor({ timeout: 10_000 });
   }
 
@@ -161,7 +163,7 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
   // canvas. Drag it down to the bottom-left first, off camera, while the tool
   // is still "none" and nothing is being pointed at.
   {
-    const grip = controller.getByTestId("toolbar-drag");
+    const grip = palette.getByTestId("toolbar-drag");
     const g = await grip.boundingBox();
     const slide = await controller.locator(".touch-none canvas").first().boundingBox();
     if (g && slide) {
@@ -191,9 +193,8 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
   // The pdf.js canvas is NOT the page rect: it is stretched over the whole
   // container and drawn with `object-fit: contain`, so its client box carries
   // the letterbox bars. The page is the contain-fitted rect inside it, which is
-  // what AnnotationOverlay normalizes against (contentRectFor in
-  // client/src/lib/annotations.ts) — so the fractions here have to be measured
-  // the same way, or every mark lands off by the bar.
+  // what the drawing layer is sized to — so the fractions here have to be
+  // measured the same way, or every mark lands off by the bar.
   const surface = controller.locator(".touch-none canvas").first();
   const box = await surface.evaluate((el) => {
     const c = el as HTMLCanvasElement;
@@ -211,9 +212,9 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
   // With a tool active and the pointer away, the palette collapses to just the
   // active tool, so the others have to be revealed before they can be clicked.
   const pickTool = async (key: "none" | "laser" | "pen") => {
-    const btn = controller.getByTestId(`tool-${key}`);
+    const btn = palette.getByTestId(`tool-${key}`);
     if (!(await btn.isVisible().catch(() => false))) {
-      await controller.getByTestId("tool-collapsed").click();
+      await palette.getByTestId("tool-collapsed").dispatchEvent("click");
       await btn.waitFor({ timeout: 5_000 });
     }
     await btn.click();
@@ -234,7 +235,7 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
   };
 
   // Park the pointer off the rendered page. A laser dot only clears when the
-  // pointer leaves the slide (AnnotationOverlay's onPointerLeave), so without
+  // pointer leaves the slide, so without
   // this the dot sits frozen where the sweep ended — on camera, and on the
   // viewer until its 3s remote-hide timer fires.
   const leaveSlide = () =>

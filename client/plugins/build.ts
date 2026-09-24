@@ -1,6 +1,6 @@
-// Built-in plugins written in TypeScript + React. Each client/plugins/<name>/
-// holds a presio-plugin.json and a main.tsx; this bundles main.tsx (and the
-// CSS it imports) into the one self-contained HTML file the plugin sandbox
+// Built-in plugins written in TypeScript (+ React). Each client/plugins/<name>/
+// holds a presio-plugin.json and a main.tsx or main.ts; this bundles it (and
+// the CSS it imports) into the one self-contained HTML file the plugin frame
 // requires, served at /plugins/<name>/ beside its manifest — built on request
 // by the dev server, emitted into dist by `vite build`. Plain plugins that
 // need no build still live in public/plugins/.
@@ -20,6 +20,22 @@ function pluginNames(): string[] {
     .map((d) => d.name)
 }
 
+function entry(name: string): string {
+  const tsx = path.join(ROOT, name, "main.tsx")
+  return fs.existsSync(tsx) ? tsx : path.join(ROOT, name, "main.ts")
+}
+
+/**
+ * Whether viewers run it. The presenter publishes those over the session's
+ * socket, which caps a bundle's size (MAX_PLUGIN_HTML_BYTES on the server), so
+ * they're minified in dev too.
+ */
+function publishes(name: string): boolean {
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, name, "presio-plugin.json"), "utf8"))
+  const surfaces: unknown[] = Array.isArray(manifest.surfaces) ? manifest.surfaces : []
+  return surfaces.includes("viewer") || surfaces.includes("slide")
+}
+
 /** One plugin as a single HTML document: its script and styles inlined. */
 async function bundle(name: string, dev: boolean): Promise<string> {
   const result = await build({
@@ -31,8 +47,8 @@ async function bundle(name: string, dev: boolean): Promise<string> {
     define: { "process.env.NODE_ENV": JSON.stringify(dev ? "development" : "production") },
     build: {
       write: false,
-      minify: !dev,
-      lib: { entry: path.join(ROOT, name, "main.tsx"), formats: ["iife"], name: "presioPlugin" },
+      minify: !dev || publishes(name),
+      lib: { entry: entry(name), formats: ["iife"], name: "presioPlugin" },
     },
   })
   const outputs = (Array.isArray(result) ? result : [result]).flatMap((r) => ("output" in r ? r.output : []))

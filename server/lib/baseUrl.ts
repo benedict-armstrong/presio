@@ -13,9 +13,7 @@ import type express from "express";
  * losing one domain is better than falling back to the Host header for all of
  * them (see baseUrl below for why that matters).
  */
-const configuredOrigins: string[] = (() => {
-  const raw = (process.env.PUBLIC_BASE_URLS ?? process.env.PUBLIC_BASE_URL ?? "").trim();
-  if (!raw) return [];
+function parseOrigins(raw: string, what: string): string[] {
   const origins: string[] = [];
   for (const entry of raw.split(",")) {
     const value = entry.trim();
@@ -24,11 +22,43 @@ const configuredOrigins: string[] = (() => {
       const { origin } = new URL(value);
       if (!origins.includes(origin)) origins.push(origin);
     } catch {
-      console.error(`Ignoring malformed public base URL: ${value}`);
+      console.error(`Ignoring malformed ${what}: ${value}`);
     }
   }
   return origins;
-})();
+}
+
+const configuredOrigins: string[] = parseOrigins(
+  (process.env.PUBLIC_BASE_URLS ?? process.env.PUBLIC_BASE_URL ?? "").trim(),
+  "public base URL"
+);
+
+/**
+ * Where audiences watch, paired by position with PUBLIC_BASE_URLS (e.g.
+ * https://viewer.presio.ch for https://presio.ch). A separate origin, so a
+ * viewer page — and the presenter's plugins running on it — can't read what
+ * Presio keeps in an audience member's own browser storage for the app origin:
+ * their login, controller tokens for their own decks. Unset (self-hosting,
+ * local mode) means viewers use the app origin as before.
+ *
+ * This isolation assumes auth stays out of domain-wide cookies: a subdomain
+ * shares those. Presio's auth lives in localStorage and headers.
+ */
+const viewerOrigins: string[] = parseOrigins((process.env.VIEWER_BASE_URLS ?? "").trim(), "viewer base URL");
+
+/**
+ * The app and viewer origins that belong together for this request: whichever
+ * of the pair it arrived on, the other half is the one at the same position.
+ * `viewer` is null when no viewer origin is configured for it.
+ */
+export function originPair(req: express.Request): { app: string; viewer: string | null; onViewer: boolean } {
+  const host = req.get("host")?.toLowerCase();
+  const i = viewerOrigins.findIndex((o) => new URL(o).host.toLowerCase() === host);
+  if (i >= 0) return { app: configuredOrigins[i] ?? configuredOrigins[0] ?? requestOrigin(req), viewer: viewerOrigins[i], onViewer: true };
+  const app = baseUrl(req);
+  const j = configuredOrigins.indexOf(app);
+  return { app, viewer: viewerOrigins[j >= 0 ? j : 0] ?? null, onViewer: false };
+}
 
 /** Host (including any port) of each configured origin, for request matching. */
 const originsByHost = new Map(configuredOrigins.map((o) => [new URL(o).host.toLowerCase(), o]));

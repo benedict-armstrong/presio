@@ -54,8 +54,28 @@ function precacheServiceWorker(): Plugin {
   }
 }
 
+// Dev only: try the app/viewer origin split (lib/origins.ts) without a
+// deployment, e.g. DEV_VIEWER_ORIGIN=http://127.0.0.1:5173 with the app on
+// http://localhost:5173. The server names the two in production; here the
+// dev server does. Unset, dev stays on one origin, as LAN testing needs.
+function devOrigins(): Plugin {
+  const viewer = process.env.DEV_VIEWER_ORIGIN
+  const app = process.env.DEV_APP_ORIGIN ?? "http://localhost:5173"
+  return {
+    name: "presio-dev-origins",
+    apply: "serve",
+    transformIndexHtml() {
+      if (!viewer) return
+      return [
+        { tag: "meta", attrs: { name: "presio-app-origin", content: app }, injectTo: "head" },
+        { tag: "meta", attrs: { name: "presio-viewer-origin", content: viewer }, injectTo: "head" },
+      ]
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), builtinPlugins(), precacheServiceWorker()],
+  plugins: [react(), builtinPlugins(), devOrigins(), precacheServiceWorker()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -64,6 +84,8 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": "http://localhost:3001",
+      // Local mode's uploaded decks (server/local/blobStore.ts).
+      "/files": "http://localhost:3001",
       "/mcp": "http://localhost:3001",
       "/.well-known": "http://localhost:3001",
       "/llms.txt": "http://localhost:3001",

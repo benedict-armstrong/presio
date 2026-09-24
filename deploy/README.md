@@ -235,6 +235,31 @@ the same effect. That is what makes `Cf-Connecting-Ip` trustworthy at the edge:
 it is an ordinary header, so it is only meaningful while the edge is
 unavoidable.
 
+### A separate origin for viewers
+
+Audiences can watch on their own hostname, e.g. `viewer.presio.ch` beside
+`presio.ch`. The presenter's plugins run on every audience device; on the
+viewer origin they can't reach what Presio keeps in an audience member's
+browser for the app origin — their login, the controller tokens of their own
+decks. With it unset, viewers use the app hostnames as before (self-hosting,
+local mode).
+
+1. Add a DNS record per viewer hostname, pointing where the app's does
+   (proxied through Cloudflare). Keep each one level under the domain —
+   `viewer.presio.ch`, `staging-viewer.presio.xyz` — so the `*.domain`
+   origin certificates already cover it.
+2. Set `VIEWER_HOST` (and `VIEWER_HOST_ALT` when dual-homed; they pair with
+   `APP_HOST` / `APP_HOST_ALT` in order) in the stack `.env`, and add their
+   `https://` origins to `ALLOWED_ORIGIN` — `gen-env.sh` does both from
+   `VIEWER_DOMAIN` / `VIEWER_DOMAIN_ALT`. Staging takes `STAGING_VIEWER_HOST`
+   (and `_ALT`).
+3. Redeploy. Join links and QR codes now point at the viewer host; old viewer
+   links on the app host redirect there, and "Switch to Controller" hands back
+   to the app host to ask for the passphrase.
+
+The isolation relies on Presio keeping auth out of domain-wide cookies — a
+subdomain shares those. Its auth lives in localStorage and request headers.
+
 ## Monitoring certificate expiry
 
 Uptime Kuma runs in the stack. Two monitors are worth having:

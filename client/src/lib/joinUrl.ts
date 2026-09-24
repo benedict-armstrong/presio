@@ -24,6 +24,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getSetting, setSetting } from "@/lib/settings";
+import { viewerOrigin } from "@/lib/origins";
 
 /** How long to wait for a probe. A firewall DROP sends no RST, so an unguarded
  *  fetch hangs until the TCP timeout (~75s) — the difference between an instant
@@ -293,7 +294,9 @@ export function useJoinUrls(id: string) {
   return {
     ...rest,
     origin,
-    viewerUrl: `${origin}/s/${id}?role=viewer`,
+    // Audiences join on the viewer origin when the deployment has one
+    // (lib/origins.ts); control always stays on the app origin.
+    viewerUrl: `${viewerOrigin ?? origin}/s/${id}?role=viewer`,
     controllerUrl: `${origin}/s/${id}?role=controller`,
   };
 }
@@ -302,5 +305,6 @@ export function useJoinUrls(id: string) {
  *  the verdict on whether it's worth showing at all. */
 export function useJoinUrl(id: string, role: "viewer" | "controller") {
   const { origin, shareable } = useLanOrigin();
-  return { url: `${origin}/s/${id}?role=${role}`, shareable };
+  const base = role === "viewer" ? (viewerOrigin ?? origin) : origin;
+  return { url: `${base}/s/${id}?role=${role}`, shareable };
 }

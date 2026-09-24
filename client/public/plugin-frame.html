@@ -2,11 +2,10 @@
 <html>
 <head>
 <meta charset="utf-8">
-<!-- Presio plugin sandbox. Loaded in an iframe with sandbox="allow-scripts"
-     (an opaque origin: no access to the app's storage, cookies or tokens) and
-     this no-network policy, which the server also sends as a header — see
-     PLUGIN_FRAME_CSP in server/security.ts. Keep the two in step. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<!-- The page every plugin runs in. Plugins are trusted code the presenter
+     installed, so this frame is for a stable API and containment, not
+     security: the server replaces the app's CSP with a permissive one here
+     (PLUGIN_FRAME_CSP in server/security.ts). -->
 <script>
 // The host posts one "presio:boot" message carrying a MessagePort, the
 // plugin's HTML and the starting context. This installs `window.presio` on
@@ -31,7 +30,11 @@
     var settingsListeners = [];
     var storageListeners = [];
     var deckListeners = [];
+    var viewListeners = [];
+    var hoverListeners = [];
     var buttonListeners = {};
+    var commandListeners = {};
+    var exporter = null;
     // Messages that arrive before the plugin subscribes (retained state is
     // replayed right after boot) wait here instead of being dropped.
     var pending = [];
@@ -73,10 +76,22 @@
       } else if (m.type === "storage") {
         ctx.storage = m.storage;
         each(storageListeners, Object.assign({}, ctx.storage));
+      } else if (m.type === "clock") {
+        ctx.clockOffset = m.offset;
       } else if (m.type === "deck") {
-        each(deckListeners, undefined);
+        each(deckListeners, m.kind || "replace");
+      } else if (m.type === "view") {
+        ctx.view = m.view;
+        each(viewListeners, ctx.view);
+      } else if (m.type === "hover") {
+        ctx.hovered = m.hovered;
+        each(hoverListeners, ctx.hovered);
       } else if (m.type === "button") {
         each(buttonListeners[m.id] || [], m.id);
+      } else if (m.type === "command") {
+        each(commandListeners[m.id] || [], m.id);
+      } else if (m.type === "export") {
+        runExport(m);
       } else if (m.type === "message") {
         if (messageListeners.length) each(messageListeners, m.message);
         else pending.push(m.message);
@@ -89,10 +104,30 @@
       }
     };
 
+    // The presenter is downloading the deck: pass it through this plugin's
+    // export handler, if it has one.
+    function runExport(m) {
+      var handler = exporter;
+      Promise.resolve()
+        .then(function () { return handler ? handler(m.bytes, { mode: m.mode }) : m.bytes; })
+        .then(
+          function (bytes) {
+            if (!(bytes instanceof Uint8Array)) throw new Error("onExport handlers resolve to a Uint8Array");
+            post({ type: "exported", id: m.id, bytes: bytes });
+          },
+          function (err) {
+            console.error(err);
+            post({ type: "exported", id: m.id, error: String((err && err.message) || err) });
+          }
+        );
+    }
+
     var api = {
       get pluginId() { return ctx.pluginId; },
       /** "background" (hidden, presenter's device), "tile" (presenter's
-       *  dashboard card) or "viewer" (every viewer screen). */
+       *  dashboard card), "viewer" (full screen on every viewer) or "slide"
+       *  (over the slide itself, on the presenter's current slide and every
+       *  viewer — sized to the page, so fractions of it are page positions). */
       get surface() { return ctx.surface; },
       /** "presenter" or "audience": who is holding this device. */
       get role() { return ctx.role; },
@@ -111,10 +146,21 @@
        * Message this plugin's other instances. From the presenter it reaches
        * every device; from the audience, only the presenter. `retain: true`
        * (presenter only) keeps the latest message of this type for devices
-       * that join later — use it for state, not events.
+       * that join later, and across a reload of the presenter's page — use it
+       * for state, not events; a retained null payload forgets the type.
+       * `retain: "deck"` is the same, but only for the deck on screen:
+       * replacing the deck forgets it everywhere.
+       * `volatile: true` may be dropped rather than queued when the connection
+       * is busy or down — for a stream where only the latest value matters.
        */
       send: function (type, payload, opts) {
-        post({ type: "send", msgType: type, payload: payload === undefined ? null : payload, retain: !!(opts && opts.retain) });
+        post({
+          type: "send",
+          msgType: type,
+          payload: payload === undefined ? null : payload,
+          retain: opts && opts.retain === "deck" ? "deck" : !!(opts && opts.retain),
+          volatile: !!(opts && opts.volatile),
+        });
       },
       /** cb({ type, payload, from: "presenter" | "audience", sender? }) */
       onMessage: function (cb) {
@@ -161,18 +207,77 @@
         buttonListeners[id] = buttonListeners[id] || [];
         return subscribe(buttonListeners[id], cb);
       },
+      /** A contributed keybinding (contributes.keybindings) was pressed, by
+       *  its command id. Delivered like buttons: to the background surface,
+       *  or the tile when there is none. */
+      onCommand: function (id, cb) {
+        commandListeners[id] = commandListeners[id] || [];
+        return subscribe(commandListeners[id], cb);
+      },
       deck: {
         /** [{ filename, bytes: Uint8Array }] — needs the "deck" permission. */
         attachments: function () { return request("attachments"); },
         /** The PDF itself, as a Uint8Array — needs the "deck" permission. */
         bytes: function () { return request("deckBytes"); },
+        /** Each page's size in PDF points, [{ width, height }] in page order,
+         *  for turning point positions into page fractions — needs "deck". */
+        pages: function () { return request("pages"); },
         /** Presenter: replace the deck with an edited PDF (same pages), saved
          *  wherever the deck lives — needs the "editDeck" permission. */
         save: function (bytes) { return request("saveDeck", { bytes: bytes }); },
-        /** The deck was swapped (an edit, a replace, a live reload). */
+        /** The deck was swapped. cb(kind): "edit" when the same pages were
+         *  edited in place (notes saved into it), "replace" when it's a
+         *  different document (replaced, recompiled, republished). */
         onChange: function (cb) { return subscribe(deckListeners, cb); },
+        /**
+         * Transform the PDF this device downloads (bake in what this plugin
+         * shows live). handler(bytes, { mode }) resolves to the new bytes; one
+         * handler per plugin per device — the presenter's background surface
+         * (or tile) is used first. Returns a function that removes it.
+         */
+        onExport: function (handler) {
+          exporter = handler;
+          post({ type: "exporter", on: true });
+          return function () {
+            if (exporter !== handler) return;
+            exporter = null;
+            post({ type: "exporter", on: false });
+          };
+        },
+      },
+      /**
+       * Static layers: positioned images this plugin puts on slides, drawn by
+       * Presio in every view of them (thumbnails, the next-slide preview) —
+       * the still form of what a "slide" surface does live. Positions are
+       * fractions of the page. Per device, replacing the slide's previous set.
+       */
+      layers: {
+        /** items: [{ x, y, w, h, image, fit? ("cover" | "contain") }] */
+        set: function (slide, items) { post({ type: "layers", slide: slide, items: items || [] }); },
+        clear: function () { post({ type: "layers", clear: true }); },
+      },
+      /** The server's clock, shared by every device in the session (ms). */
+      clock: {
+        now: function () { return Date.now() + (ctx.clockOffset || 0); },
       },
       ui: {
+        /**
+         * "slide" surface: whether it takes pointer input. false (the
+         * default) lets everything through to the slide; true takes all of
+         * it; a list of { x, y, w, h } page fractions takes only those areas.
+         */
+        setInteractive: function (value) { post({ type: "interactive", value: value }); },
+        /**
+         * "slide" surface: the part of the page on screen, as page fractions,
+         * and the zoom it's shown at — the presenter can pinch in on their
+         * current slide. { x, y, w, h, scale }; the whole page at 1 elsewhere.
+         */
+        get view() { return ctx.view; },
+        onViewChange: function (cb) { return subscribe(viewListeners, cb); },
+        /** "slide" surface: whether a mouse is over the slide (never true for
+         *  touch), wherever the frame takes input or not. */
+        get hovered() { return !!ctx.hovered; },
+        onHover: function (cb) { return subscribe(hoverListeners, cb); },
         /** Viewer surface: show or hide this plugin's full-screen layer. */
         setVisible: function (visible) { post({ type: "visible", visible: !!visible }); },
         /** Presenter: update a contributed button — { active, label, disabled }. */
@@ -184,6 +289,26 @@
     document.open();
     document.write(d.html);
     document.close();
+    // Keys pressed while this frame has focus (after a click on one of its
+    // buttons) are the page's shortcuts all the same: replay the ones the
+    // plugin didn't handle, and that weren't typed into a field, on the page
+    // (same origin), and if the page acts on one — Space for the next slide —
+    // keep it from also pressing the focused button here. Added after the
+    // plugin's own listeners, so it can preventDefault() first.
+    window.addEventListener("keydown", function (e) {
+      var t = e.target;
+      if (e.defaultPrevented || e.isComposing) return;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      try {
+        var page = window.parent;
+        var replay = new page.KeyboardEvent("keydown", {
+          key: e.key, code: e.code, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey,
+          shiftKey: e.shiftKey, repeat: e.repeat, bubbles: true, cancelable: true,
+        });
+        page.dispatchEvent(replay);
+        if (replay.defaultPrevented) e.preventDefault();
+      } catch (err) { /* not embedded by Presio's page */ }
+    });
     post({ type: "ready" });
   }
 })();

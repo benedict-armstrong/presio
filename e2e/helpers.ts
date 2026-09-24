@@ -15,7 +15,7 @@ export type Frac = [x: number, y: number];
  * Mint a session that belongs to this test alone.
  *
  * A session carries mutable state these specs assert on — current slide,
- * annotations, timer — and Playwright runs `fullyParallel`, so a shared id
+ * drawings, timer — and Playwright runs `fullyParallel`, so a shared id
  * makes tests fail only when run together. The harness hands out a fresh one
  * per call (see server/e2eHarness.ts).
  */
@@ -77,19 +77,26 @@ export async function waitForSlide(page: Page) {
   await page.locator("canvas").first().waitFor({ timeout: 30_000 });
 }
 
+/** The drawing plugin's layer over the slide (a "slide" surface frame). */
+export const DRAWING_FRAME = '[data-testid="plugin-frame-drawing-slide"]';
+
+/** What's inside the drawing layer: its palette, its laser dot. */
+export function drawingLayer(page: Page) {
+  return page.frameLocator(DRAWING_FRAME).first();
+}
+
 /**
- * The annotation overlay is positioned and sized to the slide's *content rect*
- * — the contain-fitted page inside the letterboxed canvas — which is the same
- * box AnnotationOverlay normalizes pointer coordinates against. So its bounding
- * box converts slide fractions to viewport pixels directly, with no need to
- * re-derive the letterbox the way scripts/record-demo.mts does.
+ * The drawing layer is sized exactly to the slide's *content rect* — the
+ * contain-fitted page inside the letterboxed canvas — which is what it
+ * normalizes pointer coordinates against. So its bounding box converts slide
+ * fractions to viewport pixels directly.
  */
 export async function slideBox(page: Page) {
-  const overlay = page.getByTestId("annotation-overlay").first();
-  await overlay.waitFor({ timeout: 30_000 });
-  const box = await overlay.boundingBox();
+  const layer = page.locator(DRAWING_FRAME).first();
+  await layer.waitFor({ timeout: 30_000 });
+  const box = await layer.boundingBox();
   if (!box || box.width <= 0 || box.height <= 0) {
-    throw new Error("annotation overlay has no layout box");
+    throw new Error("drawing layer has no layout box");
   }
   return {
     at: ([fx, fy]: Frac) => ({ x: box.x + box.width * fx, y: box.y + box.height * fy }),
@@ -98,31 +105,29 @@ export async function slideBox(page: Page) {
 }
 
 /**
- * Pick a tool from the palette.
+ * Pick a tool from the palette (drawn by the drawing plugin, in its frame).
  *
  * With a tool active and the pointer away, the palette collapses to just the
  * active tool, so the others have to be revealed before they can be clicked.
  */
 export async function pickTool(controller: Page, key: "none" | "laser" | "pen" | "highlighter") {
-  const btn = controller.getByTestId(`tool-${key}`);
+  const layer = drawingLayer(controller);
+  const btn = layer.getByTestId(`tool-${key}`);
   if (!(await btn.isVisible().catch(() => false))) {
-    await controller.getByTestId("tool-collapsed").click();
+    await layer.getByTestId("tool-collapsed").click();
     await btn.waitFor({ timeout: 5_000 });
   }
   await btn.click();
   // The palette may re-collapse around the new active tool, so assert on
   // whichever button is showing rather than on `btn` specifically.
   await expect(
-    controller.getByTestId(`tool-${key}`).or(controller.getByTestId("tool-collapsed"))
+    layer.getByTestId(`tool-${key}`).or(layer.getByTestId("tool-collapsed"))
   ).toHaveAttribute("aria-pressed", "true");
 }
 
 /**
  * Move the pointer along a path across the slide, optionally with the button
  * held (a stroke) rather than just hovering (a laser sweep).
- *
- * Steps between points matter: the overlay drops moves closer than
- * MIN_POINT_DISTANCE, so a two-point jump can land as a single sample.
  */
 export async function trace(controller: Page, points: Frac[], draw: boolean) {
   const { at } = await slideBox(controller);
@@ -138,8 +143,8 @@ export async function trace(controller: Page, points: Frac[], draw: boolean) {
 
 /**
  * Park the pointer above the slide. A laser dot only clears when the pointer
- * actually leaves the content rect (AnnotationOverlay's onPointerLeave), so
- * without this the dot sits frozen where the sweep ended.
+ * actually leaves the slide, so without this the dot sits frozen where the
+ * sweep ended.
  */
 export async function leaveSlide(controller: Page) {
   const { box } = await slideBox(controller);
@@ -147,24 +152,25 @@ export async function leaveSlide(controller: Page) {
 }
 
 /**
- * Count pixels the annotation canvas has actually painted.
+ * Count pixels the drawing layer's canvases have actually painted.
  *
- * Strokes are drawn to a canvas, so there is no DOM node to assert on — the
+ * Strokes are drawn to canvases, so there is no DOM node to assert on — the
  * only honest check that a stroke arrived is that ink exists. Returns the
  * number of non-transparent pixels.
  */
 export async function inkPixels(page: Page): Promise<number> {
   return page
-    .getByTestId("annotation-overlay")
+    .locator(DRAWING_FRAME)
     .first()
-    .locator("canvas")
-    .evaluate((el) => {
-      const c = el as HTMLCanvasElement;
-      const ctx = c.getContext("2d");
-      if (!ctx || c.width === 0 || c.height === 0) return 0;
-      const { data } = ctx.getImageData(0, 0, c.width, c.height);
+    .evaluate((frame) => {
+      const doc = (frame as HTMLIFrameElement).contentDocument;
       let n = 0;
-      for (let i = 3; i < data.length; i += 4) if (data[i] > 0) n++;
+      for (const c of doc?.querySelectorAll("canvas") ?? []) {
+        const ctx = c.getContext("2d");
+        if (!ctx || c.width === 0 || c.height === 0) continue;
+        const { data } = ctx.getImageData(0, 0, c.width, c.height);
+        for (let i = 3; i < data.length; i += 4) if (data[i] > 0) n++;
+      }
       return n;
     });
 }

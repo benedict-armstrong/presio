@@ -4,26 +4,29 @@ import { safeEqual } from "./auth.js";
 import {
   isValidSlideNumber,
   isValidTotalSlides,
-  sanitizeLaserPoint,
-  sanitizeStroke,
-  sanitizeAnnotations,
+  jsonSize,
   sanitizePluginEvent,
   sanitizePluginBundle,
   sanitizePluginSettings,
-  MAX_STROKES_PER_SLIDE,
   MAX_PLUGINS_PER_SESSION,
   MAX_RETAINED_PER_PLUGIN,
+  MAX_RETAINED_BYTES_PER_PLUGIN,
   PLUGIN_ID_RE,
-  type AnnotationsBySlide,
   type PluginBundle,
+  type Retain,
 } from "./validation.js";
 
 // A presenter plugin message kept for viewers who join later (the plugin's
-// current "state of the world": which poll is open, whether the join code is up).
+// current "state of the world": which poll is open, whether the join code is
+// up, what's drawn on each slide).
 interface RetainedPluginEvent {
   plugin: string;
   type: string;
   payload: unknown;
+  /** true for the session, "deck" until the deck is replaced. */
+  retain: Exclude<Retain, false>;
+  /** The payload's size as JSON, for the per-plugin budget. */
+  size: number;
 }
 
 export interface SocketState {
@@ -33,9 +36,6 @@ export interface SocketState {
   blankedSessions: Set<string>;
   // Sessions currently showing the join code / QR on all viewers (transient).
   codeSessions: Set<string>;
-  // Committed drawings per session (in-memory; the controller re-seeds them
-  // after a server restart from its own persisted copy).
-  annotations: Map<string, AnnotationsBySlide>;
   // Plugin bundles the controller published for viewers to run, per session.
   pluginBundles: Map<string, Map<string, PluginBundle>>;
   // Retained presenter plugin messages per session, keyed plugin + type.
@@ -49,7 +49,6 @@ export function createSocketState(): SocketState {
     controllers: new Map(),
     blankedSessions: new Set(),
     codeSessions: new Set(),
-    annotations: new Map(),
     pluginBundles: new Map(),
     pluginRetained: new Map(),
     pluginSettings: new Map(),
@@ -61,10 +60,20 @@ export function clearSessionState(state: SocketState, sessionId: string) {
   state.controllers.delete(sessionId);
   state.blankedSessions.delete(sessionId);
   state.codeSessions.delete(sessionId);
-  state.annotations.delete(sessionId);
   state.pluginBundles.delete(sessionId);
   state.pluginRetained.delete(sessionId);
   state.pluginSettings.delete(sessionId);
+}
+
+// The session's deck was replaced: forget what plugins retained for the old
+// one (retain: "deck" — e.g. drawings, keyed by slide number). The presenter's
+// page does the same when it swaps the deck in.
+export function forgetDeckRetained(state: SocketState, sessionId: string) {
+  const retained = state.pluginRetained.get(sessionId);
+  if (!retained) return;
+  for (const [key, event] of retained) {
+    if (event.retain === "deck") retained.delete(key);
+  }
 }
 
 // Shape of a join code, used as a free pre-filter before touching the DB.
@@ -78,9 +87,10 @@ const SESSION_ID_RE = /^[A-Z0-9]{6}$/;
 // Only join_session is throttled, and deliberately so. Every other event is
 // wrapped in controllerOnly(), meaning the socket already proved the controller
 // token to reach it — and those are exactly the events that are legitimately
-// high-frequency: slide_change, laser_move (pointer-rate), stroke_progress,
-// media_time. Presenting a long deck, or scrubbing back and forth through
-// hundreds of slides, must never be rate limited, so it isn't.
+// high-frequency: slide_change and the presenter's plugin_event (a drawing's
+// strokes and laser at pointer rate, the media plugin's time sync). Presenting
+// a long deck, or scrubbing back and forth through hundreds of slides, must
+// never be rate limited, so it isn't.
 //
 // join_session is the exception because it is unauthenticated, queries the DB
 // on every call, and its reply reveals whether a 6-character code exists —
@@ -133,7 +143,7 @@ export function registerSocketHandlers(
   supabase: SupabaseClient,
   state: SocketState
 ) {
-  const { controllers, blankedSessions, codeSessions, annotations, pluginBundles, pluginRetained, pluginSettings } = state;
+  const { controllers, blankedSessions, codeSessions, pluginBundles, pluginRetained, pluginSettings } = state;
 
   // What a joining (or re-joining) socket needs to mount the session's
   // plugins: which bundles exist (by hash, fetched separately so the
@@ -142,16 +152,42 @@ export function registerSocketHandlers(
   const pluginsState = (sessionId: string) => ({
     plugins: [...(pluginBundles.get(sessionId)?.values() ?? [])].map(({ manifest, hash }) => ({ manifest, hash })),
     settings: Object.fromEntries(pluginSettings.get(sessionId) ?? []),
-    retained: [...(pluginRetained.get(sessionId)?.values() ?? [])],
+    retained: [...(pluginRetained.get(sessionId)?.values() ?? [])].map(({ plugin, type, payload, retain }) => ({ plugin, type, payload, retain })),
   });
 
   // Tail of each session's in-flight current_slide write, so overlapping
   // updates land in emit order (see slide_change).
   const pendingSlideWrites = new Map<string, Promise<void>>();
 
+  // Keep (or, for a null payload, forget) a presenter's retained message,
+  // within its plugin's budget: MAX_RETAINED_PER_PLUGIN types, and
+  // MAX_RETAINED_BYTES_PER_PLUGIN of payload. Over budget it's still relayed
+  // live, just not kept for late joiners.
+  const retain = (sessionId: string, event: RetainedPluginEvent) => {
+    const retained = pluginRetained.get(sessionId) ?? new Map<string, RetainedPluginEvent>();
+    const key = `${event.plugin}\u0000${event.type}`;
+    if (event.payload === null) {
+      retained.delete(key);
+      return;
+    }
+    const plugins = new Set<string>();
+    let count = 0;
+    let bytes = 0;
+    for (const [k, e] of retained) {
+      plugins.add(e.plugin);
+      if (e.plugin !== event.plugin || k === key) continue;
+      count++;
+      bytes += e.size;
+    }
+    if (!plugins.has(event.plugin) && plugins.size >= MAX_PLUGINS_PER_SESSION) return;
+    if (count >= MAX_RETAINED_PER_PLUGIN || bytes + event.size > MAX_RETAINED_BYTES_PER_PLUGIN) return;
+    retained.set(key, event);
+    pluginRetained.set(sessionId, retained);
+  };
+
   // Wrap an event handler so it only runs for the session's registered
   // controller, passing the resolved sessionId through. Mutating events
-  // (slide/blank/media) all share this guard.
+  // (slide/blank/sync) all share this guard.
   const controllerOnly = <A extends unknown[]>(
     socket: Socket,
     handler: (sessionId: string, ...args: A) => void
@@ -211,7 +247,6 @@ export function registerSocketHandlers(
         currentSlide: data.current_slide,
         totalSlides: data.total_slides,
         role: grantedRole,
-        annotations: annotations.get(sessionId) ?? {},
       });
       socket.emit("plugins_state", pluginsState(sessionId));
     });
@@ -278,78 +313,6 @@ export function registerSocketHandlers(
       io.to(sessionId).emit("code_update", { showCode: codeSessions.has(sessionId) });
     }));
 
-    // Laser pointer stream: relay to everyone else in the room. Transient and
-    // high-frequency, so nothing is persisted.
-    socket.on("laser_move", controllerOnly(socket, (sessionId, payload: unknown) => {
-      const pt = sanitizeLaserPoint(payload);
-      if (pt === undefined) return;
-      socket.to(sessionId).emit("laser_update", pt);
-    }));
-
-    // --- Drawing annotations ---
-
-    // In-progress stroke preview: relay-only, nothing persisted.
-    socket.on("stroke_progress", controllerOnly(socket, (sessionId, payload: { slide?: unknown; stroke?: unknown }) => {
-      if (!isValidSlideNumber(payload?.slide, socket.data.totalSlides)) return;
-      if (payload.stroke === null) {
-        socket.to(sessionId).emit("stroke_progress", { slide: payload.slide, stroke: null });
-        return;
-      }
-      const stroke = sanitizeStroke(payload.stroke);
-      if (!stroke) return;
-      socket.to(sessionId).emit("stroke_progress", { slide: payload.slide, stroke });
-    }));
-
-    socket.on("stroke_commit", controllerOnly(socket, (sessionId, payload: { slide?: unknown; stroke?: unknown }) => {
-      const slide = payload?.slide as number;
-      if (!isValidSlideNumber(slide, socket.data.totalSlides)) return;
-      const stroke = sanitizeStroke(payload.stroke);
-      if (!stroke) return;
-      const bySlide = annotations.get(sessionId) ?? {};
-      const existing = bySlide[slide] ?? [];
-      if (existing.length >= MAX_STROKES_PER_SLIDE) return;
-      bySlide[slide] = [...existing, stroke];
-      annotations.set(sessionId, bySlide);
-      socket.to(sessionId).emit("stroke_commit", { slide, stroke });
-    }));
-
-    socket.on("stroke_undo", controllerOnly(socket, (sessionId, payload: { slide?: unknown }) => {
-      const slide = payload?.slide as number;
-      if (!isValidSlideNumber(slide, socket.data.totalSlides)) return;
-      const bySlide = annotations.get(sessionId);
-      if (bySlide?.[slide]?.length) bySlide[slide] = bySlide[slide].slice(0, -1);
-      socket.to(sessionId).emit("stroke_undo", { slide });
-    }));
-
-    socket.on("annotations_clear", controllerOnly(socket, (sessionId, payload: { slide?: unknown }) => {
-      const slide = payload?.slide as number;
-      if (!isValidSlideNumber(slide, socket.data.totalSlides)) return;
-      const bySlide = annotations.get(sessionId);
-      if (bySlide) delete bySlide[slide];
-      socket.to(sessionId).emit("annotations_clear", { slide });
-    }));
-
-    // Full replace: the controller reseeding after a server restart, or the
-    // presenter loading a saved drawing file.
-    socket.on("annotations_sync", controllerOnly(socket, (sessionId, payload: unknown) => {
-      const bySlide = sanitizeAnnotations(payload, socket.data.totalSlides);
-      if (!bySlide) return;
-      annotations.set(sessionId, bySlide);
-      socket.to(sessionId).emit("annotations_state", bySlide);
-    }));
-
-    socket.on("media_control", controllerOnly(socket, (sessionId, payload: { id: string; action: "play" | "pause" | "reset" }) => {
-      io.to(sessionId).emit("media_update", { ...payload, seq: Date.now() });
-    }));
-
-    socket.on("audio_change", controllerOnly(socket, (sessionId, payload: { muted: boolean; target: "controller" | "both" | "viewers" }) => {
-      io.to(sessionId).emit("audio_update", { ...payload, seq: Date.now() });
-    }));
-
-    socket.on("media_time", controllerOnly(socket, (sessionId, payload: { id: string; t: number; playing: boolean; sampledAt: number }) => {
-      socket.to(sessionId).emit("media_time_update", { ...payload, seq: Date.now() });
-    }));
-
     // --- Plugins ---
 
     // The controller publishes the plugins that have to run on viewers,
@@ -399,21 +362,11 @@ export function registerSocketHandlers(
       const { plugin, type, payload } = event;
 
       if (controllers.get(sessionId) === socket.id) {
-        if (event.retain) {
-          const retained = pluginRetained.get(sessionId) ?? new Map<string, RetainedPluginEvent>();
-          const key = `${plugin}\u0000${type}`;
-          const plugins = new Set([...retained.values()].map((e) => e.plugin));
-          const perPlugin = [...retained.values()].filter((e) => e.plugin === plugin).length;
-          const fits = retained.has(key) || (
-            (plugins.has(plugin) || plugins.size < MAX_PLUGINS_PER_SESSION) &&
-            perPlugin < MAX_RETAINED_PER_PLUGIN
-          );
-          if (fits) {
-            retained.set(key, { plugin, type, payload });
-            pluginRetained.set(sessionId, retained);
-          }
-        }
-        socket.to(sessionId).emit("plugin_event", { plugin, type, payload, from: "presenter" });
+        if (event.retain) retain(sessionId, { plugin, type, payload, retain: event.retain, size: jsonSize(payload) });
+        // Volatile ones (a laser position) may be dropped for a viewer whose
+        // connection is backed up, rather than queued behind newer ones.
+        const room = event.volatile ? socket.to(sessionId).volatile : socket.to(sessionId);
+        room.emit("plugin_event", { plugin, type, payload, from: "presenter" });
         return;
       }
 

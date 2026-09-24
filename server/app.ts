@@ -8,7 +8,7 @@ import { fileURLToPath } from "url";
 import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAllowedOrigins, buildCspDirectives, PLUGIN_FRAME_CSP } from "./security.js";
-import { canonicalBaseUrl } from "./lib/baseUrl.js";
+import { canonicalBaseUrl, originPair } from "./lib/baseUrl.js";
 import { localBlobsDir } from "./local/paths.js";
 import { isLocalMode } from "./local/mode.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
@@ -60,23 +60,23 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
           callback(null, false);
         };
 
-  // Helmet for sensible security headers. The CSP allows the YouTube/Vimeo embed
-  // SDKs and their iframes, the Supabase API/storage, and websocket connections.
+  // Helmet for sensible security headers. The CSP allows the Supabase
+  // API/storage and websocket connections (plugins get their own, below).
   app.use(
     helmet({
       contentSecurityPolicy: { directives: buildCspDirectives() },
       crossOriginEmbedderPolicy: false,
-      // YouTube (esp. the JS API / nocookie player) validates the embedding
-      // origin via the Referer header. Helmet's default `no-referrer` strips it,
+      // YouTube (esp. the JS API / nocookie player, in the media plugin's
+      // frame) validates the embedding origin via the Referer header. Helmet's default `no-referrer` strips it,
       // which triggers YouTube playback error 153. Send the origin cross-site.
       referrerPolicy: { policy: "strict-origin-when-cross-origin" },
     })
   );
   app.use(cors({ origin: corsOrigin }));
 
-  // The plugin sandbox page swaps the app's policy for its own no-network one
-  // (see PLUGIN_FRAME_CSP). Set after helmet so it replaces, not joins, the
-  // app policy — two policies would intersect and block the inline scripts.
+  // The plugin frame swaps the app's policy for its own permissive one (see
+  // PLUGIN_FRAME_CSP). Set after helmet so it replaces, not joins, the app
+  // policy — two policies would intersect and block the inline scripts.
   app.use("/plugin-frame.html", (_req, res, next) => {
     res.setHeader("Content-Security-Policy", PLUGIN_FRAME_CSP);
     next();
@@ -203,6 +203,13 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
       (c) => ({ "<": "%3C", ">": "%3E", '"': "%22", "&": "&amp;" })[c] as string
     );
     let tags = `<link rel="canonical" href="${url}" />\n  <meta property="og:url" content="${url}" />`;
+    // Which origin serves the app and which the audience (lib/origins.ts on
+    // the client). Viewer pages are the audience's, not content to index.
+    const origins = originPair(req);
+    const attr = (v: string) => v.replace(/[<>"&]/g, "");
+    tags += `\n  <meta name="presio-app-origin" content="${attr(origins.app)}" />`;
+    if (origins.viewer) tags += `\n  <meta name="presio-viewer-origin" content="${attr(origins.viewer)}" />`;
+    if (origins.onViewer) res.setHeader("X-Robots-Tag", "noindex");
     const mirror = MD_MIRRORS[req.path];
     if (mirror) tags += `\n  <link rel="alternate" type="text/markdown" href="${base}${mirror}" />`;
     res.setHeader("Content-Type", "text/html; charset=utf-8");

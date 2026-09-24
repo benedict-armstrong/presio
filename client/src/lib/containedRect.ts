@@ -8,7 +8,7 @@ export interface Rect {
 export const EMPTY_RECT: Rect = { left: 0, top: 0, width: 0, height: 0 };
 
 // Where an `object-fit: contain` child actually lands inside its box. Overlays
-// (media players, media posters) position themselves in page fractions, so they
+// (links, plugins' slide layers) position themselves in page fractions, so they
 // need the letterboxed content rect rather than the container's own box —
 // anywhere the container's aspect ratio can differ from the page's.
 export function containedRect(

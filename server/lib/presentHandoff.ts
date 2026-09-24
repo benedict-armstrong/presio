@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import { openPdf, closePdf } from "./pdfDoc.js";
 import { isValidTotalSlides, MAX_TOTAL_SLIDES } from "../validation.js";
 import { safeEqual } from "../auth.js";
-import type { SocketState } from "../socket.js";
+import { forgetDeckRetained, type SocketState } from "../socket.js";
 import { generatePassphrase, insertSession, ownedExpiry } from "./sessionRows.js";
 
 export const PRESENT_NEXT =
@@ -194,7 +194,7 @@ export async function updatePresentDeck(
   }
 
   // Everyone in the room reloads the new bytes live, as with any other replacement.
-  opts.socketState?.annotations.delete(String(row.id));
+  if (opts.socketState) forgetDeckRetained(opts.socketState, String(row.id));
   opts.io?.to(row.id).emit("deck_updated", { filename, totalSlides });
 
   return {

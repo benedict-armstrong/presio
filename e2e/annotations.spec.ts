@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
+  drawingLayer,
   inkPixels,
   leaveSlide,
   newSession,
@@ -17,6 +18,8 @@ import {
 // audience can't see is a no-op. These drive the real palette and the real
 // pointer, then assert on what the viewer actually renders.
 //
+// Both live in the built-in drawing plugin, in its layer over the slide.
+//
 // Paths stay in the lower/middle of the slide. The tool palette parks itself at
 // the slide's top-left and the pen's colour popover opens over the same corner,
 // so a stroke aimed up there lands on the popover instead of the canvas —
@@ -33,8 +36,8 @@ test("the laser dot reaches the viewer and clears when the pointer leaves", asyn
   await waitForSlide(controller);
   await waitForSlide(viewer);
 
-  const viewerDot = viewer.getByTestId("laser-dot");
-  await expect(viewerDot).toHaveCount(0);
+  const viewerDot = drawingLayer(viewer).getByTestId("laser-dot");
+  await expect(viewerDot).toBeHidden();
 
   await pickTool(controller, "laser");
   const sweep: Frac[] = [
@@ -46,13 +49,15 @@ test("the laser dot reaches the viewer and clears when the pointer leaves", asyn
   await trace(controller, sweep, false);
 
   // The controller sees its own dot, and the viewer sees the relayed one.
-  await expect(controller.getByTestId("laser-dot")).toHaveAttribute("data-laser", "local");
-  await expect(viewerDot).toHaveAttribute("data-laser", "remote");
+  await expect(drawingLayer(controller).getByTestId("laser-dot")).toBeVisible();
+  await expect(viewerDot).toBeVisible();
 
   // It must land where it was pointed, not at the origin. The sweep ends near
   // x = 0.72 of the slide's content rect, which is where the viewer's dot
   // should sit too (the two windows are different sizes, so compare fractions).
   const { box: viewerBox } = await slideBox(viewer);
+  // The dot glides to each new position; let it arrive.
+  await viewer.waitForTimeout(200);
   const dotBox = await viewerDot.boundingBox();
   const dotFracX = ((dotBox?.x ?? 0) + (dotBox?.width ?? 0) / 2 - viewerBox.x) / viewerBox.width;
   expect(dotFracX).toBeGreaterThan(0.6);
@@ -61,7 +66,7 @@ test("the laser dot reaches the viewer and clears when the pointer leaves", asyn
   // Leaving the slide sends an explicit null, so the audience's dot goes out
   // with the gesture rather than lingering until the 3s fallback timer.
   await leaveSlide(controller);
-  await expect(viewerDot).toHaveCount(0);
+  await expect(viewerDot).toBeHidden();
 
   await ctx.close();
 });
@@ -97,7 +102,7 @@ test("a pen stroke is drawn on the viewer and survives leaving and returning to 
   await expect.poll(() => inkPixels(viewer)).toBeGreaterThan(0);
 
   // The stroke was committed, not just previewed: leaving the slide and coming
-  // back re-renders it from the session's stored annotations rather than from
+  // back re-renders it from the session's retained drawing rather than from
   // the in-flight draft.
   await controller.keyboard.press("ArrowRight");
   await expect(viewer.getByTestId("viewer-slide")).toHaveAttribute("data-slide", "2");

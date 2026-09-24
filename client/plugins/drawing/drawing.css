@@ -1,0 +1,44 @@
+html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+body { font: 13px/1.2 system-ui, -apple-system, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+body.drawing { cursor: crosshair; }
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+/* The stroke being drawn: its opacity applies to the layer as a whole. */
+.live { position: absolute; inset: 0; pointer-events: none; }
+
+.laser { position: absolute; left: 0; top: 0; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 10px 3px rgba(239,68,68,.65), 0 0 0 2px rgba(255,255,255,.6); pointer-events: none; will-change: transform; }
+.laser[hidden] { display: none; }
+
+/* The presenter's palette, in Presio's own colors (presio.theme). */
+:root.light { --bg: rgba(255,255,255,.85); --fg: #0a0a0a; --muted: #71717a; --border: #e4e4e7; --hover: #f4f4f5; --accent: #18181b; --on-accent: #fafafa; --ring: #a1a1aa; }
+:root.dark { --bg: rgba(9,9,11,.85); --fg: #fafafa; --muted: #a1a1aa; --border: #27272a; --hover: #27272a; --accent: #fafafa; --on-accent: #18181b; --ring: #71717a; }
+.palette { position: absolute; left: 0; top: 0; display: flex; align-items: flex-start; gap: 4px; transform-origin: 0 0; transition: opacity .15s; color: var(--fg); }
+.palette.horizontal { flex-direction: column; }
+/* Faded, but still live: the mouse can only reach it by coming back over the
+   slide, which un-fades it on the way in. Leaving fades gently — a palette
+   that vanished the instant the mouse crossed the edge would read as a
+   glitch — while coming back is immediate. */
+.palette.dimmed { opacity: 0; transition: opacity .7s ease-out; }
+.panel { display: flex; flex-direction: column; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.palette.horizontal > .tools { flex-direction: row; align-items: center; }
+.grip { display: flex; align-items: center; justify-content: center; height: 16px; margin-bottom: -2px; color: var(--muted); cursor: grab; touch-action: none; }
+.grip:active { cursor: grabbing; }
+.palette.horizontal .grip { width: 16px; height: auto; align-self: stretch; margin: 0 -2px 0 0; }
+.grip svg { width: 12px; height: 12px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
+.btn:hover { background: var(--hover); color: var(--fg); }
+.btn.on { background: var(--accent); color: var(--on-accent); }
+.btn:disabled { opacity: .4; pointer-events: none; }
+.btn svg { width: 15px; height: 15px; pointer-events: none; }
+.options { padding: 6px; gap: 6px; }
+.colors { display: grid; grid-template-columns: repeat(3, 20px); gap: 4px; }
+.color { width: 20px; height: 20px; padding: 0; border: 1px solid rgba(0,0,0,.1); border-radius: 50%; cursor: pointer; transition: transform .15s; }
+.color.on { transform: scale(1.1); box-shadow: 0 0 0 2px var(--ring); }
+.sizes { display: flex; align-items: center; justify-content: space-between; gap: 2px; }
+.size { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; cursor: pointer; }
+.size:hover { background: var(--hover); }
+.size.on { background: var(--hover); box-shadow: 0 0 0 1px var(--ring); }
+.size > span { border-radius: 50%; background: var(--fg); }
+.actions { display: flex; align-items: center; gap: 2px; padding-top: 4px; border-top: 1px solid var(--border); }
+.actions .btn { width: 26px; height: 26px; }
+.actions .btn svg { width: 14px; height: 14px; }
+.hidden-input { display: none; }

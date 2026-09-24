@@ -7,7 +7,7 @@ import { openPdf, closePdf } from "../lib/pdfDoc.js";
 import { isValidHttpsUrl, isValidTotalSlides, MAX_TOTAL_SLIDES } from "../validation.js";
 import { getBearerToken, requireUser, resolveOptionalUserId, safeEqual } from "../auth.js";
 import { isLocalMode } from "../local/mode.js";
-import { clearSessionState, type SocketState } from "../socket.js";
+import { clearSessionState, forgetDeckRetained, type SocketState } from "../socket.js";
 import { baseUrl } from "../lib/baseUrl.js";
 import { fetchRemotePdfMeta } from "../lib/remotePdf.js";
 import { createPresentHandoff, handoffTokenFrom, updatePresentDeck } from "../lib/presentHandoff.js";
@@ -672,8 +672,9 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   //     written by the client. No filename field → nothing announced.
   //   - A deck replacement sends `filename`. The row's filename/slide count
   //     follow the new document, the current slide is clamped into range,
-  //     drawings are dropped (they are keyed by slide number), and everyone
-  //     in the room gets `deck_updated` so they reload the new bytes live.
+  //     what plugins retained for the old deck is dropped (drawings, keyed by
+  //     slide number), and everyone in the room gets `deck_updated` so they
+  //     reload the new bytes live.
   app.post("/api/sessions/:id/pdf", uploadField("pdf"), async (req, res) => {
     try {
       // Authorized either by the controller token — the same model as ending a
@@ -751,7 +752,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       // A real replacement announces itself; a notes re-save (no filename)
       // stays silent so viewers aren't forced to re-download identical slides.
       if (newFilename) {
-        socketState?.annotations.delete(String(req.params.id));
+        if (socketState) forgetDeckRetained(socketState, String(req.params.id));
         io.to(req.params.id).emit("deck_updated", { filename: newFilename, totalSlides });
       }
 
@@ -818,16 +819,17 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   // source and the presenter accepted the new version. Unlike /pdf there are
   // no bytes to store — pdf_url decks keep no server copy — so this only
   // records the new page count, clamps the current slide into range, drops
-  // the stored drawings (keyed by slide number) and announces the swap to the
-  // room; every client re-fetches the URL itself. The filename is unchanged:
-  // a republish replaces the content, not the presentation's title.
+  // what plugins retained for the old deck (drawings, keyed by slide number)
+  // and announces the swap to the room; every client re-fetches the URL
+  // itself. The filename is unchanged: a republish replaces the content, not
+  // the presentation's title.
   //
   // Unlike /pdf, the page count is asserted by the client rather than parsed
   // here — there are no bytes on this side to count. That is safe because only
   // the controller can call this, and because isValidTotalSlides bounds the
-  // value: total_slides scales the per-session annotation caps and gates slide
-  // numbers, so an unbounded one would be a memory lever, but a wrong-but-bounded
-  // one only mis-clamps the presenter's own deck until the next real update.
+  // value: total_slides gates slide numbers, so an unbounded one would be a
+  // lever, but a wrong-but-bounded one only mis-clamps the presenter's own deck
+  // until the next real update.
   app.post("/api/sessions/:id/deck-refreshed", async (req, res) => {
     try {
       const user = isLocalMode ? null : await resolveOptionalUserId(supabase, req);
@@ -870,7 +872,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         return;
       }
 
-      socketState?.annotations.delete(String(req.params.id));
+      if (socketState) forgetDeckRetained(socketState, String(req.params.id));
       io.to(req.params.id).emit("deck_updated", { filename: row.filename, totalSlides });
 
       res.json({ ok: true, totalSlides, filename: row.filename });

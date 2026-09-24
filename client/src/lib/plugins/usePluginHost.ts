@@ -12,9 +12,10 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { socket } from "@/lib/socket";
 import { readAttachments, type PdfAttachment } from "@/lib/pdf";
 import { useJoinUrl } from "@/lib/joinUrl";
-import { PluginHost, type PluginContext, type WireEvent } from "./host";
+import { PluginHost, type PageSize, type PluginContext, type WireEvent } from "./host";
 import { isActivatedBy, type LoadedPlugin, type PluginManifest } from "./manifest";
 import { loadPlugin, usePluginEntries } from "./registry";
+import { clockOffset, onClockSample } from "@/lib/clock";
 import { resolvePluginSettings, useSettingsDocument } from "@/lib/settings";
 
 interface PublishedPlugin {
@@ -32,6 +33,11 @@ interface PluginsState {
 interface SettingsUpdate {
   plugin: string;
   settings: Record<string, unknown>;
+}
+
+/** Plugins that run on audience devices, which the presenter publishes. */
+function runsOnViewers(manifest: Pick<PluginManifest, "surfaces">): boolean {
+  return manifest.surfaces.includes("viewer") || manifest.surfaces.includes("slide");
 }
 
 function useTheme(): "light" | "dark" {
@@ -59,6 +65,24 @@ function useAttachmentReader(pdf: PDFDocumentProxy | null) {
 /** The deck's PDF bytes, for plugins that read the file themselves. */
 function useBytesReader(pdf: PDFDocumentProxy | null) {
   return useMemo(() => async () => (pdf ? pdf.getData() : null), [pdf]);
+}
+
+/** Each page's size in PDF points, read once per document. */
+function usePagesReader(pdf: PDFDocumentProxy | null) {
+  return useMemo(() => {
+    let cached: Promise<PageSize[]> | null = null;
+    return () => {
+      if (!pdf) return Promise.resolve([]);
+      return (cached ??= (async () => {
+        const sizes: PageSize[] = [];
+        for (let n = 1; n <= pdf.numPages; n++) {
+          const [x1, y1, x2, y2] = (await pdf.getPage(n)).view;
+          sizes.push({ width: x2 - x1, height: y2 - y1 });
+        }
+        return sizes;
+      })());
+    };
+  }, [pdf]);
 }
 
 /** Enabled plugins from this browser's registry that the deck activates. */
@@ -141,7 +165,8 @@ export function usePluginHost({
 
   const readAll = useAttachmentReader(pdf);
   const readBytes = useBytesReader(pdf);
-  useEffect(() => host.setDeckSource(readAll, readBytes), [host, readAll, readBytes]);
+  const readPages = usePagesReader(pdf);
+  useEffect(() => host.setDeckSource(readAll, readBytes, readPages), [host, readAll, readBytes, readPages]);
 
   // Server viewers get their plugin list from the session; everyone else
   // (the presenter, and a local deck's viewer window) from this browser.
@@ -151,6 +176,14 @@ export function usePluginHost({
   const plugins = fromSession ? sessionPlugins : localActive.plugins;
   const pluginsRef = useRef(plugins);
   useEffect(() => { pluginsRef.current = plugins; });
+
+  // Static layers belong to running plugins only, and downloads pass through
+  // them in this order.
+  const runningIds = plugins.map((p) => p.manifest.id).join(",");
+  useEffect(() => host.setRunning(runningIds ? runningIds.split(",") : []), [host, runningIds]);
+
+  // Plugins keep their own copy of the server clock (presio.clock).
+  useEffect(() => onClockSample(() => host.setClockOffset(clockOffset())), [host]);
 
   // --- Local deck: BroadcastChannel between this browser's windows ---
   useEffect(() => {
@@ -193,11 +226,13 @@ export function usePluginHost({
   const publishRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (local !== false) return;
-    host.setOutbound((event) => socket.emit("plugin_event", event));
+    // A volatile message (a laser position) is dropped rather than queued
+    // while the socket can't take it: a late one is worse than none.
+    host.setOutbound((event) => (event.volatile ? socket.volatile : socket).emit("plugin_event", event));
 
     const publish = () => {
       const bundles = pluginsRef.current
-        .filter((p) => p.manifest.surfaces.includes("viewer"))
+        .filter((p) => runsOnViewers(p.manifest))
         .map(({ manifest, html }) => ({ manifest, html }));
       socket.emit("plugins_publish", { bundles });
     };
@@ -212,7 +247,7 @@ export function usePluginHost({
         // The server's copy can lag ours (it restarted, or we changed plugins
         // before joining): republish, and re-seed retained state it lost.
         const server = new Map(state.plugins.map((p) => [p.manifest.id, p.hash]));
-        const ours = pluginsRef.current.filter((p) => p.manifest.surfaces.includes("viewer"));
+        const ours = pluginsRef.current.filter((p) => runsOnViewers(p.manifest));
         const stale = ours.length !== server.size || ours.some((p) => server.get(p.manifest.id) !== p.hash);
         if (stale) publish();
         // Retained state is merged both ways: ours goes up where the server
@@ -256,7 +291,7 @@ export function usePluginHost({
             ...manifest,
             main: "index.html",
             activation: ["always"],
-            contributes: { buttons: [], settings: {} },
+            contributes: { buttons: [], keybindings: [], settings: {} },
           } as LoadedPlugin["manifest"],
           html: bundle.html,
           hash: bundle.hash,
@@ -286,7 +321,7 @@ export function usePluginHost({
   // kept across a controller reload; the join's plugins_state reply covers
   // the first publish.
   const publishKey = plugins
-    .filter((p) => p.manifest.surfaces.includes("viewer"))
+    .filter((p) => runsOnViewers(p.manifest))
     .map((p) => `${p.manifest.id}:${p.hash}`)
     .join(",");
   const publishedOnceRef = useRef(false);

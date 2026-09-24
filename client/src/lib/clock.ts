@@ -12,6 +12,7 @@ let offsetMs = 0;
 let rttMs = 0;
 let initialised = false;
 let started = false;
+const listeners = new Set<() => void>();
 
 const PING_INTERVAL = 30_000;
 const INITIAL_BURST = 4;
@@ -76,11 +77,18 @@ function ping() {
       offsetMs = next.offsetMs;
       rttMs = next.rttMs;
       initialised = true;
+      listeners.forEach((l) => l());
     }
   );
 }
 
-/** Server-time approximation in milliseconds. */
-export function serverNow(): number {
-  return Date.now() + offsetMs;
+/** The server's clock minus this one's (ms), for plugins' presio.clock. */
+export function clockOffset(): number {
+  return offsetMs;
+}
+
+/** Called after every clock sample, i.e. whenever clockOffset() may move. */
+export function onClockSample(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
 }

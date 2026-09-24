@@ -721,6 +721,10 @@ services:
       # two domains don't present as duplicate content. Defaults to the single
       # app domain, which is the single-domain behaviour as before.
       PUBLIC_BASE_URLS: ${PUBLIC_BASE_URLS:-https://${APP_HOST}}
+      # Where audiences watch, paired in order with PUBLIC_BASE_URLS (see
+      # VIEWER_HOST in deploy/.env.example). Unset = viewers stay on the app
+      # hosts. Their origins must also be in ALLOWED_ORIGIN.
+      VIEWER_BASE_URLS: ${VIEWER_HOST:+https://${VIEWER_HOST}}${VIEWER_HOST_ALT:+,https://${VIEWER_HOST_ALT}}
       ANALYTICS_URL: ${ANALYTICS_URL:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
@@ -737,7 +741,9 @@ services:
       # APP_HOST_ALT is optional: unset, it defaults back to APP_HOST, leaving a
       # harmless `Host(x) || Host(x)` rather than an empty Host(``) matching
       # nothing. Verified enabled on Traefik 3.3 both ways.
-      - "traefik.http.routers.presio.rule=Host(`${APP_HOST}`) || Host(`${APP_HOST_ALT:-${APP_HOST}}`)"
+      #
+      # The viewer hosts follow the same pattern, defaulting back to APP_HOST.
+      - "traefik.http.routers.presio.rule=Host(`${APP_HOST}`) || Host(`${APP_HOST_ALT:-${APP_HOST}}`) || Host(`${VIEWER_HOST:-${APP_HOST}}`) || Host(`${VIEWER_HOST_ALT:-${APP_HOST}}`)"
       - "traefik.http.routers.presio.entrypoints=websecure"
       - "traefik.http.routers.presio.tls=true"
       - "traefik.http.services.presio.loadbalancer.server.port=3001"

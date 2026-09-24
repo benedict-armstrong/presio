@@ -1,6 +1,6 @@
 // Strict sidecar inspection for the PDF checker tool.
-// Unlike loadNotesFromAttachments / loadMediaPlacements (which silently skip
-// bad attachments for the presenter), this reports every issue so the user can
+// Unlike the notes and media plugins' readers (which silently skip bad
+// attachments for the presenter), this reports every issue so the user can
 // fix their Typst source.
 
 import type { PDFDocumentProxy } from "pdfjs-dist";

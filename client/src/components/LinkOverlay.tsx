@@ -13,24 +13,20 @@ export function LinkOverlay({
   canvasContainerRef,
   links,
   onGoToSlide,
-  enabled = true,
 }: {
   canvasContainerRef: React.RefObject<HTMLDivElement | null>;
   links: PdfLink[];
   onGoToSlide?: (slide: number) => void;
-  /** False while a drawing tool is active, so a stroke is never eaten by a
-   *  link. Explicit rather than relying on the annotation layer's z-index,
-   *  which would break silently if those values ever moved. */
-  enabled?: boolean;
 }) {
   const rect = useContainedCanvasRect(canvasContainerRef, links);
 
   const usable = links.filter((l) => l.url || (l.slide && onGoToSlide));
-  if (!enabled || !usable.length || rect.width === 0) return null;
+  if (!usable.length || rect.width === 0) return null;
 
   return (
-    // Below the annotation layer (z-5) as a second line of defence; `enabled`
-    // is the one that actually decides.
+    // Below plugins' slide layers (z-5, see SlideLayers): one that takes
+    // input — a drawing tool — covers the links, one that doesn't lets clicks
+    // through to them.
     <div
       className="absolute z-[4] pointer-events-none"
       style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}

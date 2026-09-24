@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { newSession, openController, openViewer, waitForSlide } from "./helpers";
+import { drawingLayer, newSession, openController, openViewer, slideBox, waitForSlide } from "./helpers";
 
 // The controller is a presenter's dashboard, not just a remote: notes to read
 // from, a clock to pace against, and two keys that take over the room's screen.
@@ -131,24 +131,28 @@ test("the drawing palette collapses to the active tool and reopens", async ({
   const controller = await openController(ctx, sessionId);
   await waitForSlide(controller);
 
-  // All four tools are offered while the palette is expanded.
+  // All four tools are offered while the palette is expanded. It's the
+  // built-in drawing plugin's, drawn in its layer over the slide.
+  const palette = drawingLayer(controller);
   for (const key of ["none", "laser", "pen", "highlighter"]) {
-    await expect(controller.getByTestId(`tool-${key}`)).toBeVisible();
+    await expect(palette.getByTestId(`tool-${key}`)).toBeVisible();
   }
 
   // Picking one and moving the pointer away collapses the palette to just that
   // tool, so it stops covering the slide mid-talk.
-  await controller.getByTestId("tool-pen").click();
-  await controller.mouse.move(5, 5);
+  await palette.getByTestId("tool-pen").click();
+  const { box } = await slideBox(controller);
+  await controller.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 });
 
-  const collapsed = controller.getByTestId("tool-collapsed");
+  const collapsed = palette.getByTestId("tool-collapsed");
   await expect(collapsed).toBeVisible();
-  await expect(controller.getByTestId("tool-laser")).toBeHidden();
+  await expect(palette.getByTestId("tool-laser")).toBeHidden();
 
-  // And it reopens on demand, with the pen still the active tool.
-  await collapsed.click();
-  await expect(controller.getByTestId("tool-pen")).toHaveAttribute("aria-pressed", "true");
-  await expect(controller.getByTestId("tool-laser")).toBeVisible();
+  // And it reopens on demand — under the mouse, or at a tap (a touch screen
+  // has no hover) — with the pen still the active tool.
+  await collapsed.dispatchEvent("click");
+  await expect(palette.getByTestId("tool-pen")).toHaveAttribute("aria-pressed", "true");
+  await expect(palette.getByTestId("tool-laser")).toBeVisible();
 
   await ctx.close();
 });

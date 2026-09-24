@@ -1,12 +1,13 @@
 // Plugin manifests (presio-plugin.json). A plugin is one self-contained HTML
-// file plus this manifest; it runs sandboxed in plugin-frame.html and talks to
+// file plus this manifest; it runs in its own frame (plugin-frame.html) and talks to
 // Presio only through `window.presio` (see public/plugin-frame.html and
 // lib/plugins/host.ts). Mirrors schema/plugin-manifest.schema.json.
 //
 // Like a VS Code extension, a plugin never touches Presio's own interface: it
-// *declares* what it adds (buttons, settings) and Presio draws it.
+// *declares* what it adds (buttons, keybindings, settings) and Presio draws it.
 
 import { RESERVED_SETTING_SECTIONS, sanitizeSettingValue, type SettingSpec } from "@/lib/settings";
+import type { KeyBinding } from "@/lib/keymap";
 
 /** Where a plugin runs. The same HTML runs in each; presio.surface says which. */
 export type PluginSurface =
@@ -17,7 +18,11 @@ export type PluginSurface =
   | "tile"
   /** A full-screen layer on every viewer screen, hidden until the plugin
    *  asks to be shown (presio.ui.setVisible). */
-  | "viewer";
+  | "viewer"
+  /** A layer over the slide itself, sized to the page: on the presenter's
+   *  current slide and on every viewer. Lets input through unless it asks
+   *  for it (presio.ui.setInteractive). */
+  | "slide";
 
 export type PluginPermission =
   /** Read the deck: its embedded attachments and the PDF's bytes
@@ -30,7 +35,9 @@ export type PluginPermission =
 /** Where a contributed button can go. */
 export type ButtonLocation =
   /** The controller's bottom bar, beside Sync All / Show Code. */
-  "controller.toolbar";
+  | "controller.toolbar"
+  /** The current slide card's header, as an icon (the label is its tooltip). */
+  | "controller.currentSlide";
 
 export interface ButtonContribution {
   id: string;
@@ -39,6 +46,19 @@ export interface ButtonContribution {
   icon?: string;
   tooltip?: string;
   location: ButtonLocation;
+}
+
+/**
+ * A keyboard shortcut a plugin declares for one of its commands. Shown (and
+ * rebindable) in Settings → Keyboard shortcuts; the presenter's bindings are
+ * stored in the "keybindings" setting as "<plugin id>.<command>". Presses go
+ * where button presses go (presio.onCommand).
+ */
+export interface KeybindingContribution {
+  command: string;
+  label: string;
+  /** Default keys; Presio's own bindings win where they overlap. */
+  keys: KeyBinding[];
 }
 
 /** A setting a plugin declares; stored as "<plugin id>.<name>". */
@@ -59,13 +79,14 @@ export interface PluginManifest {
   permissions: PluginPermission[];
   contributes: {
     buttons: ButtonContribution[];
+    keybindings: KeybindingContribution[];
     settings: Record<string, PluginSettingSpec>;
   };
 }
 
 /** Icons a contributed button may name (drawn from Presio's own icon set). */
 export const PLUGIN_ICONS = [
-  "qr-code", "bar-chart", "message", "users", "timer", "bell", "star", "sparkles", "hand", "check", "eye", "megaphone",
+  "qr-code", "bar-chart", "message", "users", "timer", "bell", "star", "sparkles", "hand", "check", "eye", "megaphone", "pen",
 ] as const;
 
 /** A plugin ready to mount: its manifest and HTML. */
@@ -76,8 +97,8 @@ export interface LoadedPlugin {
   hash: string;
 }
 
-const SURFACES: PluginSurface[] = ["background", "tile", "viewer"];
-const BUTTON_LOCATIONS: ButtonLocation[] = ["controller.toolbar"];
+const SURFACES: PluginSurface[] = ["background", "tile", "viewer", "slide"];
+const BUTTON_LOCATIONS: ButtonLocation[] = ["controller.toolbar", "controller.currentSlide"];
 const NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 const PERMISSIONS: PluginPermission[] = ["deck", "editDeck"];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -115,6 +136,9 @@ export function parseManifest(raw: unknown): PluginManifest {
   if (contributes.buttons.length && !surfaces.includes("background") && !surfaces.includes("tile")) {
     throw new Error('presio-plugin.json: buttons need a "background" or "tile" surface to handle them');
   }
+  if (contributes.keybindings.length && !surfaces.includes("background") && !surfaces.includes("tile")) {
+    throw new Error('presio-plugin.json: keybindings need a "background" or "tile" surface to handle them');
+  }
   return {
     id,
     name: str("name", 80)!,
@@ -133,7 +157,7 @@ function parseContributes(raw: unknown): PluginManifest["contributes"] {
   const fail = (msg: string): never => {
     throw new Error(`presio-plugin.json: contributes.${msg}`);
   };
-  if (raw === undefined) return { buttons: [], settings: {} };
+  if (raw === undefined) return { buttons: [], keybindings: [], settings: {} };
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) fail("must be an object");
   const c = raw as Record<string, unknown>;
 
@@ -160,6 +184,26 @@ function parseContributes(raw: unknown): PluginManifest["contributes"] {
     }
   }
 
+  const keybindings: KeybindingContribution[] = [];
+  if (c.keybindings !== undefined) {
+    if (!Array.isArray(c.keybindings) || c.keybindings.length > 16) fail("keybindings must be a list of at most 16");
+    for (const k of c.keybindings as unknown[]) {
+      const kb = (typeof k === "object" && k !== null ? k : {}) as Record<string, unknown>;
+      if (typeof kb.command !== "string" || !NAME_RE.test(kb.command)) fail('keybindings: each needs a "command" (letters and digits)');
+      const at = `keybindings.${kb.command}`;
+      if (typeof kb.label !== "string" || !kb.label || kb.label.length > 48) fail(`${at}: "label" must be 1–48 characters`);
+      if (!Array.isArray(kb.keys) || kb.keys.length > 3) fail(`${at}: "keys" must be a list of at most 3`);
+      const keys = (kb.keys as unknown[]).map((raw): KeyBinding => {
+        const key = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+        if (typeof key.key !== "string" || !key.key || key.key.length > 32) fail(`${at}: each key needs a "key" (a KeyboardEvent.key value)`);
+        if (key.meta !== undefined && typeof key.meta !== "boolean") fail(`${at}: "meta" must be true or false`);
+        return key.meta ? { key: key.key as string, meta: true } : { key: key.key as string };
+      });
+      if (keybindings.some((x) => x.command === kb.command)) fail(`keybindings: duplicate command "${kb.command}"`);
+      keybindings.push({ command: kb.command as string, label: kb.label as string, keys });
+    }
+  }
+
   const settings: Record<string, PluginSettingSpec> = {};
   if (c.settings !== undefined) {
     if (typeof c.settings !== "object" || c.settings === null || Array.isArray(c.settings)) fail("settings must be an object");
@@ -170,7 +214,7 @@ function parseContributes(raw: unknown): PluginManifest["contributes"] {
       settings[name] = parseSettingSpec(name, rawSpec, fail);
     }
   }
-  return { buttons, settings };
+  return { buttons, keybindings, settings };
 }
 
 function parseSettingSpec(name: string, raw: unknown, fail: (msg: string) => never): PluginSettingSpec {

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { newSession, openController, openViewer, pickTool, slideCounter, waitForSlide } from "./helpers";
+import { newSession, openController, openViewer, pickTool, slideBox, slideCounter, waitForSlide } from "./helpers";
 
 // Link annotations are painted into the slide bitmap by pdf.js like any other
 // ink, so nothing about a rendered slide reveals whether they work — the only
@@ -99,7 +99,7 @@ test("links land on the slide they belong to and disappear with it", async ({
   // Both of the fixture's links live on page 1, in its top half.
   await expect(controller.getByTestId("slide-link")).toHaveCount(2);
 
-  const slide = await controller.getByTestId("annotation-overlay").first().boundingBox();
+  const slide = (await slideBox(controller)).box;
   const link = await externalLink(controller).boundingBox();
   expect(slide, "slide should have a layout box").not.toBeNull();
   expect(link, "link should have a layout box").not.toBeNull();
@@ -130,13 +130,22 @@ test("links go inert while a drawing tool is active", async ({ browser, request 
   await waitForSlide(controller);
   await expect(controller.getByTestId("slide-link")).toHaveCount(2);
 
-  // A stroke that starts on a link must be a stroke, not a navigation — so the
-  // overlay is withdrawn entirely rather than left to lose a z-index race.
-  await pickTool(controller, "pen");
-  await expect(controller.getByTestId("slide-link")).toHaveCount(0);
+  // A stroke that starts on a link must be a stroke, not a navigation: the
+  // drawing layer takes all input while a tool is active, over the links.
+  const internal = controller.locator('[data-testid="slide-link"][data-slide]').first();
+  const box = (await internal.boundingBox())!;
+  const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const onTop = () =>
+    controller.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.getAttribute("data-testid") ?? "", at);
 
+  await pickTool(controller, "pen");
+  await expect.poll(onTop).toBe("plugin-frame-drawing-slide");
+
+  // With no tool, clicks reach the links again.
   await pickTool(controller, "none");
-  await expect(controller.getByTestId("slide-link")).toHaveCount(2);
+  await expect.poll(onTop).toBe("slide-link");
+  await controller.mouse.click(at.x, at.y);
+  await expect(slideCounter(controller)).not.toHaveValue("1");
 
   await ctx.close();
 });

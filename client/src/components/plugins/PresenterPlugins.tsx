@@ -7,6 +7,7 @@ import {
   Hand,
   Megaphone,
   MessageSquare,
+  PenLine,
   QrCode,
   Sparkles,
   Star,
@@ -15,6 +16,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { PluginHost } from "@/lib/plugins/host";
 import type { ButtonLocation, LoadedPlugin } from "@/lib/plugins/manifest";
 import { PluginFrame } from "./PluginFrame";
@@ -35,6 +37,7 @@ const ICONS: Record<string, LucideIcon> = {
   check: Check,
   eye: Eye,
   megaphone: Megaphone,
+  pen: PenLine,
 };
 
 /** A plugin's dashboard card. */
@@ -86,6 +89,28 @@ function PluginButtonGroup({ host, plugin, location }: { host: PluginHost; plugi
         .map((button) => {
           const state = states[button.id] ?? {};
           const Icon = button.icon ? ICONS[button.icon] : undefined;
+          const title = `${button.tooltip ?? state.label ?? button.label} (${name})`;
+          if (location === "controller.currentSlide") {
+            // A card header's small icon action; the label is its tooltip.
+            return (
+              <button
+                key={button.id}
+                type="button"
+                disabled={state.disabled}
+                aria-pressed={state.active}
+                aria-label={state.label ?? button.label}
+                data-testid={`plugin-button-${id}-${button.id}`}
+                title={title}
+                onClick={() => host.pressButton(id, button.id)}
+                className={cn(
+                  "inline-flex items-center justify-center h-5 min-w-5 px-0.5 rounded transition-colors disabled:opacity-40",
+                  state.active ? "text-foreground bg-accent" : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                )}
+              >
+                {Icon ? <Icon size={13} /> : <span className="text-[11px]">{state.label ?? button.label}</span>}
+              </button>
+            );
+          }
           return (
             <Button
               key={button.id}
@@ -94,7 +119,7 @@ function PluginButtonGroup({ host, plugin, location }: { host: PluginHost; plugi
               disabled={state.disabled}
               aria-pressed={state.active}
               data-testid={`plugin-button-${id}-${button.id}`}
-              title={`${button.tooltip ?? state.label ?? button.label} (${name})`}
+              title={title}
               onClick={() => host.pressButton(id, button.id)}
             >
               {Icon && <Icon size={14} className="mr-1" />}

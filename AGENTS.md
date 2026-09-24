@@ -20,7 +20,7 @@ These are served live by the Express app (not static files):
 | `/llms-full.txt` | Present + check playbook |
 | `/AGENTS.md` | Product agent brief |
 | `/api.md` / `/openapi.json` | API docs |
-| `/plugins.md` | Writing a sandboxed plugin (`window.presio` API) |
+| `/plugins.md` | Writing a plugin (`window.presio` API) |
 | `/robots.txt` / `/sitemap.xml` | Crawl discovery |
 | `/.well-known/mcp.json` / `/mcp` | MCP tools `present_pdf`, `check_pdf` |
 | `POST /api/present` | Upload PDF → local handoff URL (update in place with `session_id` + controller token) |
@@ -28,7 +28,7 @@ These are served live by the Express app (not static files):
 
 Sources: `server/agent/content/`, `server/routes/agentDocs.ts`, `server/routes/mcp.ts`, `server/lib/presentHandoff.ts`.
 
-Plugins: `client/public/plugin-frame.html` (sandbox + runtime), `client/src/lib/plugins/`, `client/public/plugins/` (built-ins), relay in `server/socket.ts`.
+Plugins: `client/public/plugin-frame.html` (frame + `window.presio` runtime), `client/src/lib/plugins/` (host), `client/plugins/` (built-in plugins in TS/React, bundled by `client/plugins/build.ts`), `client/public/plugins/` (plain built-ins), relay in `server/socket.ts`.
 
 ## Dev
 

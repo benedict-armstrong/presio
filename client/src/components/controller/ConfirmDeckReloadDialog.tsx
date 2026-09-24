@@ -8,7 +8,6 @@ import { DialogOverlay } from "@/components/ui/dialog-overlay";
 export function ConfirmDeckReloadDialog({
   filename,
   source,
-  annotatedSlides,
   deckEdited,
   busy,
   onConfirm,
@@ -17,21 +16,12 @@ export function ConfirmDeckReloadDialog({
   filename: string;
   /** Where the change came from: the file on disk, or the deck's source URL. */
   source: "watch" | "remote";
-  /** How many slides carry drawings right now (0 = nothing to lose). */
-  annotatedSlides: number;
   /** Whether edits were saved into this deck in Presio since it was loaded. */
   deckEdited: boolean;
   busy: boolean;
   onConfirm: () => void;
   onClose: () => void;
 }) {
-  const losses: string[] = [];
-  if (annotatedSlides > 0) {
-    losses.push(
-      `your drawings on ${annotatedSlides} ${annotatedSlides === 1 ? "slide" : "slides"}`
-    );
-  }
-  if (deckEdited) losses.push("the edits you saved into it here");
 
   return (
     <DialogOverlay onClose={onClose}>
@@ -46,9 +36,9 @@ export function ConfirmDeckReloadDialog({
             : "changed at its source link."}{" "}
           Showing it swaps the slides for you and everyone watching.
         </p>
-        {losses.length > 0 && (
+        {deckEdited && (
           <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            This clears {losses.join(" and ")}. The new file&apos;s own notes are used instead.
+            This clears the edits you saved into it here. The new file&apos;s own notes are used instead.
           </p>
         )}
       </div>

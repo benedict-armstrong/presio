@@ -11,6 +11,7 @@ import { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createApp } from "./app.js";
 import { registerSocketHandlers, createSocketState } from "./socket.js";
+import { MAX_SOCKET_MESSAGE_BYTES } from "./validation.js";
 import { FakeSupabase } from "./test/fakeSupabase.js";
 import { PORT, SESSION_ID, CONTROLLER_TOKEN, TOTAL_SLIDES } from "../e2e/constants.js";
 
@@ -57,7 +58,7 @@ const sessionRow = (id: string, deck: "example" | "links" = "example") => ({
 
 const fake = new FakeSupabase([sessionRow(SESSION_ID)]);
 
-const io = new Server();
+const io = new Server({ maxHttpBufferSize: MAX_SOCKET_MESSAGE_BYTES });
 const inner = createApp({ supabase: fake as unknown as SupabaseClient, io });
 
 // Wrap createApp so the example PDF route is matched before its catch-all.
@@ -72,7 +73,7 @@ app.get("/links.pdf", (_req, res) => {
 // Test-only: mint an isolated session.
 //
 // Playwright runs `fullyParallel`, and a session carries mutable state the
-// specs care about — current slide, annotations, timer. Sharing one id across
+// specs care about — current slide, drawings, timer. Sharing one id across
 // concurrent tests made them fail only when run together (a second controller
 // joining mid-test), which is the worst kind of flake. Each spec takes a fresh
 // id instead, so nothing carries between tests or across workers.

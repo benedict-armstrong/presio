@@ -1,49 +1,79 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLatestRef } from "@/hooks/useLatestRef";
-import type { PluginHost } from "@/lib/plugins/host";
+import type { FrameLink, Interactive, PluginHost, SlideView } from "@/lib/plugins/host";
 import type { LoadedPlugin, PluginSurface } from "@/lib/plugins/manifest";
 import { cn } from "@/lib/utils";
 
 /**
- * One plugin surface: a sandboxed iframe running plugin-frame.html, booted
- * with the plugin's HTML and a MessagePort into the host.
+ * One plugin surface: an iframe running plugin-frame.html, booted with the
+ * plugin's HTML and a MessagePort into the host.
  *
- * `sandbox="allow-scripts"` without allow-same-origin gives the frame an
- * opaque origin — no cookies, storage or tokens of the app — and the frame
- * page's own CSP takes away the network. Key it by the plugin's hash so a new
- * version gets a fresh frame rather than a second boot of the old one.
+ * Not a sandbox: plugins are trusted, like VS Code extensions, and run on this
+ * origin with the network and embeds (YouTube, Vimeo) available. The frame is
+ * there so a plugin only sees the `presio` API and can't break the page around
+ * it; audiences are protected by the separate viewer origin instead. Key it by
+ * the plugin's hash so a new version gets a fresh frame rather than a second
+ * boot of the old one.
  */
 export function PluginFrame({
   host,
   plugin,
   surface,
   onVisibleChange,
+  onInteractiveChange,
+  onReady,
+  view,
+  hovered,
+  frameRef,
   className,
+  style,
 }: {
   host: PluginHost;
   plugin: LoadedPlugin;
   surface: PluginSurface;
   onVisibleChange?: (visible: boolean) => void;
+  onInteractiveChange?: (value: Interactive) => void;
+  /** The plugin's document is in place — e.g. to listen to it (same origin). */
+  onReady?: (frame: HTMLIFrameElement) => void;
+  /** Slide surface: the part of the page on screen, and its zoom. */
+  view?: SlideView;
+  /** Slide surface: whether a mouse is over the slide. */
+  hovered?: boolean;
+  frameRef?: React.RefObject<HTMLIFrameElement | null>;
   className?: string;
+  style?: React.CSSProperties;
 }) {
-  const ref = useRef<HTMLIFrameElement>(null);
-  const onVisibleRef = useLatestRef(onVisibleChange);
+  const ownRef = useRef<HTMLIFrameElement>(null);
+  const ref = frameRef ?? ownRef;
+  const hooksRef = useLatestRef({ onVisibleChange, onInteractiveChange, onReady });
+  const [link, setLink] = useState<FrameLink | null>(null);
+
+  useEffect(() => {
+    if (view) link?.setView(view);
+  }, [link, view]);
+  useEffect(() => {
+    if (hovered !== undefined) link?.setHovered(hovered);
+  }, [link, hovered]);
 
   useEffect(() => {
     const frame = ref.current;
     if (!frame) return;
-    let disconnect: (() => void) | null = null;
+    let connection: FrameLink | null = null;
     // Once per mount: writing the plugin's document into the frame fires
     // `load` again, and a second boot would close the port it's using.
     const boot = () => {
-      if (disconnect) return;
+      if (connection) return;
       const { port1, port2 } = new MessageChannel();
-      disconnect = host.connect(plugin, surface, port1, (v) => onVisibleRef.current?.(v));
+      connection = host.connect(plugin, surface, port1, {
+        onVisible: (v) => hooksRef.current.onVisibleChange?.(v),
+        onInteractive: (v) => hooksRef.current.onInteractiveChange?.(v),
+        onReady: () => hooksRef.current.onReady?.(frame),
+      });
+      setLink(connection);
       frame.contentWindow?.postMessage(
         { type: "presio:boot", html: plugin.html, context: host.frameContext(plugin, surface) },
-        // The frame's origin is opaque, so there is no origin to name. It
-        // can only be the page this component just pointed it at.
-        "*",
+        // Same origin as this page: it's the frame page this component loaded.
+        window.location.origin,
         [port2]
       );
     };
@@ -54,18 +84,21 @@ export function PluginFrame({
     frame.dataset.booted = "1";
     return () => {
       frame.removeEventListener("load", boot);
-      disconnect?.();
+      connection?.disconnect();
+      setLink(null);
     };
-  }, [host, plugin, surface, onVisibleRef]);
+  }, [host, plugin, surface, hooksRef, ref]);
 
   return (
     <iframe
       ref={ref}
       src="/plugin-frame.html"
-      sandbox="allow-scripts"
+      // Players inside (YouTube, Vimeo, <video>) may autoplay and go fullscreen.
+      allow="autoplay; fullscreen; picture-in-picture"
       title={plugin.manifest.name}
       data-testid={`plugin-frame-${plugin.manifest.id}-${surface}`}
       className={cn("border-0 bg-transparent", className)}
+      style={style}
     />
   );
 }

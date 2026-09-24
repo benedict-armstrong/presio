@@ -44,10 +44,11 @@
         "enum": [
           "background",
           "tile",
-          "viewer"
+          "viewer",
+          "slide"
         ]
       },
-      "description": "background: hidden on the presenter's device; handles buttons and state. tile: a card of its own on the presenter's dashboard. viewer: a full-screen layer on every viewer screen, hidden until the plugin shows it."
+      "description": "background: hidden on the presenter's device; handles buttons, keybindings and state. tile: a card of its own on the presenter's dashboard. viewer: a full-screen layer on every viewer screen, hidden until the plugin shows it. slide: a layer over the slide itself, sized to the page, on the presenter's current slide and every viewer; lets input through unless the plugin claims it."
     },
     "activation": {
       "type": "array",
@@ -103,7 +104,8 @@
                   "hand",
                   "check",
                   "eye",
-                  "megaphone"
+                  "megaphone",
+                  "pen"
                 ]
               },
               "tooltip": {
@@ -112,12 +114,59 @@
               },
               "location": {
                 "enum": [
-                  "controller.toolbar"
+                  "controller.toolbar",
+                  "controller.currentSlide"
                 ]
               }
             }
           },
           "description": "Buttons Presio draws natively; presses reach the background surface (or the tile)."
+        },
+        "keybindings": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "required": [
+              "command",
+              "label",
+              "keys"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 48
+              },
+              "keys": {
+                "type": "array",
+                "maxItems": 3,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "key"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32,
+                      "description": "A KeyboardEvent.key value, e.g. \"k\" or \"ArrowUp\"."
+                    },
+                    "meta": {
+                      "type": "boolean",
+                      "description": "Needs ⌘ (Meta) held."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "description": "Keyboard shortcuts for the presenter's controller, rebindable in Settings (stored as \"<id>.<command>\" in the keybindings setting). Presses reach presio.onCommand on the background surface (or the tile). Presio's own shortcuts win where keys overlap."
         },
         "settings": {
           "type": "object",

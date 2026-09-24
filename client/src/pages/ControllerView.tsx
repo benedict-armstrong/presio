@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { cn, getSessionAuth, setSessionAuth } from "@/lib/utils";
-import { Settings, Check, Option, Plus, Share2, ExternalLink, QrCode, Save, FolderOpen, PenLine, User, LayoutGrid, Puzzle, KeyRound, Keyboard, FileJson } from "lucide-react";
+import { Settings, Check, Option, Plus, Share2, ExternalLink, QrCode, User, LayoutGrid, Puzzle, KeyRound, Keyboard, FileJson } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
@@ -43,8 +43,9 @@ import {
 import {
   DEFAULT_KEYMAP,
   matchesBinding,
+  pluginBindings,
 } from "@/lib/keymap";
-import { getSetting, useSetting } from "@/lib/settings";
+import { useSetting } from "@/lib/settings";
 import {
   CARD_KEYS,
   CARD_LABELS,
@@ -64,7 +65,6 @@ import {
 } from "@/lib/controllerLayout";
 import { lsGetString, lsSetString, viewerOpenedKey } from "@/lib/storage";
 import { type MosaicNode } from "react-mosaic-component";
-import type { MediaState, AudioState } from "@/components/MediaOverlay";
 import type { Deck } from "@/lib/deck";
 import type { PluginHostState } from "@/lib/plugins/usePluginHost";
 import { PluginBackgrounds, PluginButtons, PluginTile } from "@/components/plugins/PresenterPlugins";
@@ -73,7 +73,6 @@ import { SettingsDialog } from "@/components/controller/SettingsDialog";
 import { AddPluginPage, PluginPage } from "@/components/plugins/PluginSettings";
 import { pluginLabel, useInstalledPlugins } from "@/lib/plugins/installed";
 import type { PluginManifest } from "@/lib/plugins/manifest";
-import { hasAnyStrokes, type LaserPoint, type PenStyle, type Stroke, type Tool } from "@/lib/annotations";
 
 // How long a pending "j<number>" jump waits for another digit before it
 // commits on its own. Long enough to type a second digit, short enough that the
@@ -108,19 +107,6 @@ interface ControllerViewProps {
   /** A URL-backed deck's source PDF was republished (see Presentation). */
   remoteDeckUpdate: boolean;
   onRemoteDeckApply: () => void;
-  mediaState: MediaState;
-  onMediaControl: (id: string, action: "play" | "pause" | "reset") => void;
-  onMediaTime: (id: string, t: number, playing: boolean, sampledAt: number) => void;
-  muted: boolean;
-  audioState: AudioState;
-  onAudioChange: (next: { muted: boolean; target: AudioState["target"] }) => void;
-  onLaserMove: (pt: LaserPoint | null) => void;
-  onStrokeProgress: (stroke: Stroke | null) => void;
-  onStrokeCommit: (stroke: Stroke) => void;
-  onStrokeUndo: () => void;
-  onAnnotationsClear: () => void;
-  onSaveDrawing: () => void;
-  onLoadDrawing: (file: File) => void;
   plugins: PluginHostState;
 }
 
@@ -147,23 +133,9 @@ export function ControllerView({
   onDeckWatchResume,
   remoteDeckUpdate,
   onRemoteDeckApply,
-  mediaState,
-  onMediaControl,
-  onMediaTime,
-  muted,
-  audioState,
-  onAudioChange,
-  onLaserMove,
-  onStrokeProgress,
-  onStrokeCommit,
-  onStrokeUndo,
-  onAnnotationsClear,
-  onSaveDrawing,
-  onLoadDrawing,
   plugins,
 }: ControllerViewProps) {
-  const { totalSlides, annotations } = deck;
-  const mediaPlacements = deck.mediaBySlide.get(currentSlide) ?? [];
+  const { totalSlides } = deck;
   const slideLinks = deck.linksBySlide.get(currentSlide) ?? [];
   const isMobile = useIsMobile();
   // A window wide enough for the dashboard but not for the full toolbars: the
@@ -190,28 +162,6 @@ export function ControllerView({
   const [passphraseDialogOpen, setPassphraseDialogOpen] = useState(false);
   // First-run tutorial for the controller. Shown before the viewer prompt.
   const [onboardingOpen, setOnboardingOpen] = useState(() => !hasCompletedControllerOnboarding());
-  // Active annotation tool for the current-slide card (laser pointer etc.).
-  const [tool, setTool] = useState<Tool>("none");
-  // Floating tool palette visibility (toggled in the card header). Hiding it
-  // also drops the active tool so the slide is click-through.
-  const [toolsOpen, setToolsOpen] = useSetting("drawing.toolbar");
-  const toggleTools = useCallback(() => {
-    const next = !getSetting("drawing.toolbar");
-    setToolsOpen(next);
-    if (!next) setTool("none");
-  }, [setToolsOpen]);
-  // Drawing color/width per tool, remembered across presentations.
-  const [penStyle, setPenStyle] = useSetting("drawing.pen");
-  const [highlighterStyle, setHighlighterStyle] = useSetting("drawing.highlighter");
-  const activeStyle = tool === "highlighter" ? highlighterStyle : penStyle;
-  const changeActiveStyle = useCallback(
-    (style: PenStyle) => (tool === "highlighter" ? setHighlighterStyle(style) : setPenStyle(style)),
-    [tool, setHighlighterStyle, setPenStyle]
-  );
-
-  // Hidden file input for loading a saved drawing from Settings.
-  const drawingFileRef = useRef<HTMLInputElement | null>(null);
-
   // Deck replacement: pick a PDF, confirm, then hand it to the orchestrator.
   // The File is held in state between the picker and the confirmation dialog.
   const replaceFileRef = useRef<HTMLInputElement | null>(null);
@@ -267,8 +217,8 @@ export function ControllerView({
 
   const { user } = useAuth();
   const loggedIn = !!user;
-  // Drawing and notes editing are purely local (canvas state / IndexedDB), so
-  // they're never gated on an account. Login is only for sharing online.
+  // Plugins (drawing, notes editing) work on this device, so they're never
+  // gated on an account. Login is only for sharing online.
   const { syncing, syncError, sync } = useClaim(id);
 
   // One-time email list prompt after a few minutes of presenting. Waits for
@@ -304,12 +254,12 @@ export function ControllerView({
     lsGetString(viewerOpenedKey(id)) !== "true";
 
   // Tap the left/right half of the current slide to go back/forward on touch
-  // devices. Disabled while a drawing tool is active so a stroke is never
-  // mistaken for a tap, and while pinch-zoom is active so panning or lifting
-  // fingers off a zoomed slide never flips pages.
+  // devices. Disabled while pinch-zoom is active so panning or lifting
+  // fingers off a zoomed slide never flips pages. (A plugin layer taking the
+  // slide's input — a drawing tool — gets the taps instead.)
   const [slideZoomActive, setSlideZoomActive] = useState(false);
   useSlideTapNav(currentCanvasRef, {
-    enabled: tool === "none" && !slideZoomActive,
+    enabled: !slideZoomActive,
     onPrev: () => onGoTo(currentSlide - 1),
     onNext: () => onGoTo(currentSlide + 1),
   });
@@ -369,6 +319,8 @@ export function ControllerView({
   // Never leave a pending jump's timer running past unmount.
   useEffect(() => cancelJump, [cancelJump]);
 
+  const { host: pluginHost, plugins: runningPlugins } = plugins;
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -413,11 +365,22 @@ export function ControllerView({
         // The join code is only meaningful for synced sessions, which have a
         // remote audience; local sessions can't be joined elsewhere.
         if (!local) onShowCodeToggle();
+      } else if (!e.repeat) {
+        // Plugins' keybindings, after Presio's own: a key both claim is ours.
+        for (const plugin of runningPlugins) {
+          const { id: pluginId, contributes } = plugin.manifest;
+          const hit = contributes.keybindings.find((kb) => matchesBinding(e, pluginBindings(keymap, pluginId, kb)));
+          if (hit) {
+            e.preventDefault();
+            pluginHost.runCommand(pluginId, hit.command);
+            return;
+          }
+        }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [currentSlide, totalSlides, onGoTo, onBlankToggle, onShowCodeToggle, local, keymap, pendingJump, armJump, commitJump, cancelJump]);
+  }, [currentSlide, totalSlides, onGoTo, onBlankToggle, onShowCodeToggle, local, keymap, pendingJump, armJump, commitJump, cancelJump, runningPlugins, pluginHost]);
 
   const onMosaicChange = useCallback((node: MosaicNode<string> | null) => {
     setMosaic(node);
@@ -553,52 +516,21 @@ export function ControllerView({
       content: (
         <CurrentSlideCard
           ref={currentCanvasRef}
-          local={local}
-          mediaPlacements={mediaPlacements}
           links={slideLinks}
           onLinkGoTo={onGoTo}
-          mediaState={mediaState}
-          onMediaControl={onMediaControl}
-          onMediaTime={onMediaTime}
-          muted={muted}
-          audioState={audioState}
-          onAudioChange={onAudioChange}
-          tool={tool}
-          toolbarVisible={toolsOpen}
-          onToolChange={setTool}
-          onLaserMove={onLaserMove}
-          penStyle={activeStyle}
-          onPenStyleChange={changeActiveStyle}
-          strokes={annotations[currentSlide] ?? []}
-          onStrokeProgress={onStrokeProgress}
-          onStrokeCommit={onStrokeCommit}
-          onStrokeUndo={onStrokeUndo}
-          onAnnotationsClear={onAnnotationsClear}
           onZoomActiveChange={setSlideZoomActive}
+          plugins={plugins}
+          slide={currentSlide}
         />
       ),
-      action: (
-        <button
-          type="button"
-          data-testid="toolbar-toggle"
-          title={toolsOpen ? "Hide drawing tools" : "Show drawing tools"}
-          aria-pressed={toolsOpen}
-          onClick={toggleTools}
-          className={`inline-flex items-center justify-center h-5 w-5 rounded transition-colors ${
-            toolsOpen
-              ? "text-foreground bg-accent"
-              : "text-muted-foreground hover:text-foreground hover:bg-accent"
-          }`}
-        >
-          <PenLine size={13} />
-        </button>
-      ),
+      // Plugins' buttons for the slide (the drawing tools' toggle).
+      action: <PluginButtons host={plugins.host} plugins={plugins.plugins} location="controller.currentSlide" />,
     },
     nextSlide: {
-      content: <NextSlideCard deck={deck} currentSlide={currentSlide} />,
+      content: <NextSlideCard deck={deck} currentSlide={currentSlide} plugins={plugins} />,
     },
     thumbnails: {
-      content: <ThumbnailsCard deck={deck} currentSlide={currentSlide} onGoTo={onGoTo} />,
+      content: <ThumbnailsCard deck={deck} currentSlide={currentSlide} onGoTo={onGoTo} plugins={plugins} />,
     },
     // Each running plugin with a tile surface gets a card of its own.
     ...Object.fromEntries(
@@ -650,6 +582,7 @@ export function ControllerView({
       onOpen={() => setMenuOpen(true)}
       onClose={() => setMenuOpen(false)}
       deck={deck}
+      pluginHost={plugins.host}
       canSharePassphrase={canSharePassphrase}
       canShowCode={!local}
       showingCode={showCode}
@@ -761,7 +694,7 @@ export function ControllerView({
           <PluginButtons host={plugins.host} plugins={plugins.plugins} location="controller.toolbar" />
           {!narrow && (
             <div className="ml-auto flex items-center gap-2">
-              <DownloadButton deck={deck} />
+              <DownloadButton deck={deck} plugins={plugins.host} />
               <Button variant="destructive" size="sm" onClick={() => setConfirmEnd(true)}>
                 End Presentation
               </Button>
@@ -880,47 +813,6 @@ export function ControllerView({
                 </div>
               ),
             },
-            {
-              id: "drawing",
-              label: "Drawing",
-              icon: PenLine,
-              description: "Save the drawings made on the slides to a file, or load a previously saved drawing.",
-              content: (
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    data-testid="drawing-save"
-                    disabled={!hasAnyStrokes(annotations)}
-                    onClick={onSaveDrawing}
-                  >
-                    <Save size={14} className="mr-1" />
-                    Save drawing
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    data-testid="drawing-load"
-                    onClick={() => drawingFileRef.current?.click()}
-                  >
-                    <FolderOpen size={14} className="mr-1" />
-                    Load drawing
-                  </Button>
-                  <input
-                    ref={drawingFileRef}
-                    type="file"
-                    accept=".json,application/json"
-                    className="hidden"
-                    data-testid="drawing-load-input"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) onLoadDrawing(file);
-                      e.target.value = "";
-                    }}
-                  />
-                </div>
-              ),
-            },
             ...(canSharePassphrase
               ? [{
                 id: "control",
@@ -959,7 +851,17 @@ export function ControllerView({
                   Reset defaults
                 </Button>
               ),
-              content: <ShortcutsEditor keymap={keymap} onChange={setKeymap} />,
+              content: (
+                <ShortcutsEditor
+                  keymap={keymap}
+                  onChange={setKeymap}
+                  plugins={installedPlugins.flatMap(({ entry, manifest }) =>
+                    entry.enabled && manifest
+                      ? [{ id: manifest.id, name: manifest.name, keybindings: manifest.contributes.keybindings }]
+                      : []
+                  )}
+                />
+              ),
             },
             {
               id: "file",
@@ -984,7 +886,7 @@ export function ControllerView({
               label: "Add plugin",
               icon: Plus,
               description:
-                "Load a plugin from its URL — its own site, or your dev server while you build one. Plugins run sandboxed, with no network access.",
+                "Load a plugin from its URL — its own site, or your dev server while you build one. Plugins can do anything Presio can, so only add ones you trust.",
               content: (
                 <AddPluginPage
                   onAdded={(url, manifest) => {

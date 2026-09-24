@@ -1,6 +1,6 @@
 // User settings: one JSON document, in the spirit of VS Code's settings.json.
 //
-// Keys are dotted ("drawing.toolbar"), and the document holds only what differs
+// Keys are dotted ("share.lanAddress"), and the document holds only what differs
 // from the defaults, so an exported file reads as "what this presenter
 // changed". Presio's own settings are declared in CORE_SETTINGS below; plugins
 // contribute theirs through their manifest, namespaced by plugin id
@@ -16,7 +16,6 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { lsGet, lsSet, STORAGE_KEYS } from "./storage";
 import { DEFAULT_KEYMAP, KEYMAP_ACTIONS, type KeyBinding, type Keymap } from "./keymap";
-import { DEFAULT_HIGHLIGHTER_STYLE, DEFAULT_PEN_STYLE, type PenStyle } from "./annotations";
 
 // --- Schema ---
 
@@ -61,9 +60,6 @@ export type ThemeSetting = "system" | "light" | "dark";
 export interface CoreSettings {
   theme: ThemeSetting;
   keybindings: Keymap;
-  "drawing.toolbar": boolean;
-  "drawing.pen": PenStyle;
-  "drawing.highlighter": PenStyle;
   "share.lanAddress": string;
   "home.minimal": boolean;
   "layout.forceDesktop": boolean;
@@ -75,6 +71,8 @@ export type CoreSettingKey = keyof CoreSettings;
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
+const PLUGIN_COMMAND_RE = /^[a-z0-9][a-z0-9-]{0,63}\.[A-Za-z][A-Za-z0-9_]{0,63}$/;
+
 function sanitizeKeymap(raw: unknown): Keymap | undefined {
   if (!isRecord(raw)) return undefined;
   const isBinding = (b: unknown): b is KeyBinding =>
@@ -82,20 +80,17 @@ function sanitizeKeymap(raw: unknown): Keymap | undefined {
   // Merged over the defaults, so a map saved before an action existed still
   // binds it.
   const km: Keymap = { ...DEFAULT_KEYMAP };
+  const clean = (list: KeyBinding[]) => list.map((b) => (b.meta ? { key: b.key, meta: true } : { key: b.key }));
   for (const action of KEYMAP_ACTIONS) {
     const list = raw[action];
-    if (Array.isArray(list) && list.every(isBinding)) {
-      km[action] = list.map((b) => (b.meta ? { key: b.key, meta: true } : { key: b.key }));
-    }
+    if (Array.isArray(list) && list.every(isBinding)) km[action] = clean(list);
+  }
+  // Plugins' commands, kept whether or not the plugin is installed here (like
+  // their settings), so an imported file doesn't lose them.
+  for (const [key, list] of Object.entries(raw)) {
+    if (PLUGIN_COMMAND_RE.test(key) && Array.isArray(list) && list.length <= 3 && list.every(isBinding)) km[key] = clean(list);
   }
   return km;
-}
-
-function sanitizePenStyle(raw: unknown): PenStyle | undefined {
-  if (!isRecord(raw)) return undefined;
-  if (typeof raw.color !== "string" || !/^#[0-9a-f]{6}$/i.test(raw.color)) return undefined;
-  if (typeof raw.size !== "number" || !Number.isFinite(raw.size) || raw.size <= 0 || raw.size > 0.05) return undefined;
-  return { color: raw.color, size: raw.size };
 }
 
 function sanitizePluginList(raw: unknown): CoreSettings["plugins"] | undefined {
@@ -118,24 +113,7 @@ export const CORE_SETTINGS: { [K in CoreSettingKey]: CoreSpec<CoreSettings[K]> }
     type: "object",
     default: DEFAULT_KEYMAP,
     sanitize: sanitizeKeymap,
-    description: "Controller keyboard shortcuts, per action: a list of { key, meta? }.",
-  },
-  "drawing.toolbar": {
-    type: "boolean",
-    default: true,
-    description: "Show the drawing and laser toolbar on the current slide.",
-  },
-  "drawing.pen": {
-    type: "object",
-    default: DEFAULT_PEN_STYLE,
-    sanitize: sanitizePenStyle,
-    description: "Pen color (#rrggbb) and width (fraction of the slide width).",
-  },
-  "drawing.highlighter": {
-    type: "object",
-    default: DEFAULT_HIGHLIGHTER_STYLE,
-    sanitize: sanitizePenStyle,
-    description: "Highlighter color (#rrggbb) and width (fraction of the slide width).",
+    description: "Controller keyboard shortcuts, per action (or \"<plugin id>.<command>\" for a plugin's): a list of { key, meta? }.",
   },
   "share.lanAddress": {
     type: "string",
@@ -182,7 +160,11 @@ const resolved = new Map<string, unknown>();
 
 function loadDoc(): Doc {
   const stored = lsGet<unknown>(STORAGE_KEYS.settings, undefined);
-  if (isRecord(stored)) return stored;
+  if (isRecord(stored)) {
+    const upgraded = upgradeDoc(stored);
+    if (upgraded !== stored) lsSet(STORAGE_KEYS.settings, upgraded);
+    return upgraded;
+  }
   const migrated = migrateLegacySettings();
   lsSet(STORAGE_KEYS.settings, migrated);
   return migrated;
@@ -350,9 +332,9 @@ function migrateLegacySettings(): Doc {
   // Likewise the notes plugin's text size.
   const notesScale = json("presio_notes_font_scale");
   if (typeof notesScale === "number" && notesScale !== 1) out["notes.fontScale"] = notesScale;
-  if (read("presio_annotation_toolbar") !== null) put("drawing.toolbar", read("presio_annotation_toolbar") !== "false");
-  put("drawing.pen", json("presio_pen_style"));
-  put("drawing.highlighter", json("presio_highlighter_style"));
+  // And drawing's: the palette's visibility, and each tool's color and width.
+  if (read("presio_annotation_toolbar") === "false") out["drawing.toolbar"] = false;
+  Object.assign(out, drawingStyle("pen", json("presio_pen_style")), drawingStyle("highlighter", json("presio_highlighter_style")));
   put("share.lanAddress", read("presio_lan_address") ?? undefined);
   put("home.minimal", json("presio_home_minimal"));
   if (read("presio_force_desktop") !== null) put("layout.forceDesktop", read("presio_force_desktop") === "true");
@@ -363,6 +345,37 @@ function migrateLegacySettings(): Doc {
     } catch { /* storage unavailable */ }
   }
   return out;
+}
+
+/**
+ * A drawing tool's style as it used to be stored ({ color, size }, the size a
+ * fraction of the slide width) as the drawing plugin's settings: a color and
+ * a width in pixels at a 960px-wide slide. Values the plugin wouldn't accept
+ * are dropped there, when read.
+ */
+function drawingStyle(tool: "pen" | "highlighter", raw: unknown): Doc {
+  const out: Doc = {};
+  if (!isRecord(raw)) return out;
+  // The plugin's defaults (client/plugins/drawing/presio-plugin.json), which
+  // the document leaves out.
+  const defaults = tool === "pen" ? { color: "#e11d48", size: 3 } : { color: "#facc15", size: 14 };
+  const color = typeof raw.color === "string" && /^#[0-9a-f]{6}$/i.test(raw.color) ? raw.color.toLowerCase() : null;
+  if (color && color !== defaults.color) out[`drawing.${tool}Color`] = color;
+  const size = typeof raw.size === "number" && Number.isFinite(raw.size) && raw.size > 0 ? Math.round(raw.size * 960 * 10) / 10 : null;
+  if (size !== null && size !== defaults.size) out[`drawing.${tool}Size`] = size;
+  return out;
+}
+
+/**
+ * Bring a stored document up to date with settings that moved since it was
+ * written: drawing's object-valued styles became the drawing plugin's plain
+ * settings (plugin settings can't be objects). Returns the same object when
+ * there's nothing to do.
+ */
+function upgradeDoc(doc: Doc): Doc {
+  if (!("drawing.pen" in doc) && !("drawing.highlighter" in doc)) return doc;
+  const { "drawing.pen": pen, "drawing.highlighter": highlighter, ...rest } = doc;
+  return { ...drawingStyle("pen", pen), ...drawingStyle("highlighter", highlighter), ...rest };
 }
 
 const LEGACY_KEYS = [

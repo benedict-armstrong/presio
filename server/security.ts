@@ -19,8 +19,9 @@ function originOf(envUrl: string | undefined): string {
   }
 }
 
-// Content-Security-Policy directives. Allows the YouTube/Vimeo embed SDKs and
-// their iframes, the Supabase API/storage, optional analytics, and websockets.
+// Content-Security-Policy directives. Allows the Supabase API/storage, optional
+// analytics, and websockets. Media players (YouTube, Vimeo) run in the media
+// plugin's frame, under PLUGIN_FRAME_CSP below, not in the app's own page.
 export function buildCspDirectives() {
   const supabaseHost = originOf(process.env.SUPABASE_URL);
   const analyticsHost = originOf(process.env.ANALYTICS_URL);
@@ -34,8 +35,8 @@ export function buildCspDirectives() {
     // invisible in dev, where Vite serves the page without this CSP — so it
     // only ever shows up on a deployed origin. It permits WebAssembly
     // compilation, not JavaScript eval(): 'unsafe-eval' is still not granted.
-    "script-src": ["'self'", "'wasm-unsafe-eval'", "https://www.youtube.com", "https://www.youtube-nocookie.com", "https://player.vimeo.com", ...(analyticsHost ? [analyticsHost] : [])],
-    "frame-src": ["'self'", "https://www.youtube.com", "https://www.youtube-nocookie.com", "https://player.vimeo.com"],
+    "script-src": ["'self'", "'wasm-unsafe-eval'", ...(analyticsHost ? [analyticsHost] : [])],
+    "frame-src": ["'self'"],
     "img-src": ["'self'", "data:", "blob:", "https:"],
     "media-src": ["'self'", "blob:", "https:"],
     // `https:` lets the client fetch externally-hosted PDFs ("bring your own
@@ -44,27 +45,20 @@ export function buildCspDirectives() {
     // The loopback origins let a presenter load a plugin they're developing
     // from their own dev server (Settings → Plugins → dev URL) against any
     // Presio deployment, the way a VS Code extension is run from source.
-    "connect-src": ["'self'", "blob:", "data:", "ws:", "wss:", "https:", "https://vimeo.com", "http://localhost:*", "http://127.0.0.1:*", ...(supabaseHost ? [supabaseHost] : [])],
+    "connect-src": ["'self'", "blob:", "data:", "ws:", "wss:", "https:", "http://localhost:*", "http://127.0.0.1:*", ...(supabaseHost ? [supabaseHost] : [])],
     "worker-src": ["'self'", "blob:"],
     "upgrade-insecure-requests": null,
   };
 }
 
-// The page every plugin runs in (client/public/plugin-frame.html), loaded in a
-// sandboxed iframe with an opaque origin. Plugins are single-file HTML, so
-// inline script and style are allowed — and nothing else: no network in any
-// form (fetch, images, fonts, navigation), so a plugin that was handed the deck
-// has no way to send it anywhere. Mirrored by the page's own <meta> policy,
-// which is what applies under the Vite dev server.
+// The plugin frame's policy, in place of the app's. Plugins are trusted code
+// the presenter chose to install (as with VS Code extensions): the frame gives
+// them a stable API and keeps a crashing plugin from taking the page down, not
+// a security boundary. So nothing is locked down beyond keeping the frame
+// embeddable only by Presio itself — plugins may fetch, embed players (YouTube,
+// Vimeo), load media and scripts. What protects audiences is the separate
+// viewer origin (VIEWER_BASE_URLS), not this frame.
 export const PLUGIN_FRAME_CSP = [
-  "default-src 'none'",
-  "script-src 'unsafe-inline'",
-  "style-src 'unsafe-inline'",
-  "img-src data: blob:",
-  "font-src data:",
-  "media-src data: blob:",
-  "connect-src 'none'",
-  "form-action 'none'",
-  "base-uri 'none'",
+  "default-src * data: blob: 'unsafe-inline' 'unsafe-eval'",
   "frame-ancestors 'self'",
 ].join("; ");

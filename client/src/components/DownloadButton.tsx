@@ -9,9 +9,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useDeckDownload } from "@/lib/useDeckDownload";
 import type { Deck } from "@/lib/deck";
+import type { PluginHost } from "@/lib/plugins/host";
 
 interface Props {
   deck: Deck;
+  /** Running plugins, whose export handlers get to transform the file. */
+  plugins?: PluginHost;
   className?: string;
   variant?: React.ComponentProps<typeof Button>["variant"];
   size?: React.ComponentProps<typeof Button>["size"];
@@ -20,18 +23,20 @@ interface Props {
 }
 
 // Split "Download PDF" button. The main action downloads the deck with
-// everything in it: the presenter's drawings burned into the pages and any
-// embedded attachments kept. The dropdown (opening upward — the button lives
-// in bottom bars and menus) offers the same file minus the drawings (i.e. the
-// original upload) or minus the attachments (presio's notes/media sidecars).
+// everything in it: what plugins show live baked into the pages (a video's
+// poster, what's drawn on the slides) and any embedded attachments kept. The
+// dropdown (opening upward — the button lives in bottom bars and menus) offers
+// the original file, untouched, or the full one minus the attachments
+// (presio's notes/media sidecars).
 export function DownloadButton({
   deck,
+  plugins,
   className,
   variant = "ghost",
   size = "sm",
   block,
 }: Props) {
-  const { busy, error, hasDrawing, download } = useDeckDownload(deck);
+  const { busy, error, download } = useDeckDownload(deck, plugins);
 
   return (
     <div className={block ? "w-full flex flex-col gap-1" : "flex flex-col items-end gap-0.5"}>
@@ -66,11 +71,10 @@ export function DownloadButton({
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="end">
             <DropdownMenuItem
-              disabled={!hasDrawing}
-              data-testid="download-no-drawings"
-              onSelect={() => download("no-drawings")}
+              data-testid="download-original"
+              onSelect={() => download("original")}
             >
-              Without drawings
+              Original file
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={!deck.hasAttachments}

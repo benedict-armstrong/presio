@@ -3,8 +3,8 @@
 // before: the slide is painted to a canvas, which has no notion of a clickable
 // region, so links were dead on screen.
 //
-// Positions use the same convention as MediaPlacement — a fraction of the page,
-// top-left origin — so an overlay can place them over the rendered canvas.
+// Positions use the same convention as plugins' layers — a fraction of the
+// page, top-left origin — so an overlay can place them over the rendered canvas.
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
 

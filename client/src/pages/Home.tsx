@@ -16,7 +16,8 @@ import { idbPut, idbGet, idbList, idbDelete } from "@/lib/localStore";
 import { newLocalDeckId } from "@/lib/localId";
 import { isDeckWatchSupported, PDF_PICKER_OPTIONS } from "@/lib/deckWatcher";
 import { getSessionAuth, setSessionAuth, endSession } from "@/lib/utils";
-import { lsRemove, lsSetString, annotationsKey, sessionKey, deckWatchKey } from "@/lib/storage";
+import { lsRemove, lsSetString, sessionKey, deckWatchKey } from "@/lib/storage";
+import { forgetDeckRetained } from "@/lib/plugins/host";
 import { useSetting } from "@/lib/settings";
 import { track, sha256Hex } from "@/lib/analytics";
 import { matchReupload } from "@/lib/reupload";
@@ -750,8 +751,9 @@ export default function Home() {
           throw new Error(body.error || "Failed to replace the PDF");
         }
       }
-      // Drawings are keyed by slide number; a replaced deck invalidates them.
-      lsRemove(annotationsKey(target.id));
+      // What plugins kept for the old deck (drawings, keyed by slide number)
+      // doesn't belong on the new one.
+      forgetDeckRetained(target.id);
       // Keep the in-memory recents row in step with the stored record — the
       // hash must reflect the new bytes for the next re-drop to be matched.
       setRecents((rs) =>

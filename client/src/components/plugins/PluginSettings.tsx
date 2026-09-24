@@ -19,6 +19,7 @@ const SURFACE_LABELS: Record<string, string> = {
   background: "Runs in the background while you present",
   tile: "A card on your dashboard",
   viewer: "A layer on every viewer's screen, including your audience's devices",
+  slide: "A layer on the slide, on your current slide and every viewer's screen",
 };
 
 /** One plugin's page. */
@@ -64,12 +65,17 @@ export function PluginPage({
           <h4 className="text-sm font-medium">What it adds</h4>
           <ul className="text-sm text-muted-foreground list-disc pl-5 space-y-0.5">
             {buttons.map((b) => (
-              <li key={b.id}>A “{b.label}” button in the bottom bar</li>
+              <li key={b.id}>
+                A “{b.label}” button {b.location === "controller.currentSlide" ? "in the current slide's header" : "in the bottom bar"}
+              </li>
             ))}
-            {/* A background part that only serves its buttons says nothing
-                the button line didn't already. */}
+            {manifest.contributes.keybindings.map((k) => (
+              <li key={k.command}>A keyboard shortcut: {k.label}</li>
+            ))}
+            {/* A background part that only serves its buttons or shortcuts
+                says nothing those lines didn't already. */}
             {manifest.surfaces
-              .filter((s) => s !== "background" || buttons.length === 0)
+              .filter((s) => s !== "background" || (buttons.length === 0 && manifest.contributes.keybindings.length === 0))
               .map((s) => (
                 <li key={s}>{SURFACE_LABELS[s]}</li>
               ))}

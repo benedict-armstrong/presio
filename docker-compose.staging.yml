@@ -33,19 +33,23 @@ services:
       PORT: 3001
       # Both hostnames when dual-homed, or the second one's own requests are
       # refused as cross-origin.
-      ALLOWED_ORIGIN: https://${STAGING_HOST:-staging.presio.xyz}${STAGING_HOST_ALT:+,https://${STAGING_HOST_ALT}}
+      ALLOWED_ORIGIN: https://${STAGING_HOST:-staging.presio.xyz}${STAGING_HOST_ALT:+,https://${STAGING_HOST_ALT}}${STAGING_VIEWER_HOST:+,https://${STAGING_VIEWER_HOST}}${STAGING_VIEWER_HOST_ALT:+,https://${STAGING_VIEWER_HOST_ALT}}
       # Pin the origins used in generated links (canonical/og:url, handoff URLs)
       # instead of deriving them from the client-controlled Host header. Staging
       # sits behind Traefik on known hostnames, so the value is knowable here.
       # First entry wins for canonical/og:url; share links follow the request.
       PUBLIC_BASE_URLS: https://${STAGING_HOST:-staging.presio.xyz}${STAGING_HOST_ALT:+,https://${STAGING_HOST_ALT}}
+      # Optional viewer hosts, paired with the two above (e.g.
+      # staging-viewer.presio.xyz — one level under the domain, so the origin
+      # certificate covers it). Unset = viewers stay on the staging hosts.
+      VIEWER_BASE_URLS: ${STAGING_VIEWER_HOST:+https://${STAGING_VIEWER_HOST}}${STAGING_VIEWER_HOST_ALT:+,https://${STAGING_VIEWER_HOST_ALT}}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=web"
       # Two OR'd matchers, not Host(`a`, `b`) — the multi-value form is Traefik
       # v2 syntax and v3 disables the router outright. STAGING_HOST_ALT is
       # optional and defaults back to the primary.
-      - "traefik.http.routers.presio-staging.rule=Host(`${STAGING_HOST:-staging.presio.xyz}`) || Host(`${STAGING_HOST_ALT:-${STAGING_HOST:-staging.presio.xyz}}`)"
+      - "traefik.http.routers.presio-staging.rule=Host(`${STAGING_HOST:-staging.presio.xyz}`) || Host(`${STAGING_HOST_ALT:-${STAGING_HOST:-staging.presio.xyz}}`) || Host(`${STAGING_VIEWER_HOST:-${STAGING_HOST:-staging.presio.xyz}}`) || Host(`${STAGING_VIEWER_HOST_ALT:-${STAGING_HOST:-staging.presio.xyz}}`)"
       - "traefik.http.routers.presio-staging.entrypoints=websecure"
       # Serve TLS from the proxy's certificates (Cloudflare Origin CA). Traefik
       # picks per-handshake by SNI: the default cert covers *.presio.xyz, and a

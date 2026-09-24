@@ -1,7 +1,7 @@
 // React glue for built-in plugins: re-render on whatever presio reports, and
 // mount the plugin into the document build.ts gives it.
 
-import { useEffect, useReducer, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useReducer, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import "./base.css";
 
@@ -19,6 +19,23 @@ export function usePresio(): Presio {
     return () => offs.forEach((off) => off());
   }, []);
   return presio;
+}
+
+/**
+ * One presio.storage value, and a setter that re-renders straight away:
+ * storage.onChange only reports other surfaces' changes, not this one's own.
+ */
+export function useStorage<T>(key: string): [T | undefined, (value: T | undefined) => void] {
+  const [value, setValue] = useState(() => presio.storage.get(key) as T | undefined);
+  useEffect(() => presio.storage.onChange((all) => setValue(all[key] as T | undefined)), [key]);
+  const set = useCallback(
+    (next: T | undefined) => {
+      presio.storage.set(key, next);
+      setValue(next);
+    },
+    [key]
+  );
+  return [value, set];
 }
 
 /** The current time, updated every `ms`. */

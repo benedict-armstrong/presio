@@ -35,7 +35,8 @@ export const STORAGE_KEYS = {
 
 /** Plugins' presio.storage for one session: { [pluginId]: { [key]: value } }. */
 export const pluginStateKey = (id: string) => `presio_plugin_state_${id}`;
-export const annotationsKey = (id: string) => `presio_annotations_${id}`;
+/** The presenter's retained plugin messages for one session (lib/plugins/host.ts). */
+export const pluginRetainedKey = (id: string) => `presio_plugin_retained_${id}`;
 export const sessionKey = (id: string) => `session_${id}`;
 /** Live-reload preference for a local deck: "off" | "prompt" | "auto". A device
  *  preference (the file being watched is on this machine), not session state. */
@@ -91,12 +92,13 @@ export function lsRemove(key: string): void {
 /** Move a deck's per-session state from one id to another. Sharing a local deck
  *  mints its real join code server-side, so the deck is re-keyed — and anything
  *  stored under the old id would be silently lost at exactly the moment the
- *  presenter shares. Drawings are the one that hurts; plugin state and the
- *  viewer-opened flag are moved for the same reason (a running timer resetting,
- *  or the "open the viewer" prompt reappearing, mid-presentation). */
+ *  presenter shares. Plugins' retained state is the one that hurts (it holds
+ *  the drawings); their storage and the viewer-opened flag are moved for the
+ *  same reason (a running timer resetting, or the "open the viewer" prompt
+ *  reappearing, mid-presentation). */
 export function rekeySessionStorage(oldId: string, newId: string): void {
   if (oldId === newId) return;
-  for (const key of [annotationsKey, pluginStateKey, viewerOpenedKey]) {
+  for (const key of [pluginRetainedKey, pluginStateKey, viewerOpenedKey]) {
     const value = lsGetString(key(oldId), "");
     if (value) lsSetString(key(newId), value);
     lsRemove(key(oldId));

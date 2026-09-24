@@ -1,9 +1,10 @@
 # Writing a Presio plugin
 
 A Presio plugin adds a feature to a live presentation — a button in the
-presenter's bottom bar, a card on their dashboard, a layer on every viewer's
-screen, its own settings. It is one self-contained HTML file plus a manifest,
-served from any https URL (or from `http://localhost` while you build it).
+presenter's bottom bar, a keyboard shortcut, a card on their dashboard, a layer
+on every viewer's screen or on the slide itself, its own settings. It is one
+self-contained HTML file plus a manifest, served from any https URL (or from
+`http://localhost` while you build it).
 
 Like a VS Code extension, a plugin never edits Presio's interface: it
 *declares* what it adds, and Presio draws it.
@@ -32,6 +33,9 @@ index.html
     "buttons": [
       { "id": "toggle", "label": "Hello", "icon": "sparkles", "location": "controller.toolbar" }
     ],
+    "keybindings": [
+      { "command": "toggle", "label": "Say hello", "keys": [{ "key": "h" }] }
+    ],
     "settings": {
       "greeting": { "type": "string", "default": "Hello!", "description": "What viewers see." }
     }
@@ -47,16 +51,37 @@ index.html
     resize and hide it like any other card.
   - `viewer`: a full-screen layer on every viewer screen (projector and
     audience phones), hidden until the plugin calls `presio.ui.setVisible(true)`.
+  - `slide`: a layer over the slide itself, sized to the page, on the
+    presenter's current slide and on every viewer — for things that live on
+    the page (media, drawings). It sits above the slide's links, follows the
+    presenter's pinch-zoom (`presio.ui.view` says what of the page is on
+    screen) and lets input through to the slide unless it asks for it with
+    `presio.ui.setInteractive(true)` or a list of page areas. Two fingers stay
+    Presio's even then: once a second touch lands, both pinch and pan the
+    slide (the plugin still sees them, and should drop what the first began).
+    Pair it with `presio.layers` so the same content shows, still, in
+    thumbnails and the next-slide preview.
 - `activation` — `"always"`, or `"attachment:<glob>"` to run only for decks
   whose PDF embeds a matching attachment (e.g. `"attachment:poll-*.json"`).
 - `permissions` — `"deck"` to read the PDF (its bytes and embedded
   attachments); `"editDeck"` to save an edited PDF over it from the presenter's
   device.
 - `contributes.buttons` — up to 4 buttons Presio draws natively. `location`:
-  `controller.toolbar` (the controller's bottom bar). `icon` is one of
-  `qr-code bar-chart message users timer bell star sparkles hand check eye
-  megaphone`. Presses go to the `background` surface, or the `tile` when there
+  `controller.toolbar` (the controller's bottom bar) or
+  `controller.currentSlide` (the current slide card's header, as an icon with
+  the label as its tooltip). `icon` is one of `qr-code bar-chart message users
+  timer bell star sparkles hand check eye megaphone pen`. Presses go to the `background` surface, or the `tile` when there
   is none — so a plugin with buttons needs one of the two.
+- `contributes.keybindings` — up to 16 keyboard shortcuts for the presenter's
+  controller, each a `command` id, a `label` and default `keys` (up to 3, each
+  `{ "key": KeyboardEvent.key, "meta"?: true }`). They're listed under the
+  plugin's name in **Settings → Keyboard shortcuts**, where the presenter can
+  rebind them (stored in the `keybindings` setting as `<id>.<command>`).
+  Presses reach `presio.onCommand(command, …)` where buttons go (background,
+  else tile). They never fire while the presenter types in a field, and
+  Presio's own shortcuts win where keys overlap (arrows, Space, PgUp/PgDn,
+  `b`, `c`, `j` then digits) — Settings marks such a key as taken. The
+  built-ins use `k` and `r` (media) and `p`, `h`, `l`, Esc and ⌘Z (drawing).
 - `contributes.settings` — settings Presio shows under the plugin in
   **Settings → Plugins** and stores in the presenter's settings file as
   `<id>.<name>` (e.g. `hello.greeting`). Types: `boolean`, `number`
@@ -64,20 +89,33 @@ index.html
   (`maxLength`), `enum` (`values`, optional `labels`). Every setting needs a
   `default` that fits it. Viewers run with the presenter's values.
 
-## Rules of the sandbox
+## Trust and the frame
 
-The HTML runs in a sandboxed iframe with an opaque origin and **no network**:
-no `fetch`, no external scripts, styles, images or fonts, no storage, no access
-to the page around it. Inline everything (a single-file build, e.g.
-`vite-plugin-singlefile`, works — React and any npm package are fine once
-bundled in). `data:` and `blob:` URLs are fine.
+Plugins are trusted code, as VS Code extensions are: a presenter should only
+install plugins they trust. Each surface runs in its own frame on Presio's
+origin, with the network available — fetch, scripts, images, and players such
+as YouTube or Vimeo all work. The frame is there for a stable API and to keep
+a misbehaving plugin from breaking the page, not as a sandbox.
 
-The same file runs on every surface; branch on `presio.surface`.
+Audiences are protected differently: on a deployment with a viewer origin
+(e.g. `viewer.presio.ch`), viewer surfaces run there, where nothing of an
+audience member's own Presio account is stored.
+
+Plugins are still delivered as one HTML file — inline your scripts and styles
+(a single-file build, e.g. `vite-plugin-singlefile`, works; React and any npm
+package are fine once bundled in), or load them from your own server with
+absolute URLs.
+
+The same file runs on every surface; branch on `presio.surface`. Keys pressed
+while a frame has focus (after a click on one of its buttons) are handed on to
+Presio unless the plugin calls `preventDefault()` or they were typed into a
+field, so the presenter's shortcuts keep working; a key Presio acts on (Space
+for the next slide) no longer also presses the focused button.
 
 ## The `presio` API
 
 ```js
-presio.surface          // "background" | "tile" | "viewer"
+presio.surface          // "background" | "tile" | "viewer" | "slide"
 presio.role             // "presenter" | "audience"
 presio.theme            // "light" | "dark" (the app's theme)
 presio.session          // { id, local, joinUrl } — joinUrl is null for a local deck
@@ -86,7 +124,7 @@ presio.slide.total
 presio.slide.onChange(slide => {})         // → unsubscribe()
 presio.onContextChange(presio => {})       // session/role/theme changed
 
-presio.send(type, payload, { retain })     // message the plugin's other instances
+presio.send(type, payload, { retain, volatile })  // message the plugin's other instances
 presio.onMessage(({ type, payload, from, sender }) => {})
 
 presio.settings.get(name)                  // this plugin's setting (presenter's value)
@@ -101,12 +139,24 @@ presio.storage.onChange(storage => {})     // another surface of this plugin cha
 
 presio.onButton(id, () => {})              // a contributed button was pressed
 presio.ui.setButton(id, { active, label, disabled })  // presenter: update it
+presio.onCommand(command, () => {})        // a contributed keybinding was pressed
 
 presio.deck.attachments()   // → Promise<[{ filename, bytes: Uint8Array }]> ("deck" permission)
 presio.deck.bytes()         // → Promise<Uint8Array>, the PDF itself ("deck")
+presio.deck.pages()         // → Promise<[{ width, height }]>, each page's size in PDF points ("deck")
 presio.deck.save(bytes)     // presenter: → Promise; same pages, saved where the deck lives ("editDeck")
-presio.deck.onChange(() => {})  // the deck was swapped: an edit, a replace, a live reload
+presio.deck.onChange(kind => {})  // the deck was swapped: "edit" (same pages, e.g. notes saved) or "replace"
+presio.deck.onExport(async (bytes, { mode }) => bytes)  // transform the PDF this device downloads
 presio.ui.setVisible(bool)  // viewer surface: show/hide the layer
+presio.ui.setInteractive(true | false | [{ x, y, w, h }])  // slide surface: take input (page fractions)
+presio.ui.view              // slide surface: { x, y, w, h, scale } — the part of the page on screen, and its zoom
+presio.ui.onViewChange(view => {})
+presio.ui.hovered           // slide surface, presenter: a mouse is over the slide (never for touch)
+presio.ui.onHover(hovered => {})
+
+presio.layers.set(slide, [{ x, y, w, h, image, fit }])  // still images on a slide, shown in every view
+presio.layers.clear()
+presio.clock.now()          // the server's clock (ms), the same on every device
 ```
 
 Storage: `presio.storage` is the presenter's per-session state on their own
@@ -115,12 +165,33 @@ device. It survives a reload and is shared by the plugin's surfaces there
 for anything viewers need. On audience devices it is empty and `set` does
 nothing.
 
+Downloads: when someone downloads the deck with everything in it (or
+everything but its attachments — `mode` is `"everything"` or
+`"no-attachments"`), each running plugin's `onExport` handler on that device
+gets the PDF in turn, in the presenter's plugin order, and resolves to the PDF
+to pass on — the place to bake in what the plugin shows live (the media plugin
+draws each video's poster onto its page, the drawing plugin each stroke).
+Handlers see the deck with its attachments still in. Register one handler per
+plugin per device — on the presenter's, the `background` surface (or the tile)
+is used first; a viewer's download uses whichever surface registered one. A
+handler that throws or takes over a minute is skipped. "Original file" never
+passes through plugins.
+
 Messaging:
 
 - From the **presenter**, a message reaches every instance of the plugin on
   every device. With `{ retain: true }` the latest message of that `type` is
-  kept and replayed to devices that join later — use it for state ("the code
-  is showing"), not one-off events.
+  kept and replayed to devices that join later, and to the presenter's own
+  page after a reload (it's saved on their device) — use it for state ("the
+  code is showing"), not one-off events. A retained `null` payload forgets
+  the type. `{ retain: "deck" }` is the same but belongs to the deck on
+  screen: replacing the deck forgets it everywhere. Split big state over many
+  types (the drawing plugin keeps each slide's strokes in a few): a plugin may
+  keep up to 1024 retained types and 2 MB of them; past that, messages still
+  go out live but aren't kept.
+- `{ volatile: true }` lets a message be dropped instead of queued when a
+  connection is backed up — for a stream where only the latest value counts
+  (a laser position).
 - From the **audience**, a message reaches the presenter's instances only
   (rate-limited), with `from: "audience"` and a per-connection `sender` id.
   The presenter aggregates and broadcasts results back.
@@ -145,3 +216,15 @@ The built-in Join Code plugin is a complete example:
 background sharing `presio.storage`, and Speaker Notes
 ([manifest](BASE/plugins/notes/presio-plugin.json)) reads notes out of the PDF
 and saves edits back with `presio.deck.save` — both React, bundled to one file.
+Media ([manifest](BASE/plugins/media/presio-plugin.json)) plays the GIFs,
+videos and YouTube/Vimeo embeds a deck carries: a `slide` surface with the
+players (controls drawn on each item for the presenter, claimed with
+`setInteractive` areas), retained messages for play state and audio plus time
+samples stamped with `presio.clock.now()` that viewers follow, posters as
+`presio.layers`, keybindings, and an `onExport` handler. Drawing
+([manifest](BASE/plugins/drawing/presio-plugin.json)) is the pen, highlighter
+and laser: a `slide` surface that takes input while a tool is active and only
+its palette otherwise, strokes streamed as they're drawn and kept as
+per-slide `retain: "deck"` chunks, a volatile laser, previews as
+`presio.layers`, a header button and keybindings, and an `onExport` handler
+that bakes the strokes into the PDF as vectors.

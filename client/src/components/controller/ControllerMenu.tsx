@@ -1,4 +1,5 @@
 import type { Deck } from "@/lib/deck";
+import type { PluginHost } from "@/lib/plugins/host";
 import { Menu, X, QrCode, RefreshCw, Settings, ExternalLink, Share2, KeyRound, MonitorPlay, Power } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -16,6 +17,7 @@ export function ControllerMenu({
   onOpen,
   onClose,
   deck,
+  pluginHost,
   canSharePassphrase,
   canShowCode,
   showingCode,
@@ -32,6 +34,8 @@ export function ControllerMenu({
   onOpen: () => void;
   onClose: () => void;
   deck: Deck;
+  /** Plugins that transform the downloaded PDF. */
+  pluginHost?: PluginHost;
   /** Whether shared control can be handed out (synced sessions only — a local
    *  deck is same-device, so there is nobody remote to grant control to). */
   canSharePassphrase: boolean;
@@ -107,7 +111,7 @@ export function ControllerMenu({
                 <RefreshCw size={16} className="mr-2" />
                 Replace PDF…
               </Button>
-              <DownloadButton deck={deck} size="default" block />
+              <DownloadButton deck={deck} plugins={pluginHost} size="default" block />
               {onSettings && (
                 <Button variant="ghost" className="justify-start" onClick={act(onSettings)}>
                   <Settings size={16} className="mr-2" />

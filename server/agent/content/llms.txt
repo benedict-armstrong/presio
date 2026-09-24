@@ -15,7 +15,7 @@ Presio is a PDF presentation tool: controller + viewer windows, speaker notes, e
 ## Docs
 
 - [Checker](BASE/check.md): validate notes/media sidecars
-- [Plugins](BASE/plugins.md): write a sandboxed plugin (presenter card + viewer layer)
+- [Plugins](BASE/plugins.md): write a plugin (presenter card, viewer or slide layer, buttons, shortcuts)
 - [Home](BASE/index.md): product overview
 
 ## Optional

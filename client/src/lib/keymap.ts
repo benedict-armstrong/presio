@@ -1,5 +1,7 @@
 // Controller keyboard shortcuts: types, defaults, and matching. The user's
-// bindings are the "keybindings" setting (lib/settings.ts).
+// bindings are the "keybindings" setting (lib/settings.ts), which also holds
+// their bindings for plugins' commands, as "<plugin id>.<command>" (a plugin's
+// own defaults come from its manifest's contributes.keybindings).
 
 export interface KeyBinding {
   key: string;
@@ -14,6 +16,8 @@ export interface Keymap {
   toggleBlank: KeyBinding[];
   toggleCode: KeyBinding[];
   jumpToSlide: KeyBinding[];
+  /** Plugins' commands the presenter rebound, as "<plugin id>.<command>". */
+  [pluginCommand: string]: KeyBinding[];
 }
 
 export const KEYMAP_ACTIONS = ["nextSlide", "prevSlide", "firstSlide", "lastSlide", "toggleBlank", "toggleCode", "jumpToSlide"] as const;
@@ -47,6 +51,25 @@ export function matchesBinding(e: KeyboardEvent, bindings: KeyBinding[]): boolea
     const metaMatch = b.meta ? e.metaKey : !e.metaKey;
     return keyMatch && metaMatch;
   });
+}
+
+/** Where a plugin command's bindings live in the keymap. */
+export const pluginCommandKey = (pluginId: string, command: string) => `${pluginId}.${command}`;
+
+/** The keys a plugin command answers to: the presenter's, else the plugin's defaults. */
+export function pluginBindings(keymap: Keymap, pluginId: string, command: { command: string; keys: KeyBinding[] }): KeyBinding[] {
+  return (keymap[pluginCommandKey(pluginId, command.command)] as KeyBinding[] | undefined) ?? command.keys;
+}
+
+const sameBinding = (a: KeyBinding, b: KeyBinding) =>
+  a.key.toLowerCase() === b.key.toLowerCase() && !!a.meta === !!b.meta;
+
+/**
+ * The Presio action already bound to this key, if any. Presio's own shortcuts
+ * win, so a plugin binding that clashes never reaches the plugin.
+ */
+export function coreActionFor(keymap: Keymap, binding: KeyBinding): KeymapAction | null {
+  return KEYMAP_ACTIONS.find((action) => keymap[action].some((b) => sameBinding(b, binding))) ?? null;
 }
 
 export function formatBinding(b: KeyBinding): string {

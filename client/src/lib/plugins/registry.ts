@@ -19,10 +19,14 @@ export interface PluginEntry {
 }
 
 /** Shipped with the app, by URL, with whether each is on until the presenter
- *  says otherwise. The timer and notes were core cards before plugins existed. */
+ *  says otherwise. The timer, notes, media and drawing were core before
+ *  plugins existed. Order is the order plugins' layers stack on a slide (later ones
+ *  on top) and downloads pass through them. */
 const BUILTINS: Record<string, { enabled: boolean }> = {
   "/plugins/timer/": { enabled: true },
   "/plugins/notes/": { enabled: true },
+  "/plugins/media/": { enabled: true },
+  "/plugins/drawing/": { enabled: true },
   "/plugins/join-code/": { enabled: false },
 };
 const BUILTIN_URLS = Object.keys(BUILTINS);

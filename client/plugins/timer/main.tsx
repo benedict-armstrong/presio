@@ -6,8 +6,8 @@
 // The clock itself lives in presio.storage, so it survives a reload and the
 // two surfaces always agree.
 
-import { useEffect } from "react";
-import { mount, useNow, usePresio } from "../sdk/react";
+import { useCallback, useEffect } from "react";
+import { mount, useNow, usePresio, useStorage } from "../sdk/react";
 import "./timer.css";
 
 interface Clock {
@@ -28,14 +28,19 @@ function elapsedOf(c: Clock, now: number): number {
   return c.running && c.startedAt ? c.accumulated + Math.floor((now - c.startedAt) / 1000) : c.accumulated;
 }
 
-function toggle() {
-  const c = clock();
-  presio.storage.set(
-    "clock",
-    c.running
-      ? { running: false, startedAt: null, accumulated: elapsedOf(c, Date.now()) }
-      : { ...c, running: true, startedAt: Date.now() }
-  );
+function toggled(c: Clock): Clock {
+  return c.running
+    ? { running: false, startedAt: null, accumulated: elapsedOf(c, Date.now()) }
+    : { ...c, running: true, startedAt: Date.now() };
+}
+
+/** The clock, and its controls. Read fresh from storage when acted on, so a
+ *  press from the other surface is never undone by a stale copy. */
+function useClock(): { clock: Clock; toggle: () => void; reset: () => void } {
+  const [stored, setStored] = useStorage<Clock>("clock");
+  const toggle = useCallback(() => setStored(toggled(clock())), [setStored]);
+  const reset = useCallback(() => setStored(STOPPED), [setStored]);
+  return { clock: stored && typeof stored.accumulated === "number" ? stored : STOPPED, toggle, reset };
 }
 
 const toSeconds = (minutes: unknown) => (typeof minutes === "number" ? Math.round(minutes * 60) : 0);
@@ -70,7 +75,7 @@ function formatTime(total: number): string {
 function Tile() {
   usePresio();
   const now = useNow();
-  const c = clock();
+  const { clock: c, toggle, reset } = useClock();
   const { seconds, warning } = readout(elapsedOf(c, now));
   const time = new Date(now);
   return (
@@ -89,7 +94,7 @@ function Tile() {
       )}
       <div className="row">
         <button className="outline" onClick={toggle}>{c.running ? "Stop" : "Start"}</button>
-        <button onClick={() => presio.storage.set("clock", STOPPED)}>Reset</button>
+        <button onClick={reset}>Reset</button>
       </div>
     </div>
   );
@@ -98,9 +103,9 @@ function Tile() {
 function ToolbarButton() {
   usePresio();
   const now = useNow();
-  const c = clock();
+  const { clock: c, toggle } = useClock();
   const label = formatTime(readout(elapsedOf(c, now)).seconds);
-  useEffect(() => presio.onButton("toggle", toggle), []);
+  useEffect(() => presio.onButton("toggle", toggle), [toggle]);
   // Only tell Presio when the button actually changes, not every tick.
   useEffect(() => presio.ui.setButton("toggle", { label, active: c.running }), [label, c.running]);
   return null;

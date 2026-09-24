@@ -1,0 +1,65 @@
+{
+  "id": "drawing",
+  "name": "Drawing",
+  "version": "1.0.0",
+  "author": "Presio",
+  "description": "A pen, a highlighter and a laser pointer on your current slide, drawn live on every screen, shown in your previews and kept in the PDF you download.",
+  "main": "index.html",
+  "surfaces": ["background", "slide"],
+  "activation": ["always"],
+  "permissions": ["deck"],
+  "contributes": {
+    "buttons": [
+      {
+        "id": "palette",
+        "label": "Drawing tools",
+        "icon": "pen",
+        "tooltip": "Show or hide the drawing tools",
+        "location": "controller.currentSlide"
+      }
+    ],
+    "keybindings": [
+      { "command": "pen", "label": "Pen", "keys": [{ "key": "p" }] },
+      { "command": "highlighter", "label": "Highlighter", "keys": [{ "key": "h" }] },
+      { "command": "laser", "label": "Laser pointer", "keys": [{ "key": "l" }] },
+      { "command": "pointer", "label": "No tool (pointer)", "keys": [{ "key": "Escape" }] },
+      { "command": "undo", "label": "Undo the last stroke", "keys": [{ "key": "z", "meta": true }] },
+      { "command": "clear", "label": "Clear the slide's drawings", "keys": [] }
+    ],
+    "settings": {
+      "toolbar": {
+        "type": "boolean",
+        "default": true,
+        "description": "Show the drawing tools on the current slide."
+      },
+      "penColor": {
+        "type": "enum",
+        "values": ["#111111", "#e11d48", "#2563eb", "#16a34a", "#f59e0b", "#9333ea"],
+        "labels": ["Black", "Red", "Blue", "Green", "Amber", "Purple"],
+        "default": "#e11d48",
+        "description": "The pen's color."
+      },
+      "penSize": {
+        "type": "number",
+        "default": 3,
+        "minimum": 1,
+        "maximum": 48,
+        "description": "The pen's width, in pixels on a 960px-wide slide."
+      },
+      "highlighterColor": {
+        "type": "enum",
+        "values": ["#facc15", "#a3e635", "#22d3ee", "#f472b6", "#fb923c", "#c084fc"],
+        "labels": ["Yellow", "Lime", "Cyan", "Pink", "Orange", "Violet"],
+        "default": "#facc15",
+        "description": "The highlighter's color."
+      },
+      "highlighterSize": {
+        "type": "number",
+        "default": 14,
+        "minimum": 1,
+        "maximum": 48,
+        "description": "The highlighter's width, in pixels on a 960px-wide slide."
+      }
+    }
+  }
+}

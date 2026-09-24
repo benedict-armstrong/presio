@@ -17,11 +17,6 @@ export interface SlideZoom {
 const IDENTITY: SlideZoom = { scale: 1, x: 0, y: 0 };
 
 interface PinchZoomOptions {
-  /**
-   * A drawing tool owns single-finger input: the first finger draws, so panning
-   * and double-tap-to-reset are off. Two fingers still pinch and pan.
-   */
-  drawing: boolean;
   /** Reports whether a gesture is in progress or the slide is zoomed. */
   onActiveChange?: (active: boolean) => void;
 }
@@ -32,17 +27,20 @@ interface PinchZoomOptions {
 // returns to fit-to-card. The transform is purely local to this device —
 // nothing is emitted to viewers or other sessions.
 //
+// Where a plugin's slide layer takes input (a drawing tool), single-finger
+// input is the plugin's and never gets here; SlideLayers passes touches on
+// once a second finger comes down, so two fingers still pinch and pan.
+//
 // The caller applies `zoom` as a CSS transform on a wrapper around everything
 // that should move with the slide content.
 export function useSlidePinchZoom(
   ref: RefObject<HTMLElement | null>,
-  { drawing, onActiveChange }: PinchZoomOptions
+  { onActiveChange }: PinchZoomOptions
 ) {
   const [zoom, setZoom] = useState<SlideZoom>(IDENTITY);
   // Latest values for the listeners; kept in refs so they are bound once and
   // always see current state without re-binding every render.
   const zoomRef = useRef(zoom);
-  const drawingRef = useRef(drawing);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinchBase = useRef<{ dist: number; midX: number; midY: number; zoom: SlideZoom } | null>(null);
   const panLast = useRef<{ x: number; y: number } | null>(null);
@@ -52,9 +50,6 @@ export function useSlidePinchZoom(
   useEffect(() => {
     zoomRef.current = zoom;
   }, [zoom]);
-  useEffect(() => {
-    drawingRef.current = drawing;
-  }, [drawing]);
 
   // Keep the scaled content covering the surface: at origin 0 0 the content
   // spans [x, x + scale*size], which must include [0, size].
@@ -80,8 +75,10 @@ export function useSlidePinchZoom(
     if (!el) return;
     const tracked = pointers.current;
 
-    // Capturing on the surface retargets the pointer away from the annotation
-    // overlay, so it only happens once this hook actually owns the gesture.
+    // Capturing on the surface retargets the pointer away from whatever it
+    // started on, so it only happens once this hook actually owns the gesture.
+    // (Touches handed on from a plugin's frame can't be captured here; they
+    // keep arriving from the frame regardless.)
     const capture = (pointerId: number) => {
       try {
         el.setPointerCapture(pointerId);
@@ -105,7 +102,7 @@ export function useSlidePinchZoom(
         panLast.current = null;
         lastTap.current = null;
         for (const id of tracked.keys()) capture(id);
-      } else if (tracked.size === 1 && !drawingRef.current && zoomRef.current.scale > 1) {
+      } else if (tracked.size === 1 && zoomRef.current.scale > 1) {
         panLast.current = { x: e.clientX, y: e.clientY };
         capture(e.pointerId);
       }
@@ -142,16 +139,16 @@ export function useSlidePinchZoom(
       const wasPinching = !!pinchBase.current;
       setGesturing(tracked.size >= 2);
       if (tracked.size < 2) pinchBase.current = null;
-      if (tracked.size === 1 && !drawingRef.current) {
+      if (tracked.size === 1) {
         // The remaining finger takes over panning from where it sits now.
         const [p] = [...tracked.values()];
         panLast.current = { x: p.x, y: p.y };
       } else {
         panLast.current = null;
       }
-      // Double-tap resets — but only while zoomed and with no drawing tool
-      // active, so taps keep reaching slide navigation and the pen untouched.
-      if (zoomRef.current.scale > 1 && !wasPinching && !drawingRef.current) {
+      // Double-tap resets — but only while zoomed, so taps keep reaching
+      // slide navigation untouched.
+      if (zoomRef.current.scale > 1 && !wasPinching) {
         const now = performance.now();
         const prev = lastTap.current;
         if (
