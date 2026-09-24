@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { PluginManifest, PluginSettingSpec } from "@/lib/plugins/manifest";
+import type { PluginHost } from "@/lib/plugins/host";
+import type { LoadedPlugin, PluginManifest, PluginSettingSpec } from "@/lib/plugins/manifest";
 import { resolvePluginSettings, setPluginSetting, useSettingsDocument } from "@/lib/settings";
 import { addPlugin, removePlugin, setPluginEnabled } from "@/lib/plugins/registry";
 import { pluginLabel, type InstalledPlugin } from "@/lib/plugins/installed";
+import { PluginButtons } from "./PresenterPlugins";
 
 // Settings for plugins: one page per installed plugin (switch it on or off,
-// see what it adds and may do, edit its settings) and a page to add one by
-// URL. The Settings dialog lists them in its sidebar.
+// see what it adds and may do, use its actions, edit its settings) and a page
+// to add one by URL. The Settings dialog lists them in its sidebar.
 
 const PERMISSION_LABELS: Record<string, string> = {
   deck: "Reads the deck: its pages and attachments",
@@ -25,15 +27,22 @@ const SURFACE_LABELS: Record<string, string> = {
 /** One plugin's page. */
 export function PluginPage({
   plugin,
+  host,
+  running,
   onEnabled,
 }: {
   plugin: InstalledPlugin;
+  host: PluginHost;
+  /** The plugin as it runs for this deck, if it does: its actions need it. */
+  running?: LoadedPlugin;
   /** It was just switched on. */
   onEnabled?: (manifest: PluginManifest) => void;
 }) {
   const { entry, manifest, error } = plugin;
   const settings = manifest ? Object.keys(manifest.contributes.settings) : [];
-  const buttons = manifest?.contributes.buttons ?? [];
+  // Its actions are on this page, so the list of what it adds leaves them out.
+  const actions = manifest?.contributes.buttons.filter((b) => b.location === "settings") ?? [];
+  const buttons = manifest?.contributes.buttons.filter((b) => b.location !== "settings") ?? [];
   const details = [
     manifest && `v${manifest.version}`,
     manifest?.author && `by ${manifest.author}`,
@@ -83,6 +92,28 @@ export function PluginPage({
               <li key={p} className="text-amber-600 dark:text-amber-400">{PERMISSION_LABELS[p] ?? p}</li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {actions.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium">Actions</h4>
+          <div className="flex flex-wrap gap-2">
+            {running ? (
+              <PluginButtons host={host} plugins={[running]} location="settings" />
+            ) : (
+              actions.map((b) => (
+                <Button key={b.id} size="sm" variant="outline" disabled>
+                  {b.label}
+                </Button>
+              ))
+            )}
+          </div>
+          {!running && (
+            <p className="text-xs text-muted-foreground">
+              {entry.enabled ? "Available once it runs for this deck." : "Enable the plugin to use these."}
+            </p>
+          )}
         </div>
       )}
 

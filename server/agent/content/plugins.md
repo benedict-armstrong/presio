@@ -67,11 +67,16 @@ index.html
   attachments); `"editDeck"` to save an edited PDF over it from the presenter's
   device.
 - `contributes.buttons` — up to 4 buttons Presio draws natively. `location`:
-  `controller.toolbar` (the controller's bottom bar) or
+  `controller.toolbar` (the controller's bottom bar),
   `controller.currentSlide` (the current slide card's header, as an icon with
-  the label as its tooltip). `icon` is one of `qr-code bar-chart message users
-  timer bell star sparkles hand check eye megaphone pen`. Presses go to the `background` surface, or the `tile` when there
-  is none — so a plugin with buttons needs one of the two.
+  the label as its tooltip) or `settings` (under **Actions** on the plugin's
+  page in Settings — for what's used now and then, like exporting its data).
+  `icon` is one of `qr-code bar-chart message users timer bell star sparkles
+  hand check eye megaphone pen download upload`. With `accept` (an `<input
+  accept>` value, e.g. `".json,application/json"`) Presio asks the presenter
+  for a file first and the press arrives with it. Presses go to the
+  `background` surface, or the `tile` when there is none — so a plugin with
+  buttons needs one of the two.
 - `contributes.keybindings` — up to 16 keyboard shortcuts for the presenter's
   controller, each a `command` id, a `label` and default `keys` (up to 3, each
   `{ "key": KeyboardEvent.key, "meta"?: true }`). They're listed under the
@@ -148,7 +153,8 @@ presio.storage.set(key, value)             // JSON, 16 KB per plugin; set(key) r
 presio.storage.all
 presio.storage.onChange(storage => {})     // another surface of this plugin changed it
 
-presio.onButton(id, () => {})              // a contributed button was pressed
+presio.onButton(id, (id, file) => {})      // a contributed button was pressed; with "accept",
+                                           // file is { name, type, bytes: Uint8Array }
 presio.ui.setButton(id, { active, label, disabled })  // presenter: update it
 presio.onCommand(command, () => {})        // a contributed keybinding was pressed
 

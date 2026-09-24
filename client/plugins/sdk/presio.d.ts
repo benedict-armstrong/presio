@@ -22,6 +22,13 @@ interface PresioView {
   scale: number;
 }
 
+/** A file the presenter picked for a button with "accept". */
+interface PresioFile {
+  name: string;
+  type: string;
+  bytes: Uint8Array;
+}
+
 interface PresioMessage {
   type: string;
   payload: unknown;
@@ -59,7 +66,8 @@ interface Presio {
     set(key: string, value?: unknown): void;
     onChange(cb: (storage: Record<string, unknown>) => void): Unsubscribe;
   };
-  onButton(id: string, cb: (id: string) => void): Unsubscribe;
+  /** A contributed button was pressed; one with "accept" brings the file picked. */
+  onButton(id: string, cb: (id: string, file?: PresioFile) => void): Unsubscribe;
   /** A contributed keybinding's command (contributes.keybindings). */
   onCommand(command: string, cb: (command: string) => void): Unsubscribe;
   readonly deck: {

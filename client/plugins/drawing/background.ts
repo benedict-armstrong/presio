@@ -1,9 +1,10 @@
 // The presenter's hidden surface: a still of each slide's drawing for Next
-// Slide and the thumbnails, the keyboard shortcuts and the header button, and
+// Slide and the thumbnails, the keyboard shortcuts and the buttons (the
+// header's, and saving or loading the drawing from its Settings page), and
 // baking the drawing into a downloaded PDF. It keeps the same model as the
 // slide surface, from the same messages (see model.ts).
 
-import { Drawing, publish, type Tool } from "./model";
+import { Drawing, parseFile, publish, serializeFile, type Tool } from "./model";
 import { drawStrokes } from "./render";
 
 // How wide previews are drawn, and how long a slide's drawing has to settle
@@ -16,6 +17,8 @@ export function runBackground() {
   let pages: { width: number; height: number }[] = [];
   const previews = new Map<number, string>();
   const pending = new Map<number, ReturnType<typeof setTimeout>>();
+  // Saving to a file needs something drawn.
+  const showSaveFile = () => presio.ui.setButton("saveFile", { disabled: drawing.drawnSlides().length === 0 });
 
   // --- Previews (presio.layers) ---
 
@@ -48,7 +51,10 @@ export function runBackground() {
 
   presio.onMessage(({ type, payload }) => {
     const slide = drawing.apply(type, payload);
-    if (slide !== null) schedulePreview(slide);
+    if (slide !== null) {
+      schedulePreview(slide);
+      showSaveFile();
+    }
   });
 
   const loadPages = async () => {
@@ -58,6 +64,7 @@ export function runBackground() {
   presio.deck.onChange((kind) => {
     if (kind === "replace") {
       drawing.reset();
+      showSaveFile();
       presio.layers.clear();
       for (const url of previews.values()) URL.revokeObjectURL(url);
       previews.clear();
@@ -88,6 +95,32 @@ export function runBackground() {
   presio.onButton("palette", () => void presio.settings.set("toolbar", presio.settings.get("toolbar") === false));
   presio.settings.onChange(showButton);
   showButton();
+
+  // --- Saving and loading, from its page in Settings ---
+
+  presio.onButton("saveFile", () => {
+    const url = URL.createObjectURL(new Blob([serializeFile(drawing)], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "slides-drawing.json";
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  presio.onButton("loadFile", (_id, file) => {
+    if (!file) return;
+    try {
+      const loaded = parseFile(new TextDecoder().decode(file.bytes), presio.slide.total);
+      const changed = new Set([...drawing.drawnSlides(), ...loaded.keys()]);
+      publish(drawing.replaceAll(loaded));
+      changed.forEach(schedulePreview);
+      showSaveFile();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to load the drawing");
+    }
+  });
+  showSaveFile();
 
   // pdf-lib only loads when a download asks for it.
   presio.deck.onExport(async (bytes) => (await import("./bake")).bakeDrawing(bytes, drawing));

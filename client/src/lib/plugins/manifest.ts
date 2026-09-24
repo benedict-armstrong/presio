@@ -37,7 +37,10 @@ export type ButtonLocation =
   /** The controller's bottom bar, beside Sync All / Show Code. */
   | "controller.toolbar"
   /** The current slide card's header, as an icon (the label is its tooltip). */
-  | "controller.currentSlide";
+  | "controller.currentSlide"
+  /** The plugin's own page in Settings: for what's used now and then, like
+   *  saving or loading the plugin's data. */
+  | "settings";
 
 export interface ButtonContribution {
   id: string;
@@ -46,6 +49,9 @@ export interface ButtonContribution {
   icon?: string;
   tooltip?: string;
   location: ButtonLocation;
+  /** Ask for a file first, of these types (an <input accept> value): the
+   *  press arrives with it, and doesn't arrive if the presenter cancels. */
+  accept?: string;
 }
 
 /**
@@ -87,6 +93,7 @@ export interface PluginManifest {
 /** Icons a contributed button may name (drawn from Presio's own icon set). */
 export const PLUGIN_ICONS = [
   "qr-code", "bar-chart", "message", "users", "timer", "bell", "star", "sparkles", "hand", "check", "eye", "megaphone", "pen",
+  "download", "upload",
 ] as const;
 
 /** A plugin ready to mount: its manifest and HTML. */
@@ -103,7 +110,7 @@ export interface LoadedPlugin {
 }
 
 const SURFACES: PluginSurface[] = ["background", "tile", "viewer", "slide"];
-const BUTTON_LOCATIONS: ButtonLocation[] = ["controller.toolbar", "controller.currentSlide"];
+const BUTTON_LOCATIONS: ButtonLocation[] = ["controller.toolbar", "controller.currentSlide", "settings"];
 const NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 const PERMISSIONS: PluginPermission[] = ["deck", "editDeck"];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -178,6 +185,7 @@ function parseContributes(raw: unknown): PluginManifest["contributes"] {
         fail(`buttons.${btn.id}: unknown icon "${String(btn.icon)}" (one of ${PLUGIN_ICONS.join(", ")})`);
       }
       if (btn.tooltip !== undefined && (typeof btn.tooltip !== "string" || btn.tooltip.length > 120)) fail(`buttons.${btn.id}: "tooltip" must be a string`);
+      if (btn.accept !== undefined && (typeof btn.accept !== "string" || !btn.accept || btn.accept.length > 200)) fail(`buttons.${btn.id}: "accept" must be a string`);
       if (buttons.some((x) => x.id === btn.id)) fail(`buttons: duplicate id "${btn.id}"`);
       buttons.push({
         id: btn.id as string,
@@ -185,6 +193,7 @@ function parseContributes(raw: unknown): PluginManifest["contributes"] {
         icon: btn.icon as string | undefined,
         tooltip: btn.tooltip as string | undefined,
         location: btn.location as ButtonLocation,
+        accept: btn.accept as string | undefined,
       });
     }
   }

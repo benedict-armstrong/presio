@@ -878,7 +878,14 @@ export function ControllerView({
               icon: Puzzle,
               dimmed: !plugin.entry.enabled,
               description: plugin.manifest?.description,
-              content: <PluginPage plugin={plugin} onEnabled={showPluginTile} />,
+              content: (
+                <PluginPage
+                  plugin={plugin}
+                  host={plugins.host}
+                  running={plugins.plugins.find((p) => p.url === plugin.entry.url)}
+                  onEnabled={showPluginTile}
+                />
+              ),
             })),
             {
               id: "add-plugin",
