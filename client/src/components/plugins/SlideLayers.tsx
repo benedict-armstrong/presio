@@ -327,6 +327,8 @@ function SlideSurface({ host, plugin, view, page }: { host: PluginHost; plugin: 
       const box = frame.getBoundingClientRect();
       return [(clientX - box.left) / box.width, (clientY - box.top) / box.height] as const;
     };
+    const elementAt = (fx: number, fy: number) =>
+      frame.contentDocument?.elementFromPoint(fx * frame.clientWidth, fy * frame.clientHeight);
     // Outside the frame's own input: where the pointer is over the page.
     const onMove = (e: PointerEvent) => {
       if (e.pointerType !== "mouse") return;
@@ -370,7 +372,7 @@ function SlideSurface({ host, plugin, view, page }: { host: PluginHost; plugin: 
       const [fx, fy] = fraction(e.clientX, e.clientY);
       if (!inside(regions, fx, fy) || !onTop(frame, e.clientX, e.clientY)) return;
       e.stopPropagation();
-      const target = frame.contentDocument?.elementFromPoint(fx * frame.clientWidth, fy * frame.clientHeight);
+      const target = elementAt(fx, fy);
       if (!target || !e.isPrimary) return;
       touch = { id: e.pointerId, target };
       forward("pointerdown", e, target);
@@ -389,7 +391,7 @@ function SlideSurface({ host, plugin, view, page }: { host: PluginHost; plugin: 
     const onClick = (e: MouseEvent) => {
       const [fx, fy] = fraction(e.clientX, e.clientY);
       if (!inside(regions, fx, fy) || !onTop(frame, e.clientX, e.clientY)) return;
-      const target = frame.contentDocument?.elementFromPoint(fx * frame.clientWidth, fy * frame.clientHeight);
+      const target = elementAt(fx, fy);
       if (!target) return;
       e.preventDefault();
       e.stopPropagation();

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { stripAttachments } from "@/lib/stripAttachments";
 import type { Deck } from "@/lib/deck";
 import type { PluginHost } from "@/lib/plugins/host";
+import { saveFile } from "@/lib/saveFile";
 
 export type DownloadMode = "everything" | "original" | "no-attachments";
 
@@ -32,20 +33,7 @@ export function useDeckDownload(deck: Deck, plugins?: PluginHost) {
         bytes = await stripAttachments(bytes);
         name = `${stem}-no-attachments.pdf`;
       }
-      // Coerce to a plain ArrayBuffer slice so Blob's BlobPart typing is happy.
-      const buf = bytes.buffer.slice(
-        bytes.byteOffset,
-        bytes.byteOffset + bytes.byteLength
-      ) as ArrayBuffer;
-      const url = URL.createObjectURL(new Blob([buf], { type: "application/pdf" }));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      // Give the browser a tick before revoking; Safari has been finicky.
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      saveFile(new Blob([bytes.slice()], { type: "application/pdf" }), name);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Download failed");
     } finally {

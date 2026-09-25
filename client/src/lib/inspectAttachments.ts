@@ -5,7 +5,7 @@
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { readAttachments } from "./pdf";
-import { typstAstToMarkdown } from "./typstNotes";
+import { notesToMarkdown } from "./typstNotes";
 
 export type Validity = "valid" | "warning" | "invalid";
 
@@ -100,16 +100,7 @@ function inspectNotesJson(
       }
 
       try {
-        if (typeof notes === "string") {
-          previewText = notes;
-        } else if (Array.isArray(notes)) {
-          previewText = notes
-            .map((n) => typstAstToMarkdown(n))
-            .filter((s) => s.length > 0)
-            .join("\n\n---\n\n");
-        } else {
-          previewText = typstAstToMarkdown(notes);
-        }
+        previewText = notesToMarkdown(notes);
       } catch {
         issues.push({ level: "warning", message: "Could not render notes preview (AST may be non-standard)" });
       }

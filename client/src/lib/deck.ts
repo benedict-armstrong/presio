@@ -9,7 +9,7 @@ import { loadLinks, type PdfLink } from "./pdfLinks";
 
 /** Everything derived from the PDF itself — stable until the file changes
  *  (e.g. when a plugin saves an edited deck). */
-export interface DeckInfo {
+export interface Deck {
   pdf: PDFDocumentProxy;
   /** Source of the PDF bytes: server URL, or an object URL for local sessions. */
   url: string;
@@ -21,16 +21,13 @@ export interface DeckInfo {
   linksBySlide: Map<number, PdfLink[]>;
 }
 
-/** The deck the views work with. */
-export type Deck = DeckInfo;
-
 /** Extract everything the app needs from a freshly loaded PDF. Never rejects —
  *  links and attachments are best-effort extras. */
-export async function loadDeckInfo(
+export async function loadDeck(
   pdf: PDFDocumentProxy,
   url: string,
   filename: string
-): Promise<DeckInfo> {
+): Promise<Deck> {
   const totalSlides = pdf.numPages;
   const [attachments, linksBySlide] = await Promise.all([
     hasAttachments(pdf).catch(() => false),

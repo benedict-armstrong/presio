@@ -8,7 +8,7 @@ import type { PdfAttachment } from "@/lib/pdf";
 import { lsGet, lsRemove, lsSet, pluginRetainedKey, pluginStateKey } from "@/lib/storage";
 import { sanitizeSettingValue, setPluginSetting } from "@/lib/settings";
 import { clockOffset } from "@/lib/clock";
-import type { LoadedPlugin, PluginSurface } from "./manifest";
+import { asRecord, type LoadedPlugin, type PluginSurface } from "./manifest";
 
 export type PluginRole = "presenter" | "audience";
 
@@ -161,7 +161,8 @@ const MAX_RETAINED_BYTES_PER_PLUGIN = 2 * 1024 * 1024;
 /** How long retained changes wait before the presenter's copy is saved. */
 const PERSIST_DELAY_MS = 300;
 const NO_BUTTONS: Record<string, ButtonState> = {};
-const retainKey = (plugin: string, type: string) => `${plugin}\u0000${type}`;
+/** A retained message's identity: its plugin and type (a later one replaces it). */
+export const retainKey = ({ plugin, type }: Pick<WireEvent, "plugin" | "type">) => `${plugin}\u0000${type}`;
 /** How long one plugin may take over its part of a download. */
 const EXPORT_TIMEOUT_MS = 60_000;
 
@@ -347,12 +348,10 @@ export class PluginHost {
     const slide = m.slide;
     if (typeof slide !== "number" || !Number.isInteger(slide) || slide < 1 || slide > 10_000) return;
     const items = (Array.isArray(m.items) ? m.items : []).slice(0, MAX_LAYER_ITEMS).flatMap((raw): LayerItem[] => {
-      const r = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
-      const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : NaN);
-      const [x, y, w, h] = [num(r.x), num(r.y), num(r.w), num(r.h)];
-      if ([x, y, w, h].some(Number.isNaN) || w <= 0 || h <= 0) return [];
-      if (typeof r.image !== "string" || !LAYER_IMAGE_RE.test(r.image)) return [];
-      return [{ x, y, w, h, image: r.image, fit: r.fit === "contain" ? "contain" : "cover" }];
+      const r = asRecord(raw);
+      const rect = parseRect(r);
+      if (!rect || typeof r.image !== "string" || !LAYER_IMAGE_RE.test(r.image)) return [];
+      return [{ ...rect, image: r.image, fit: r.fit === "contain" ? "contain" : "cover" }];
     });
     let bySlide = this.layers.get(pluginId);
     if (!bySlide) this.layers.set(pluginId, (bySlide = new Map()));
@@ -527,7 +526,7 @@ export class PluginHost {
    * goes out live; it just isn't there for devices that join later.
    */
   private keepRetained(event: WireEvent): boolean {
-    const key = retainKey(event.plugin, event.type);
+    const key = retainKey(event);
     if (event.payload === null) {
       this.retained.delete(key);
       this.retainedSize.delete(key);
@@ -656,13 +655,14 @@ export class PluginHost {
 
   private async answer(conn: Conn, id: unknown, kind: unknown, args: unknown) {
     const reply = (result: unknown, error?: string) => conn.port.postMessage({ type: "reply", id, result, error });
-    const a = (typeof args === "object" && args !== null ? args : {}) as Record<string, unknown>;
+    const a = asRecord(args);
     const { manifest } = conn.plugin;
+    const readsDeck = kind === "attachments" || kind === "deckBytes" || kind === "pages";
+    if (readsDeck && !manifest.permissions.includes("deck")) {
+      return reply(null, 'Reading the deck needs the "deck" permission in presio-plugin.json');
+    }
     switch (kind) {
       case "attachments": {
-        if (!manifest.permissions.includes("deck")) {
-          return reply(null, 'Reading the deck needs the "deck" permission in presio-plugin.json');
-        }
         try {
           // Copies, so a plugin can't mutate the bytes the app itself renders from.
           const list = await this.attachments();
@@ -672,9 +672,6 @@ export class PluginHost {
         }
       }
       case "deckBytes": {
-        if (!manifest.permissions.includes("deck")) {
-          return reply(null, 'Reading the deck needs the "deck" permission in presio-plugin.json');
-        }
         try {
           const bytes = await this.deckBytes();
           if (!bytes) return reply(null, "The deck hasn't loaded yet");
@@ -684,9 +681,6 @@ export class PluginHost {
         }
       }
       case "pages": {
-        if (!manifest.permissions.includes("deck")) {
-          return reply(null, 'Reading the deck needs the "deck" permission in presio-plugin.json');
-        }
         try {
           return reply(await this.pageSizes());
         } catch {
@@ -720,16 +714,18 @@ export class PluginHost {
   }
 }
 
+/** A plugin-given box (fractions): finite, with a positive size; else null. */
+function parseRect(r: Record<string, unknown>): SlidePage | null {
+  const { x, y, w, h } = r;
+  if (![x, y, w, h].every((v) => typeof v === "number" && Number.isFinite(v))) return null;
+  const rect = { x, y, w, h } as SlidePage;
+  return rect.w > 0 && rect.h > 0 ? rect : null;
+}
+
 function sanitizeInteractive(value: unknown): Interactive {
   if (typeof value === "boolean") return value;
   if (!Array.isArray(value)) return false;
-  return value.slice(0, 32).flatMap((raw) => {
-    const r = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
-    const [x, y, w, h] = [r.x, r.y, r.w, r.h];
-    return [x, y, w, h].every((v) => typeof v === "number" && Number.isFinite(v)) && (w as number) > 0 && (h as number) > 0
-      ? [{ x: x as number, y: y as number, w: w as number, h: h as number }]
-      : [];
-  });
+  return value.slice(0, 32).flatMap((raw) => parseRect(asRecord(raw)) ?? []);
 }
 
 /** A deck replaced while its presenter's page wasn't open (from Home): forget

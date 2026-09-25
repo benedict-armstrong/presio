@@ -106,18 +106,21 @@ test("the join code can be thrown up on the viewer", async ({ browser, request }
   await waitForSlide(controller);
   await waitForSlide(viewer);
 
-  const code = viewer.getByText("Session code");
-  await expect(code).toBeHidden();
+  // The built-in Join Code plugin's layer, mounted on every viewer but hidden
+  // until the presenter puts it up.
+  const layer = viewer.getByTestId("plugin-frame-join-code-viewer");
+  await expect(layer).toBeAttached();
+  await expect(layer).toBeHidden();
 
   await controller.locator("body").click();
   await controller.keyboard.press("c");
 
   // The projector shows the code itself, so the room can type it in.
-  await expect(code).toBeVisible();
-  await expect(viewer.getByText(sessionId, { exact: true })).toBeVisible();
+  await expect(layer).toBeVisible();
+  await expect(viewer.frameLocator('[data-testid="plugin-frame-join-code-viewer"]').getByText(sessionId, { exact: true })).toBeVisible();
 
   await controller.keyboard.press("c");
-  await expect(code).toBeHidden();
+  await expect(layer).toBeHidden();
 
   await ctx.close();
 });

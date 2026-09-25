@@ -57,9 +57,12 @@
         post({ type: "request", id: id, kind: kind, args: args || null });
       });
     }
-    function each(list, arg) {
+    // Call each listener with the arguments after `list`; one that throws
+    // doesn't stop the rest.
+    function each(list) {
+      var args = Array.prototype.slice.call(arguments, 1);
       list.slice().forEach(function (cb) {
-        try { cb(arg); } catch (err) { console.error(err); }
+        try { cb.apply(null, args); } catch (err) { console.error(err); }
       });
     }
     function subscribe(list, cb) {
@@ -68,6 +71,11 @@
         var i = list.indexOf(cb);
         if (i >= 0) list.splice(i, 1);
       };
+    }
+    // Listeners by id (a button, a command): map[id] is that id's list.
+    function subscribeTo(map, id, cb) {
+      map[id] = map[id] || [];
+      return subscribe(map[id], cb);
     }
 
     port.onmessage = function (e) {
@@ -98,13 +106,9 @@
         ctx.hovered = m.hovered;
         each(hoverListeners, ctx.hovered);
       } else if (m.type === "button") {
-        (buttonListeners[m.id] || []).slice().forEach(function (cb) {
-          try { cb(m.id, m.file); } catch (err) { console.error(err); }
-        });
+        each(buttonListeners[m.id] || [], m.id, m.file);
       } else if (m.type === "menu") {
-        (menuListeners[m.id] || []).slice().forEach(function (cb) {
-          try { cb(m.item, m.id); } catch (err) { console.error(err); }
-        });
+        each(menuListeners[m.id] || [], m.item, m.id);
       } else if (m.type === "command") {
         each(commandListeners[m.id] || [], m.id);
       } else if (m.type === "export") {
@@ -187,9 +191,7 @@
         var off = subscribe(messageListeners, cb);
         var queued = pending;
         pending = [];
-        queued.forEach(function (m) {
-          try { cb(m); } catch (err) { console.error(err); }
-        });
+        queued.forEach(function (m) { each([cb], m); });
         return off;
       },
       /**
@@ -225,23 +227,14 @@
        *  the background surface, or the tile when there is none. cb(id, file):
        *  a button with "accept" arrives with the file the presenter picked,
        *  { name, type, bytes: Uint8Array }. */
-      onButton: function (id, cb) {
-        buttonListeners[id] = buttonListeners[id] || [];
-        return subscribe(buttonListeners[id], cb);
-      },
+      onButton: function (id, cb) { return subscribeTo(buttonListeners, id, cb); },
       /** An item was picked from a button's menu (presio.ui.setButton's
        *  `menu`). Delivered like button presses. cb(itemId, buttonId). */
-      onMenu: function (id, cb) {
-        menuListeners[id] = menuListeners[id] || [];
-        return subscribe(menuListeners[id], cb);
-      },
+      onMenu: function (id, cb) { return subscribeTo(menuListeners, id, cb); },
       /** A contributed keybinding (contributes.keybindings) was pressed, by
        *  its command id. Delivered like buttons: to the background surface,
        *  or the tile when there is none. */
-      onCommand: function (id, cb) {
-        commandListeners[id] = commandListeners[id] || [];
-        return subscribe(commandListeners[id], cb);
-      },
+      onCommand: function (id, cb) { return subscribeTo(commandListeners, id, cb); },
       deck: {
         /** [{ filename, bytes: Uint8Array }] — needs the "deck" permission. */
         attachments: function () { return request("attachments"); },

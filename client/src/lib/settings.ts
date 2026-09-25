@@ -160,11 +160,7 @@ const resolved = new Map<string, unknown>();
 
 function loadDoc(): Doc {
   const stored = lsGet<unknown>(STORAGE_KEYS.settings, undefined);
-  if (isRecord(stored)) {
-    const upgraded = upgradeDoc(stored);
-    if (upgraded !== stored) lsSet(STORAGE_KEYS.settings, upgraded);
-    return upgraded;
-  }
+  if (isRecord(stored)) return stored;
   const migrated = migrateLegacySettings();
   lsSet(STORAGE_KEYS.settings, migrated);
   return migrated;
@@ -366,18 +362,6 @@ function drawingStyle(tool: "pen" | "highlighter", raw: unknown): Doc {
   return out;
 }
 
-/**
- * Bring a stored document up to date with settings that moved since it was
- * written: drawing's object-valued styles became the drawing plugin's plain
- * settings (plugin settings can't be objects). Returns the same object when
- * there's nothing to do.
- */
-function upgradeDoc(doc: Doc): Doc {
-  if (!("drawing.pen" in doc) && !("drawing.highlighter" in doc)) return doc;
-  const { "drawing.pen": pen, "drawing.highlighter": highlighter, ...rest } = doc;
-  return { ...drawingStyle("pen", pen), ...drawingStyle("highlighter", highlighter), ...rest };
-}
-
 const LEGACY_KEYS = [
   "theme",
   "presio_keymap",
@@ -390,6 +374,4 @@ const LEGACY_KEYS = [
   "presio_lan_address",
   "presio_home_minimal",
   "presio_force_desktop",
-  // Plugin list from before it moved into settings (never released).
-  "presio_plugins",
 ];

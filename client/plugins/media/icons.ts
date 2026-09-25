@@ -1,4 +1,6 @@
-// Presio's own icons (Lucide, ISC), inline: the controls are plain DOM.
+// The media controls' icons (Lucide, ISC).
+
+import { svgIcon } from "../sdk/icon";
 
 const PATHS: Record<string, string> = {
   play: '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" fill="currentColor"/>',
@@ -13,6 +15,4 @@ const PATHS: Record<string, string> = {
   blank: "",
 };
 
-export function icon(name: string): string {
-  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name] ?? ""}</svg>`;
-}
+export const icon = (name: string): string => svgIcon(PATHS[name] ?? "");

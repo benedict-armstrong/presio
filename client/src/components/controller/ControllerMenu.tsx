@@ -1,6 +1,6 @@
 import type { Deck } from "@/lib/deck";
 import type { PluginHost } from "@/lib/plugins/host";
-import { Menu, X, QrCode, RefreshCw, Settings, ExternalLink, Share2, KeyRound, MonitorPlay, Power } from "lucide-react";
+import { Menu, X, RefreshCw, Settings, ExternalLink, Share2, KeyRound, MonitorPlay, Power } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { DownloadButton } from "@/components/DownloadButton";
@@ -19,10 +19,7 @@ export function ControllerMenu({
   deck,
   pluginHost,
   canSharePassphrase,
-  canShowCode,
-  showingCode,
   onShare,
-  onToggleCode,
   onShowPassphrase,
   onSwitchToViewer,
   onReplaceClick,
@@ -39,11 +36,7 @@ export function ControllerMenu({
   /** Whether shared control can be handed out (synced sessions only — a local
    *  deck is same-device, so there is nobody remote to grant control to). */
   canSharePassphrase: boolean;
-  /** Whether the "show join code on viewers" toggle applies (synced sessions only). */
-  canShowCode: boolean;
-  showingCode: boolean;
   onShare: () => void;
-  onToggleCode: () => void;
   onShowPassphrase: () => void;
   /** Take over presenting in this tab (phone: there is no second window). */
   onSwitchToViewer?: () => void;
@@ -83,12 +76,6 @@ export function ControllerMenu({
                 <Share2 size={16} className="mr-2" />
                 Share
               </Button>
-              {canShowCode && (
-                <Button variant="ghost" className="justify-start" onClick={act(onToggleCode)}>
-                  <QrCode size={16} className="mr-2" />
-                  {showingCode ? "Hide Join Code" : "Show Join Code"}
-                </Button>
-              )}
               {canSharePassphrase && (
                 <Button variant="ghost" className="justify-start" onClick={act(onShowPassphrase)}>
                   <KeyRound size={16} className="mr-2" />

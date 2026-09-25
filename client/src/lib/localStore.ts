@@ -107,9 +107,3 @@ export function idbList(): Promise<LocalPresentationMeta[]> {
       .sort((a, b) => b.createdAt - a.createdAt)
   );
 }
-
-export async function idbPruneOlderThan(ms: number): Promise<void> {
-  const cutoff = Date.now() - ms;
-  const all = await tx<LocalPresentation[]>("readonly", (store) => store.getAll());
-  await Promise.all(all.filter((r) => r.createdAt < cutoff).map((r) => idbDelete(r.id)));
-}

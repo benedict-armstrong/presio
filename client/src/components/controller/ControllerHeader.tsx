@@ -13,7 +13,6 @@ export function ControllerHeader({
   id,
   local,
   blanked = false,
-  showingCode = false,
   compact = false,
   filename = "",
   deckWatchMode = null,
@@ -30,8 +29,6 @@ export function ControllerHeader({
   id: string;
   local: boolean;
   blanked?: boolean;
-  /** Whether the join code / QR is currently shown on all viewers. */
-  showingCode?: boolean;
   /** The deck on screen. Shown (and clickable, to swap it) whenever the
    * controller passes a replace handler. */
   filename?: string;
@@ -106,11 +103,6 @@ export function ControllerHeader({
         {blanked && (
           <span className="text-xs font-medium text-destructive px-1.5 py-0.5 rounded bg-destructive/10">
             Blanked
-          </span>
-        )}
-        {showingCode && (
-          <span className="hidden text-xs font-medium text-primary px-1.5 py-0.5 rounded bg-primary/10 sm:inline">
-            Code shown
           </span>
         )}
       </div>

@@ -164,39 +164,17 @@ function PluginButtonGroup({ host, plugin, location }: { host: PluginHost; plugi
               icon
             );
           }
-          if (location === "settings") {
-            const main = (
-              <Button
-                key={button.id}
-                variant="outline"
-                size="sm"
-                disabled={state.disabled}
-                data-testid={`plugin-button-${id}-${button.id}`}
-                title={button.tooltip}
-                onClick={() => press(host, id, button)}
-              >
-                {Icon && <Icon size={14} className="mr-1" />}
-                {state.label ?? button.label}
-              </Button>
-            );
-            return menu ? (
-              <ButtonGroup key={button.id}>
-                {main}
-                {menu}
-              </ButtonGroup>
-            ) : (
-              main
-            );
-          }
+          // Settings page actions are plain buttons; the toolbar's show their state.
+          const inSettings = location === "settings";
           const main = (
             <Button
               key={button.id}
-              variant={state.active ? "default" : "ghost"}
+              variant={inSettings ? "outline" : state.active ? "default" : "ghost"}
               size="sm"
               disabled={state.disabled}
-              aria-pressed={state.active}
+              aria-pressed={inSettings ? undefined : state.active}
               data-testid={`plugin-button-${id}-${button.id}`}
-              title={title}
+              title={inSettings ? button.tooltip : title}
               onClick={() => press(host, id, button)}
             >
               {Icon && <Icon size={14} className="mr-1" />}

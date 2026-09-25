@@ -43,7 +43,7 @@ export type PluginPermission =
 
 /** Where a contributed button can go. */
 export type ButtonLocation =
-  /** The controller's bottom bar, beside Sync All / Show Code. */
+  /** The controller's bottom bar, beside Sync All. */
   | "controller.toolbar"
   /** The current slide card's header, as an icon (the label is its tooltip). */
   | "controller.currentSlide"
@@ -119,6 +119,11 @@ export interface LoadedPlugin {
   hash: string;
 }
 
+/** An untrusted value as an object to read fields from ({} when it isn't one). */
+export function asRecord(value: unknown): Record<string, unknown> {
+  return (typeof value === "object" && value !== null ? value : {}) as Record<string, unknown>;
+}
+
 const SURFACES: PluginSurface[] = ["background", "tile", "viewer", "slide"];
 const BUTTON_LOCATIONS: ButtonLocation[] = ["controller.toolbar", "controller.currentSlide", "settings"];
 const NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
@@ -192,7 +197,7 @@ function parseContributes(raw: unknown): PluginManifest["contributes"] {
   if (c.buttons !== undefined) {
     if (!Array.isArray(c.buttons) || c.buttons.length > 4) fail("buttons must be a list of at most 4");
     for (const b of c.buttons as unknown[]) {
-      const btn = (typeof b === "object" && b !== null ? b : {}) as Record<string, unknown>;
+      const btn = asRecord(b);
       if (typeof btn.id !== "string" || !NAME_RE.test(btn.id)) fail("buttons: each needs an \"id\" (letters and digits)");
       if (typeof btn.label !== "string" || !btn.label || btn.label.length > 24) fail(`buttons.${btn.id}: "label" must be 1–24 characters`);
       if (!BUTTON_LOCATIONS.includes(btn.location as ButtonLocation)) fail(`buttons.${btn.id}: "location" must be one of ${BUTTON_LOCATIONS.join(", ")}`);
@@ -217,13 +222,13 @@ function parseContributes(raw: unknown): PluginManifest["contributes"] {
   if (c.keybindings !== undefined) {
     if (!Array.isArray(c.keybindings) || c.keybindings.length > 16) fail("keybindings must be a list of at most 16");
     for (const k of c.keybindings as unknown[]) {
-      const kb = (typeof k === "object" && k !== null ? k : {}) as Record<string, unknown>;
+      const kb = asRecord(k);
       if (typeof kb.command !== "string" || !NAME_RE.test(kb.command)) fail('keybindings: each needs a "command" (letters and digits)');
       const at = `keybindings.${kb.command}`;
       if (typeof kb.label !== "string" || !kb.label || kb.label.length > 48) fail(`${at}: "label" must be 1–48 characters`);
       if (!Array.isArray(kb.keys) || kb.keys.length > 3) fail(`${at}: "keys" must be a list of at most 3`);
       const keys = (kb.keys as unknown[]).map((raw): KeyBinding => {
-        const key = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+        const key = asRecord(raw);
         if (typeof key.key !== "string" || !key.key || key.key.length > 32) fail(`${at}: each key needs a "key" (a KeyboardEvent.key value)`);
         if (key.meta !== undefined && typeof key.meta !== "boolean") fail(`${at}: "meta" must be true or false`);
         return key.meta ? { key: key.key as string, meta: true } : { key: key.key as string };
@@ -261,7 +266,7 @@ function parseSettingSpec(name: string, raw: unknown, fail: (msg: string) => nev
       break;
     }
     case "string":
-      spec = { type: "string", default: r.default as string, maxLength: Math.min(bound1000(r.maxLength), 1000), description };
+      spec = { type: "string", default: r.default as string, maxLength: typeof r.maxLength === "number" && Number.isInteger(r.maxLength) && r.maxLength > 0 ? Math.min(r.maxLength, 1000) : 1000, description };
       break;
     case "enum": {
       const values = r.values;
@@ -278,10 +283,6 @@ function parseSettingSpec(name: string, raw: unknown, fail: (msg: string) => nev
   // The default has to satisfy its own spec, or every read would be invalid.
   if (sanitizeSettingValue(spec!, spec!.default) === undefined) fail(`settings.${name}: "default" doesn't match its type`);
   return spec!;
-}
-
-function bound1000(v: unknown): number {
-  return typeof v === "number" && Number.isInteger(v) && v > 0 ? v : 1000;
 }
 
 function globToRegExp(glob: string): RegExp {

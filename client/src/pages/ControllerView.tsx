@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { cn, getSessionAuth, setSessionAuth } from "@/lib/utils";
-import { Settings, TriangleAlert, Check, Option, Plus, Share2, ExternalLink, QrCode, User, LayoutGrid, Puzzle, KeyRound, Keyboard, FileJson } from "lucide-react";
+import { Settings, TriangleAlert, Check, Option, Plus, Share2, ExternalLink, User, LayoutGrid, Puzzle, KeyRound, Keyboard, FileJson } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
@@ -94,8 +94,6 @@ interface ControllerViewProps {
   currentCanvasRef: React.RefObject<HTMLDivElement | null>;
   blanked: boolean;
   onBlankToggle: () => void;
-  showCode: boolean;
-  onShowCodeToggle: () => void;
   /** The deck on screen, shown in the header's deck control. */
   filename: string;
   /** Live-reload preference, or null when this deck can't be watched. */
@@ -110,6 +108,9 @@ interface ControllerViewProps {
   plugins: PluginHostState;
 }
 
+/** The Settings page for an installed plugin, by its URL. */
+const pluginPageId = (url: string) => `plugin:${url}`;
+
 export function ControllerView({
   id,
   local,
@@ -123,8 +124,6 @@ export function ControllerView({
   currentCanvasRef,
   blanked,
   onBlankToggle,
-  showCode,
-  onShowCodeToggle,
   filename,
   deckWatchMode,
   deckWatchStatus,
@@ -217,8 +216,6 @@ export function ControllerView({
 
   const { user } = useAuth();
   const loggedIn = !!user;
-  // Plugins (drawing, notes editing) work on this device, so they're never
-  // gated on an account. Login is only for sharing online.
   const { syncing, syncError, sync } = useClaim(id);
 
   // One-time email list prompt after a few minutes of presenting. Waits for
@@ -361,10 +358,6 @@ export function ControllerView({
         onGoTo(currentSlide - 1);
       } else if (matchesBinding(e, keymap.toggleBlank)) {
         onBlankToggle();
-      } else if (matchesBinding(e, keymap.toggleCode)) {
-        // The join code is only meaningful for synced sessions, which have a
-        // remote audience; local sessions can't be joined elsewhere.
-        if (!local) onShowCodeToggle();
       } else if (!e.repeat) {
         // Plugins' keybindings, after Presio's own: a key both claim is ours.
         for (const plugin of runningPlugins) {
@@ -380,7 +373,7 @@ export function ControllerView({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [currentSlide, totalSlides, onGoTo, onBlankToggle, onShowCodeToggle, local, keymap, pendingJump, armJump, commitJump, cancelJump, runningPlugins, pluginHost]);
+  }, [currentSlide, totalSlides, onGoTo, onBlankToggle, local, keymap, pendingJump, armJump, commitJump, cancelJump, runningPlugins, pluginHost]);
 
   const onMosaicChange = useCallback((node: MosaicNode<string> | null) => {
     setMosaic(node);
@@ -557,7 +550,7 @@ export function ControllerView({
         <button
           type="button"
           onClick={() => {
-            setSettingsCategory(`plugin:${viewerFailedUrl}`);
+            setSettingsCategory(pluginPageId(viewerFailedUrl));
             setSettingsOpen(true);
           }}
           title={plugins.viewerErrors[viewerFailedUrl]}
@@ -605,10 +598,7 @@ export function ControllerView({
       deck={deck}
       pluginHost={plugins.host}
       canSharePassphrase={canSharePassphrase}
-      canShowCode={!local}
-      showingCode={showCode}
       onShare={() => setShareDialogOpen(true)}
-      onToggleCode={onShowCodeToggle}
       onShowPassphrase={() => { setPassphraseDialogOpen(true); void requestPassphrase(); }}
       onSwitchToViewer={isMobile ? () => navigate(`/s/${id}?role=viewer`, { replace: true }) : undefined}
       onReplaceClick={openReplacePicker}
@@ -633,7 +623,6 @@ export function ControllerView({
         id={id}
         local={local}
         blanked={blanked}
-        showingCode={showCode && !local}
         compact={isMobile}
         filename={filename}
         deckWatchMode={deckWatchMode}
@@ -697,19 +686,6 @@ export function ControllerView({
           {!local && (
             <Button variant="ghost" size="sm" onClick={onSyncAll} title="Bring all viewers back to the current slide">
               Sync All
-            </Button>
-          )}
-          {!local && (
-            <Button
-              variant={showCode ? "default" : "ghost"}
-              size="sm"
-              onClick={onShowCodeToggle}
-              title="Show the join code & QR on all viewers' screens"
-            >
-              <QrCode size={14} className={narrow ? undefined : "mr-1"} />
-              <span className={narrow ? "sr-only" : undefined}>
-                {showCode ? "Hide Code" : "Show Code"}
-              </span>
             </Button>
           )}
           <PluginButtons host={plugins.host} plugins={plugins.plugins} location="controller.toolbar" />
@@ -889,7 +865,7 @@ export function ControllerView({
             },
             // One page per installed plugin, then one to add another.
             ...installedPlugins.map((plugin) => ({
-              id: `plugin:${plugin.entry.url}`,
+              id: pluginPageId(plugin.entry.url),
               group: "Plugins",
               label: pluginLabel(plugin),
               icon: Puzzle,
@@ -916,7 +892,7 @@ export function ControllerView({
                 <AddPluginPage
                   onAdded={(url, manifest) => {
                     showPluginTile(manifest);
-                    setSettingsCategory(`plugin:${url}`);
+                    setSettingsCategory(pluginPageId(url));
                   }}
                 />
               ),

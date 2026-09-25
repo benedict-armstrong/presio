@@ -19,8 +19,9 @@ interface Clock {
 
 const STOPPED: Clock = { running: false, startedAt: null, accumulated: 0 };
 
-function clock(): Clock {
-  const c = presio.storage.get("clock") as Clock | undefined;
+/** A stored clock, or a stopped one when there's none (or it's malformed). */
+function asClock(value: unknown): Clock {
+  const c = value as Clock | undefined;
   return c && typeof c.accumulated === "number" ? c : STOPPED;
 }
 
@@ -38,9 +39,9 @@ function toggled(c: Clock): Clock {
  *  press from the other surface is never undone by a stale copy. */
 function useClock(): { clock: Clock; toggle: () => void; reset: () => void } {
   const [stored, setStored] = useStorage<Clock>("clock");
-  const toggle = useCallback(() => setStored(toggled(clock())), [setStored]);
+  const toggle = useCallback(() => setStored(toggled(asClock(presio.storage.get("clock")))), [setStored]);
   const reset = useCallback(() => setStored(STOPPED), [setStored]);
-  return { clock: stored && typeof stored.accumulated === "number" ? stored : STOPPED, toggle, reset };
+  return { clock: asClock(stored), toggle, reset };
 }
 
 const toSeconds = (minutes: unknown) => (typeof minutes === "number" ? Math.round(minutes * 60) : 0);

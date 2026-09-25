@@ -193,8 +193,8 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
   // The pdf.js canvas is NOT the page rect: it is stretched over the whole
   // container and drawn with `object-fit: contain`, so its client box carries
   // the letterbox bars. The page is the contain-fitted rect inside it, which is
-  // what the drawing layer is sized to — so the fractions here have to be
-  // measured the same way, or every mark lands off by the bar.
+  // what the drawing plugin positions strokes against — so the fractions here
+  // have to be measured the same way, or every mark lands off by the bar.
   const surface = controller.locator(".touch-none canvas").first();
   const box = await surface.evaluate((el) => {
     const c = el as HTMLCanvasElement;
@@ -235,9 +235,9 @@ async function record(browser: Browser, theme: "light" | "dark", BASE: string) {
   };
 
   // Park the pointer off the rendered page. A laser dot only clears when the
-  // pointer leaves the slide, so without
-  // this the dot sits frozen where the sweep ended — on camera, and on the
-  // viewer until its 3s remote-hide timer fires.
+  // pointer leaves the slide, so without this the dot sits frozen where the
+  // sweep ended — on camera, and on the viewer until its 3s remote-hide timer
+  // fires.
   const leaveSlide = () =>
     controller.mouse.move(box.x + box.width / 2, Math.max(2, box.y - 40));
 

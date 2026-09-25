@@ -50,11 +50,15 @@
   $("stage").hidden = presio.surface !== "viewer";
 
   if (presio.surface === "background") {
-    presio.onButton("toggle", () => {
+    const toggle = () => {
+      // A local deck has no join code to show.
+      if (presio.session.local) return;
       showing = !showing;
       presio.send("visible", { on: showing }, { retain: true });
       render();
-    });
+    };
+    presio.onButton("toggle", toggle);
+    presio.onCommand("toggle", toggle);
   }
 
   presio.onMessage(({ type, payload, from }) => {

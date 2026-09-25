@@ -3,7 +3,7 @@
   "name": "Join Code",
   "version": "1.1.0",
   "author": "Presio",
-  "description": "Put the session's join code up on every viewer screen from a button in the controller's bottom bar.",
+  "description": "Put the session's join code up on every viewer screen from a button in the controller's bottom bar, or the C key.",
   "main": "index.html",
   "surfaces": ["background", "viewer"],
   "activation": ["always"],
@@ -17,6 +17,9 @@
         "tooltip": "Show the join code on every viewer screen",
         "location": "controller.toolbar"
       }
+    ],
+    "keybindings": [
+      { "command": "toggle", "label": "Show join code", "keys": [{ "key": "c" }] }
     ],
     "settings": {
       "heading": {

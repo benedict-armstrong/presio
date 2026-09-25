@@ -54,9 +54,11 @@ export function isValidSlideNumber(slideNumber: unknown, total: unknown): boolea
 // published (where to load them — never the plugins themselves). These caps
 // bound what a controller or viewer can make it hold.
 
-export const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const PLUGIN_TYPE_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
-export const MAX_PLUGIN_PAYLOAD_BYTES = 16 * 1024;
+// A plugin page's SHA-256, hex.
+const HASH_RE = /^[0-9a-f]{64}$/;
+const MAX_PLUGIN_PAYLOAD_BYTES = 16 * 1024;
 export const MAX_PLUGINS_PER_SESSION = 8;
 // Retained messages are a plugin's state for late joiners, one message per
 // piece of it — a drawing keeps each slide's strokes in a few. So a plugin may
@@ -78,7 +80,7 @@ export interface PluginEvent {
   volatile: boolean;
 }
 
-export interface PluginManifest {
+interface PluginManifest {
   id: string;
   name: string;
   version: string;
@@ -107,10 +109,16 @@ export function jsonSize(value: unknown): number {
   }
 }
 
-export function sanitizePluginEvent(raw: unknown): PluginEvent | null {
+/** A plugin message's fields, when it's an object naming a valid plugin id. */
+function pluginMessage(raw: unknown): (Record<string, unknown> & { plugin: string }) | null {
   if (typeof raw !== "object" || raw === null) return null;
   const e = raw as Record<string, unknown>;
-  if (typeof e.plugin !== "string" || !PLUGIN_ID_RE.test(e.plugin)) return null;
+  return typeof e.plugin === "string" && PLUGIN_ID_RE.test(e.plugin) ? (e as Record<string, unknown> & { plugin: string }) : null;
+}
+
+export function sanitizePluginEvent(raw: unknown): PluginEvent | null {
+  const e = pluginMessage(raw);
+  if (!e) return null;
   if (typeof e.type !== "string" || !PLUGIN_TYPE_RE.test(e.type)) return null;
   const payload = e.payload === undefined ? null : e.payload;
   if (jsonSize(payload) > MAX_PLUGIN_PAYLOAD_BYTES) return null;
@@ -120,9 +128,8 @@ export function sanitizePluginEvent(raw: unknown): PluginEvent | null {
 
 // A plugin's resolved settings, as the presenter publishes them for viewers.
 export function sanitizePluginSettings(raw: unknown): { plugin: string; settings: Record<string, unknown> } | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const e = raw as Record<string, unknown>;
-  if (typeof e.plugin !== "string" || !PLUGIN_ID_RE.test(e.plugin)) return null;
+  const e = pluginMessage(raw);
+  if (!e) return null;
   const settings = e.settings;
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) return null;
   if (jsonSize(settings) > MAX_PLUGIN_PAYLOAD_BYTES) return null;
@@ -132,10 +139,9 @@ export function sanitizePluginSettings(raw: unknown): { plugin: string; settings
 // A viewer couldn't load a plugin the presenter published: which (by id and
 // the hash it was published with) and why, in a line for the presenter.
 export function sanitizePluginLoadFailure(raw: unknown): { plugin: string; hash: string; reason: string } | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const e = raw as Record<string, unknown>;
-  if (typeof e.plugin !== "string" || !PLUGIN_ID_RE.test(e.plugin)) return null;
-  if (typeof e.hash !== "string" || !/^[0-9a-f]{64}$/.test(e.hash)) return null;
+  const e = pluginMessage(raw);
+  if (!e) return null;
+  if (typeof e.hash !== "string" || !HASH_RE.test(e.hash)) return null;
   const reason = typeof e.reason === "string" ? e.reason.slice(0, 200) : "";
   return { plugin: e.plugin, hash: e.hash, reason };
 }
@@ -163,7 +169,7 @@ export function sanitizePublishedPlugin(raw: unknown): PublishedPlugin | null {
   // origin) or a web URL — nothing a browser would run as a script.
   const url = typeof b.url === "string" && b.url.length <= 2048 ? b.url : "";
   if (!/^(\/(?!\/)|https?:\/\/)/i.test(url)) return null;
-  if (typeof b.hash !== "string" || !/^[0-9a-f]{64}$/.test(b.hash)) return null;
+  if (typeof b.hash !== "string" || !HASH_RE.test(b.hash)) return null;
   return {
     manifest: {
       id: m.id,

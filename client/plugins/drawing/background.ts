@@ -6,6 +6,7 @@
 
 import { Drawing, parseFile, publish, serializeFile, type Tool } from "./model";
 import { drawStrokes } from "./render";
+import { saveFile } from "../../src/lib/saveFile";
 
 // How wide previews are drawn, and how long a slide's drawing has to settle
 // before its preview is redrawn — a preview per stroke would be wasted work.
@@ -99,14 +100,7 @@ export function runBackground() {
   // --- Saving and loading, from its page in Settings ---
 
   presio.onButton("saveFile", () => {
-    const url = URL.createObjectURL(new Blob([serializeFile(drawing)], { type: "application/json" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "slides-drawing.json";
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    saveFile(new Blob([serializeFile(drawing)], { type: "application/json" }), "slides-drawing.json");
   });
   presio.onButton("loadFile", (_id, file) => {
     if (!file) return;

@@ -127,11 +127,6 @@ export function ensureLanOrigin(): Promise<string | null> {
   return detection;
 }
 
-/** Test seam: drop the shared answer so the next caller asks again. */
-export function resetLanOriginCache() {
-  detection = undefined;
-}
-
 /**
  * Whether something is actually listening on `origin`.
  *

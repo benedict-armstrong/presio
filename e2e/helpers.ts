@@ -86,17 +86,29 @@ export function drawingLayer(page: Page) {
 }
 
 /**
- * The drawing layer is sized exactly to the slide's *content rect* — the
- * contain-fitted page inside the letterboxed canvas — which is what it
- * normalizes pointer coordinates against. So its bounding box converts slide
- * fractions to viewport pixels directly.
+ * The slide's *content rect* in viewport pixels: the contain-fitted page inside
+ * the letterboxed canvas, which is what the drawing layer normalizes pointer
+ * coordinates against. The drawing layer covers the whole slide area (bars
+ * included), so the page is found as the canvas filling that area, letterboxed
+ * the same way containedRect does it.
  */
 export async function slideBox(page: Page) {
   const layer = page.locator(DRAWING_FRAME).first();
   await layer.waitFor({ timeout: 30_000 });
-  const box = await layer.boundingBox();
+  const box = await layer.evaluate((frame) => {
+    const area = frame.getBoundingClientRect();
+    const canvas = [...document.querySelectorAll("canvas")].find((c) => {
+      const r = c.getBoundingClientRect();
+      return Math.abs(r.left - area.left) < 1 && Math.abs(r.top - area.top) < 1 && Math.abs(r.width - area.width) < 1;
+    });
+    if (!canvas || !canvas.width || !canvas.height) return null;
+    const scale = Math.min(area.width / canvas.width, area.height / canvas.height);
+    const width = canvas.width * scale;
+    const height = canvas.height * scale;
+    return { x: area.left + (area.width - width) / 2, y: area.top + (area.height - height) / 2, width, height };
+  });
   if (!box || box.width <= 0 || box.height <= 0) {
-    throw new Error("drawing layer has no layout box");
+    throw new Error("slide has no layout box");
   }
   return {
     at: ([fx, fy]: Frac) => ({ x: box.x + box.width * fx, y: box.y + box.height * fy }),
@@ -109,15 +121,17 @@ export async function slideBox(page: Page) {
  *
  * With a tool active and the pointer away, the palette collapses to just the
  * active tool, so the others have to be revealed before they can be clicked.
+ * Hover reaches the palette asynchronously, so it can expand or collapse
+ * between looking and clicking: retry until the tool is reachable.
  */
 export async function pickTool(controller: Page, key: "none" | "laser" | "pen" | "highlighter") {
   const layer = drawingLayer(controller);
   const btn = layer.getByTestId(`tool-${key}`);
-  if (!(await btn.isVisible().catch(() => false))) {
-    await layer.getByTestId("tool-collapsed").click();
-    await btn.waitFor({ timeout: 5_000 });
-  }
-  await btn.click();
+  const collapsed = layer.getByTestId("tool-collapsed");
+  await expect(async () => {
+    if (!(await btn.isVisible())) await collapsed.click({ timeout: 1_000 });
+    await btn.click({ timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
   // The palette may re-collapse around the new active tool, so assert on
   // whichever button is showing rather than on `btn` specifically.
   await expect(

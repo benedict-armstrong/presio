@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useSearchParams, useNavigate, useLocation, Link } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { loadPdf, loadPdfData, freshPdfUrl, loadLatestPdf, renderPage, clearCache, openPdf, destroyPdf } from "@/lib/pdf";
-import { loadDeckInfo, type Deck, type DeckInfo } from "@/lib/deck";
+import { loadDeck, type Deck } from "@/lib/deck";
 import { useRenderTargetWidth } from "@/hooks/useRenderTargetWidth";
 import { lsGetString, lsSetString, deckWatchKey } from "@/lib/storage";
 import { socket } from "@/lib/socket";
@@ -56,23 +56,18 @@ export default function Presentation() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [blanked, setBlanked] = useState(false);
-  // Whether all viewers are currently showing the join code / QR overlay.
-  const [showCode, setShowCode] = useState(false);
 
   // Everything extracted from the loaded PDF (links, attachments…),
   // re-derived whenever the document is swapped (e.g. after a notes edit).
-  const [deckInfo, setDeckInfo] = useState<DeckInfo | null>(null);
+  const [deck, setDeck] = useState<Deck | null>(null);
   useEffect(() => {
     if (!pdf) return;
     let cancelled = false;
-    loadDeckInfo(pdf, pdfUrl, filename).then((info) => {
-      if (!cancelled) setDeckInfo(info);
+    loadDeck(pdf, pdfUrl, filename).then((loaded) => {
+      if (!cancelled) setDeck(loaded);
     });
     return () => { cancelled = true; };
   }, [pdf, pdfUrl, filename]);
-
-  // The one object the views work with.
-  const deck: Deck | null = deckInfo;
 
   const currentCanvasRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
@@ -101,7 +96,6 @@ export default function Presentation() {
     currentSlide,
     totalSlides,
     blanked,
-    showCode,
   });
 
   // Mirror of pdfUrl for callbacks that must not re-subscribe the socket
@@ -229,7 +223,7 @@ export default function Presentation() {
   // the reply to this window's own replace. What plugins retained for the old
   // deck (retain: "deck" — drawings, keyed by slide number, which the new
   // document may renumber) is dropped wholesale, and they hear it's a new
-  // document. Slide clamping needs no extra work here: the deckInfo effect
+  // document. Slide clamping needs no extra work here: the deck effect
   // adopts the new document's page count once it loads.
   const applyDeckUpdate = useCallback(
     ({ filename, totalSlides }: { filename: string; totalSlides: number }): Promise<void> => {
@@ -369,8 +363,8 @@ export default function Presentation() {
   // the current slide back into range, and refresh whatever stored count
   // remains (IndexedDB record / session row) so every device agrees.
   useEffect(() => {
-    if (!deckInfo) return;
-    const docTotal = deckInfo.totalSlides;
+    if (!deck) return;
+    const docTotal = deck.totalSlides;
     if (totalSlides === docTotal) return;
     // Reconciling with the document itself, which only exists once it has
     // finished loading — there is no render-time value to derive this from.
@@ -386,7 +380,7 @@ export default function Presentation() {
       // the document-derived count either way.
       socket.emit("total_slides_change", { totalSlides: docTotal });
     }
-  }, [deckInfo, totalSlides, local, role, id]);
+  }, [deck, totalSlides, local, role, id]);
 
   useEffect(() => {
     if (!filename) return;
@@ -404,7 +398,6 @@ export default function Presentation() {
       const { type, payload } = e.data;
       if (type === "slide_update") setCurrentSlide(payload.slideNumber);
       else if (type === "blank_update") setBlanked(payload.blanked);
-      else if (type === "code_update") setShowCode(payload.showCode);
       else if (type === "deck_update") void applyDeckUpdate(payload);
       else if (type === "session_ended") navigate("/", { replace: true });
       else if (type === "rekeyed") {
@@ -424,7 +417,6 @@ export default function Presentation() {
         setCurrentSlide(payload.currentSlide);
         if (payload.totalSlides) setTotalSlides(payload.totalSlides);
         setBlanked(payload.blanked);
-        setShowCode(!!payload.showCode);
       }
     };
 
@@ -520,10 +512,6 @@ export default function Presentation() {
       setBlanked(blanked);
     });
 
-    socket.on("code_update", ({ showCode }: { showCode: boolean }) => {
-      setShowCode(showCode);
-    });
-
     // The controller replaced the deck (server broadcast from the replace
     // endpoint); reload the new document under the same session. The window
     // that performed the replace has usually applied it already, straight from
@@ -560,7 +548,6 @@ export default function Presentation() {
       socket.off("total_slides_update");
       socket.off("sync_all");
       socket.off("blank_update");
-      socket.off("code_update");
       socket.off("deck_updated");
       socket.off("controller_replaced");
       socket.off("error");
@@ -587,7 +574,7 @@ export default function Presentation() {
   // changes that size or scale — entering fullscreen, dragging the viewer onto
   // a projector, browser zoom, a move to a differently scaled monitor — has to
   // re-render, or the slide stays an upscaled canvas from the old size.
-  const viewWidth = useRenderTargetWidth(currentCanvasRef, !!deckInfo);
+  const viewWidth = useRenderTargetWidth(currentCanvasRef, !!deck);
 
   useEffect(() => {
     if (!pdf || !currentCanvasRef.current || !viewWidth) return;
@@ -606,9 +593,9 @@ export default function Presentation() {
       container.appendChild(canvas);
     });
     return () => { stale = true; };
-    // deckInfo gates mounting of the view that owns the container, and refs
+    // deck gates mounting of the view that owns the container, and refs
     // don't trigger effects — re-run once the container actually exists.
-  }, [pdf, displaySlide, role, deckInfo, viewWidth]);
+  }, [pdf, displaySlide, role, deck, viewWidth]);
 
   // Mirror a local state change outward: always to other same-browser windows
   // (BroadcastChannel) and, for synced sessions, to the server (socket). The
@@ -1081,7 +1068,6 @@ export default function Presentation() {
         canvasRef={currentCanvasRef}
         blanked={blanked}
         currentSlide={displaySlide}
-        showCode={showCode}
         outOfSync={outOfSync}
         onViewerGoTo={viewerGoTo}
         onResync={resync}
@@ -1130,13 +1116,6 @@ export default function Presentation() {
           // no echo (BroadcastChannel doesn't deliver to the sender), so set it here.
           if (local) setBlanked(next);
           broadcast({ type: "blank_update", payload: { blanked: next } }, { event: "blank_toggle" });
-        }}
-        showCode={showCode}
-        onShowCodeToggle={() => {
-          const next = !showCode;
-          // Same echo asymmetry as blanking: local mode sets it directly.
-          if (local) setShowCode(next);
-          broadcast({ type: "code_update", payload: { showCode: next } }, { event: "code_toggle" });
         }}
         plugins={plugins}
       />

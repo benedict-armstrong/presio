@@ -1,5 +1,5 @@
-import { test, expect, type BrowserContext, type CDPSession, type Frame, type Page, type WebSocket } from "@playwright/test";
-import { newSession, openController, openViewer, pickTool, waitForSlide } from "./helpers";
+import { test, expect, type CDPSession, type Frame, type Page, type WebSocket } from "@playwright/test";
+import { DRAWING_FRAME, newSession, openController, openViewer, pickTool, slideBox, waitForSlide } from "./helpers";
 
 // How smooth drawing feels, measured. Three numbers, each driven through the
 // real input pipeline (page.mouse → Chrome's input router → the page) and the
@@ -12,24 +12,9 @@ import { newSession, openController, openViewer, pickTool, waitForSlide } from "
 //  3. Redraw cost on a busy slide (a few hundred strokes already on it): frame
 //     rate and main-thread time per pointer event while drawing over them.
 //
-// It runs as part of the suite and prints its numbers beside the baseline
-// below. Counts and bytes are asserted against it outright; timings only
-// loosely, since they move with the machine.
-
-type Adapter = {
-  /** The document the stroke is drawn into, and its box on the page. */
-  surface(page: Page): Promise<{ frame: Frame; box: { x: number; y: number; width: number; height: number } }>;
-  /** Canvases (in that document) whose pixels are the ink. */
-  inkCanvases: string;
-  /** Put `strokes` (presio-drawing v1 strokes) on slide 1: before the
-   *  controller loads, or once it has. */
-  seed(ctx: BrowserContext, sessionId: string, strokes: Stroke[]): Promise<void>;
-  afterLoad(page: Page, strokes: Stroke[]): Promise<void>;
-  /** Whether a socket frame the viewer received is a live-stroke update. */
-  isStrokeUpdate(payload: string): boolean;
-  /** Whether a socket frame the viewer received is about drawing at all. */
-  isDrawing(payload: string): boolean;
-};
+// It prints its numbers beside the baseline below. Counts and bytes are
+// asserted against it outright; timings only loosely, since they move with the
+// machine.
 
 interface Stroke {
   tool: "pen" | "highlighter";
@@ -39,42 +24,37 @@ interface Stroke {
   points: number[];
 }
 
-const DRAWING_FRAME = '[data-testid="plugin-frame-drawing-slide"]';
+/** The drawing plugin's slide frame, whose canvases are the ink, and the
+ *  page's box on screen that strokes are drawn in. */
+async function drawingSurface(page: Page): Promise<{ frame: Frame; box: { x: number; y: number; width: number; height: number } }> {
+  const el = page.locator(DRAWING_FRAME).first();
+  await el.waitFor({ timeout: 30_000 });
+  const frame = await (await el.elementHandle())!.contentFrame();
+  return { frame: frame!, box: (await slideBox(page)).box };
+}
 
-// The drawing plugin: a "slide" surface frame on the page, syncing over
-// plugin_event messages.
-const plugin: Adapter = {
-  async surface(page) {
-    const el = page.locator(DRAWING_FRAME).first();
-    await el.waitFor({ timeout: 30_000 });
-    const box = (await el.boundingBox())!;
-    const frame = await (await el.elementHandle())!.contentFrame();
-    return { frame: frame!, box };
-  },
-  inkCanvases: "canvas",
-  async seed() {},
-  // Loaded the way a presenter would: a saved drawing file, picked with
-  // "Load from file" on the plugin's page in Settings.
-  async afterLoad(page, strokes) {
-    await plugin.surface(page);
-    const file = { format: "presio-drawing", version: 1, annotations: { 1: strokes } };
-    await page.locator('button[title="Settings"]').first().click();
-    await page.locator('[data-testid="settings-tab-plugin:/plugins/drawing/"]').click();
-    const chooser = page.waitForEvent("filechooser");
-    await page.locator('[data-testid="plugin-button-drawing-loadFile"]').click();
-    await (await chooser).setFiles({
-      name: "busy.json",
-      mimeType: "application/json",
-      buffer: Buffer.from(JSON.stringify(file)),
-    });
-    // Not Escape: that's also the drawing plugin's "no tool" shortcut.
-    await page.getByRole("button", { name: "Close settings" }).click();
-  },
-  isStrokeUpdate: (p) => p.includes('"plugin":"drawing"') && /"type":"(p|b)"/.test(p),
-  isDrawing: (p) => p.includes('"plugin":"drawing"'),
-};
+/** Put `strokes` on slide 1 the way a presenter would: a saved drawing file,
+ *  picked with "Load from file" on the plugin's page in Settings. */
+async function loadDrawing(page: Page, strokes: Stroke[]) {
+  await drawingSurface(page);
+  const file = { format: "presio-drawing", version: 1, annotations: { 1: strokes } };
+  await page.locator('button[title="Settings"]').first().click();
+  await page.locator('[data-testid="settings-tab-plugin:/plugins/drawing/"]').click();
+  const chooser = page.waitForEvent("filechooser");
+  await page.locator('[data-testid="plugin-button-drawing-loadFile"]').click();
+  await (await chooser).setFiles({
+    name: "busy.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(file)),
+  });
+  // Not Escape: that's also the drawing plugin's "no tool" shortcut.
+  await page.getByRole("button", { name: "Close settings" }).click();
+}
 
-const adapter = plugin;
+/** Whether a socket frame the viewer received is about drawing, and whether
+ *  it's a live-stroke update. */
+const isDrawing = (payload: string) => payload.includes('"plugin":"drawing"');
+const isStrokeUpdate = (payload: string) => isDrawing(payload) && /"type":"(p|b)"/.test(payload);
 
 /**
  * What drawing measured before it moved into a plugin (core's
@@ -161,12 +141,12 @@ async function drag(page: Page, box: { x: number; y: number; width: number; heig
  * (rAF, then a task) is fair to code that draws in the handler and to code
  * that draws in its own requestAnimationFrame.
  */
-async function installLatencyProbe(frame: Frame, canvases: string) {
-  await frame.evaluate((selector) => {
+async function installLatencyProbe(frame: Frame) {
+  await frame.evaluate(() => {
     const w = window as unknown as { __bench: { lat: number[]; missed: number; frames: number[] } };
     w.__bench = { lat: [], missed: 0, frames: [] };
     const inked = (x: number, y: number) => {
-      for (const c of document.querySelectorAll<HTMLCanvasElement>(selector)) {
+      for (const c of document.querySelectorAll("canvas")) {
         const r = c.getBoundingClientRect();
         if (!r.width || !r.height || !c.width || !c.height) continue;
         const cx = Math.round(((x - r.left) * c.width) / r.width);
@@ -199,7 +179,7 @@ async function installLatencyProbe(frame: Frame, canvases: string) {
       },
       true
     );
-  }, canvases);
+  });
 }
 
 async function readLatency(frame: Frame) {
@@ -282,8 +262,8 @@ test("drawing benchmark", async ({ browser, request }, testInfo) => {
     await waitForSlide(controller);
     await waitForSlide(viewer);
     await pickTool(controller, "pen");
-    const { frame, box } = await adapter.surface(controller);
-    await installLatencyProbe(frame, adapter.inkCanvases);
+    const { frame, box } = await drawingSurface(controller);
+    await installLatencyProbe(frame);
 
     await controller.waitForTimeout(500);
     const from = received.length;
@@ -296,8 +276,8 @@ test("drawing benchmark", async ({ browser, request }, testInfo) => {
     results["latency p95 ms"] = round(pct(lat, 0.95));
     results["latency missed"] = missed;
 
-    const updates = received.slice(from).filter((f) => adapter.isStrokeUpdate(f.payload));
-    const drawing = received.slice(from).filter((f) => adapter.isDrawing(f.payload));
+    const updates = received.slice(from).filter((f) => isStrokeUpdate(f.payload));
+    const drawing = received.slice(from).filter((f) => isDrawing(f.payload));
     const span = updates.length > 1 ? updates[updates.length - 1].t - updates[0].t : NaN;
     results["viewer updates"] = updates.length;
     results["viewer updates/s"] = round(((updates.length - 1) * 1000) / span);
@@ -313,17 +293,15 @@ test("drawing benchmark", async ({ browser, request }, testInfo) => {
   {
     const sessionId = await newSession(request);
     const ctx = await browser.newContext();
-    const busy = busyStrokes(300);
-    await adapter.seed(ctx, sessionId, busy);
     const controller = await openController(ctx, sessionId);
     await waitForSlide(controller);
     await pickTool(controller, "pen");
-    await adapter.afterLoad(controller, busy);
-    const { frame, box } = await adapter.surface(controller);
-    // The seeded strokes are on screen before timing starts.
-    await expect.poll(() => frame.evaluate((sel) => document.querySelectorAll(sel).length, adapter.inkCanvases)).toBeGreaterThan(0);
+    await loadDrawing(controller, busyStrokes(300));
+    const { frame, box } = await drawingSurface(controller);
+    // The loaded strokes are on screen before timing starts.
+    await expect.poll(() => frame.evaluate(() => document.querySelectorAll("canvas").length)).toBeGreaterThan(0);
     await controller.waitForTimeout(1000);
-    await installLatencyProbe(frame, adapter.inkCanvases);
+    await installLatencyProbe(frame);
 
     const cdp = await ctx.newCDPSession(controller);
     await cdp.send("Performance.enable");

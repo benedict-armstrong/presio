@@ -62,8 +62,6 @@ export type DeckWatchStatus = "watching" | "updated" | "needs-permission" | "sto
  */
 export type DeckWatchMode = "off" | "prompt" | "auto";
 
-export const DECK_WATCH_MODES: DeckWatchMode[] = ["off", "prompt", "auto"];
-
 export function isDeckWatchMode(value: unknown): value is DeckWatchMode {
   return value === "off" || value === "prompt" || value === "auto";
 }

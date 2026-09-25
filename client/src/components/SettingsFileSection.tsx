@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Download, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { exportSettings, importSettings } from "@/lib/settings";
+import { saveFile } from "@/lib/saveFile";
 
 /**
  * Settings → Settings file: every preference (Presio's and plugins') as one
@@ -11,14 +12,7 @@ export function SettingsFileSection() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
 
-  const download = () => {
-    const url = URL.createObjectURL(new Blob([exportSettings()], { type: "application/json" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "settings.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const download = () => saveFile(new Blob([exportSettings()], { type: "application/json" }), "settings.json");
 
   const load = async (file: File) => {
     try {

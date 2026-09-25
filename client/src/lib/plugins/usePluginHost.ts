@@ -12,7 +12,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { socket } from "@/lib/socket";
 import { readAttachments, type PdfAttachment } from "@/lib/pdf";
 import { useJoinUrl } from "@/lib/joinUrl";
-import { PluginHost, type PageSize, type PluginContext, type WireEvent } from "./host";
+import { PluginHost, retainKey, type PageSize, type PluginContext, type WireEvent } from "./host";
 import { isActivatedBy, type LoadedPlugin, type PluginManifest } from "./manifest";
 import { loadPlugin, usePluginEntries } from "./registry";
 import { clockOffset, onClockSample } from "@/lib/clock";
@@ -302,13 +302,12 @@ export function usePluginHost({
         if (stale) publish();
         // Retained state is merged both ways: ours goes up where the server
         // has none, and a reloaded controller adopts what the server kept.
-        const key = (e: WireEvent) => `${e.plugin}\u0000${e.type}`;
-        const onServer = new Set(state.retained.map(key));
-        const ourKeys = new Set(host.retainedEvents().map(key));
+        const onServer = new Set(state.retained.map(retainKey));
+        const ourKeys = new Set(host.retainedEvents().map(retainKey));
         for (const event of host.retainedEvents()) {
-          if (!onServer.has(key(event))) socket.emit("plugin_event", event);
+          if (!onServer.has(retainKey(event))) socket.emit("plugin_event", event);
         }
-        host.seedRetained(state.retained.filter((e) => !ourKeys.has(key(e))));
+        host.seedRetained(state.retained.filter((e) => !ourKeys.has(retainKey(e))));
         // And our settings, which the server may not have (or had from an
         // earlier controller).
         sentSettingsRef.current.clear();

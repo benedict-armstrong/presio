@@ -6,7 +6,7 @@
 // validates and edits the same files.
 
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFString } from "pdf-lib";
-import { typstAstToMarkdown } from "../../src/lib/typstNotes";
+import { notesToMarkdown } from "../../src/lib/typstNotes";
 import { setSlideNotes } from "../../src/lib/notesAttach";
 
 /** Markdown per slide; no entry = no notes. */
@@ -14,17 +14,6 @@ export type Notes = Map<number, string>;
 
 const SIDECAR_RE = /^notes-slide-(\d+)\.json$/;
 const NOTE_PREFIX = "note:";
-
-function sidecarMarkdown(notes: unknown): string {
-  if (typeof notes === "string") return notes;
-  if (Array.isArray(notes)) {
-    return notes
-      .map((n) => typstAstToMarkdown(n))
-      .filter((s) => s.length > 0)
-      .join("\n\n---\n\n");
-  }
-  return typstAstToMarkdown(notes);
-}
 
 function annotationNotes(doc: PDFDocument): Notes {
   const out: Notes = new Map();
@@ -57,7 +46,7 @@ export async function readNotes(): Promise<Notes> {
     if (!match) continue;
     try {
       const data = JSON.parse(new TextDecoder().decode(content));
-      notes.set(parseInt(match[1], 10), sidecarMarkdown(data.notes));
+      notes.set(parseInt(match[1], 10), notesToMarkdown(data.notes));
     } catch { /* skip malformed */ }
   }
   for (const [slide, text] of notes) if (!text) notes.delete(slide);

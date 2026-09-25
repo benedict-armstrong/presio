@@ -1,4 +1,6 @@
-// Presio's own icons (Lucide, ISC), inline: the palette is plain DOM.
+// The palette's icons (Lucide, ISC).
+
+import { svgIcon } from "../sdk/icon";
 
 const dots = (pts: [number, number][]) => pts.map(([cx, cy]) => `<circle cx="${cx}" cy="${cy}" r="1"/>`).join("");
 
@@ -15,6 +17,4 @@ const PATHS: Record<string, string> = {
   gripV: dots([[9, 12], [9, 5], [9, 19], [15, 12], [15, 5], [15, 19]]),
 };
 
-export function icon(name: string): string {
-  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name] ?? ""}</svg>`;
-}
+export const icon = (name: string): string => svgIcon(PATHS[name] ?? "");

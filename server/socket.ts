@@ -34,8 +34,6 @@ export interface SocketState {
   controllers: Map<string, string>;
   // Blanked state per session (transient, no DB persistence).
   blankedSessions: Set<string>;
-  // Sessions currently showing the join code / QR on all viewers (transient).
-  codeSessions: Set<string>;
   // The plugins the controller published for viewers to run (where to load
   // each and its hash), per session.
   publishedPlugins: Map<string, Map<string, PublishedPlugin>>;
@@ -49,7 +47,6 @@ export function createSocketState(): SocketState {
   return {
     controllers: new Map(),
     blankedSessions: new Set(),
-    codeSessions: new Set(),
     publishedPlugins: new Map(),
     pluginRetained: new Map(),
     pluginSettings: new Map(),
@@ -60,7 +57,6 @@ export function createSocketState(): SocketState {
 export function clearSessionState(state: SocketState, sessionId: string) {
   state.controllers.delete(sessionId);
   state.blankedSessions.delete(sessionId);
-  state.codeSessions.delete(sessionId);
   state.publishedPlugins.delete(sessionId);
   state.pluginRetained.delete(sessionId);
   state.pluginSettings.delete(sessionId);
@@ -105,18 +101,21 @@ const SESSION_ID_RE = /^[A-Z0-9]{6}$/;
 const JOIN_BURST = 20;
 const JOIN_REFILL_PER_SEC = 1;
 
-interface JoinBucket { tokens: number; last: number }
+interface TokenBucket { tokens: number; last: number }
 
-function allowJoin(socket: Socket): boolean {
+/** Take a token from the socket's bucket under `key`, refilled at `refillPerSec` up to `burst`. */
+function takeToken(socket: Socket, key: "joinBucket" | "pluginBucket", burst: number, refillPerSec: number): boolean {
   const now = Date.now();
-  const bucket: JoinBucket = socket.data.joinBucket ?? { tokens: JOIN_BURST, last: now };
-  bucket.tokens = Math.min(JOIN_BURST, bucket.tokens + ((now - bucket.last) / 1000) * JOIN_REFILL_PER_SEC);
+  const bucket: TokenBucket = socket.data[key] ?? { tokens: burst, last: now };
+  bucket.tokens = Math.min(burst, bucket.tokens + ((now - bucket.last) / 1000) * refillPerSec);
   bucket.last = now;
-  socket.data.joinBucket = bucket;
+  socket.data[key] = bucket;
   if (bucket.tokens < 1) return false;
   bucket.tokens -= 1;
   return true;
 }
+
+const allowJoin = (socket: Socket) => takeToken(socket, "joinBucket", JOIN_BURST, JOIN_REFILL_PER_SEC);
 
 // Viewers may message the presenter's plugins (a vote, a question), which makes
 // plugin_event the one audience-writable event. It carries no DB cost, but an
@@ -125,26 +124,15 @@ function allowJoin(socket: Socket): boolean {
 const AUDIENCE_PLUGIN_BURST = 20;
 const AUDIENCE_PLUGIN_REFILL_PER_SEC = 5;
 
-function allowAudiencePluginEvent(socket: Socket): boolean {
-  const now = Date.now();
-  const bucket: JoinBucket = socket.data.pluginBucket ?? { tokens: AUDIENCE_PLUGIN_BURST, last: now };
-  bucket.tokens = Math.min(
-    AUDIENCE_PLUGIN_BURST,
-    bucket.tokens + ((now - bucket.last) / 1000) * AUDIENCE_PLUGIN_REFILL_PER_SEC
-  );
-  bucket.last = now;
-  socket.data.pluginBucket = bucket;
-  if (bucket.tokens < 1) return false;
-  bucket.tokens -= 1;
-  return true;
-}
+const allowAudiencePluginEvent = (socket: Socket) =>
+  takeToken(socket, "pluginBucket", AUDIENCE_PLUGIN_BURST, AUDIENCE_PLUGIN_REFILL_PER_SEC);
 
 export function registerSocketHandlers(
   io: Server,
   supabase: SupabaseClient,
   state: SocketState
 ) {
-  const { controllers, blankedSessions, codeSessions, publishedPlugins, pluginRetained, pluginSettings } = state;
+  const { controllers, blankedSessions, publishedPlugins, pluginRetained, pluginSettings } = state;
 
   // What a joining (or re-joining) socket needs to mount the session's
   // plugins: which ones run and where each loads from (by URL and hash; the
@@ -303,15 +291,6 @@ export function registerSocketHandlers(
         blankedSessions.add(sessionId);
       }
       io.to(sessionId).emit("blank_update", { blanked: blankedSessions.has(sessionId) });
-    }));
-
-    socket.on("code_toggle", controllerOnly(socket, (sessionId) => {
-      if (codeSessions.has(sessionId)) {
-        codeSessions.delete(sessionId);
-      } else {
-        codeSessions.add(sessionId);
-      }
-      io.to(sessionId).emit("code_update", { showCode: codeSessions.has(sessionId) });
     }));
 
     // --- Plugins ---
