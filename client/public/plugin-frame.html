@@ -34,6 +34,7 @@
     var hoverListeners = [];
     var buttonListeners = {};
     var commandListeners = {};
+    var menuListeners = {};
     var exporter = null;
     // Messages that arrive before the plugin subscribes (retained state is
     // replayed right after boot) wait here instead of being dropped.
@@ -95,6 +96,10 @@
       } else if (m.type === "button") {
         (buttonListeners[m.id] || []).slice().forEach(function (cb) {
           try { cb(m.id, m.file); } catch (err) { console.error(err); }
+        });
+      } else if (m.type === "menu") {
+        (menuListeners[m.id] || []).slice().forEach(function (cb) {
+          try { cb(m.item, m.id); } catch (err) { console.error(err); }
         });
       } else if (m.type === "command") {
         each(commandListeners[m.id] || [], m.id);
@@ -219,6 +224,12 @@
         buttonListeners[id] = buttonListeners[id] || [];
         return subscribe(buttonListeners[id], cb);
       },
+      /** An item was picked from a button's menu (presio.ui.setButton's
+       *  `menu`). Delivered like button presses. cb(itemId, buttonId). */
+      onMenu: function (id, cb) {
+        menuListeners[id] = menuListeners[id] || [];
+        return subscribe(menuListeners[id], cb);
+      },
       /** A contributed keybinding (contributes.keybindings) was pressed, by
        *  its command id. Delivered like buttons: to the background surface,
        *  or the tile when there is none. */
@@ -292,7 +303,10 @@
         onHover: function (cb) { return subscribe(hoverListeners, cb); },
         /** Viewer surface: show or hide this plugin's full-screen layer. */
         setVisible: function (visible) { post({ type: "visible", visible: !!visible }); },
-        /** Presenter: update a contributed button — { active, label, disabled }. */
+        /** Presenter: update a contributed button — { active, label, disabled,
+         *  menu }. Each call replaces the last. `menu` adds a small menu
+         *  beside it: a list of { id, label, checked?, disabled? },
+         *  { heading } and { separator: true }; picks go to presio.onMenu. */
         setButton: function (id, state) { post({ type: "button", id: id, state: state || {} }); },
       },
     };

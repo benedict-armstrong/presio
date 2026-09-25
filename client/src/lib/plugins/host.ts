@@ -40,7 +40,19 @@ export interface ButtonState {
   active?: boolean;
   label?: string;
   disabled?: boolean;
+  /** A small menu beside the button (a mic to use, a mode): picking an item
+   *  goes to the plugin's presio.onMenu. */
+  menu?: ButtonMenuEntry[];
 }
+
+/** One row of a button's menu: an item to pick, a heading, or a divider. */
+export type ButtonMenuEntry =
+  | { id: string; label: string; checked?: boolean; disabled?: boolean }
+  | { heading: string }
+  | { separator: true };
+
+/** How many rows a button's menu may have. */
+const MAX_MENU_ENTRIES = 32;
 
 /** A file the presenter picked for a button that asks for one. */
 export interface ButtonFile {
@@ -394,6 +406,11 @@ export class PluginHost {
     for (const conn of this.handlerFrames(pluginId)) conn.port.postMessage({ type: "button", id: buttonId, file });
   }
 
+  /** The presenter picked an item from a button's menu; delivered like a press. */
+  pickMenuItem(pluginId: string, buttonId: string, itemId: string) {
+    for (const conn of this.handlerFrames(pluginId)) conn.port.postMessage({ type: "menu", id: buttonId, item: itemId });
+  }
+
   /** The presenter pressed one of a plugin's keybindings; delivered like a button. */
   runCommand(pluginId: string, command: string) {
     for (const conn of this.handlerFrames(pluginId)) conn.port.postMessage({ type: "command", id: command });
@@ -611,6 +628,7 @@ export class PluginHost {
       active: typeof s.active === "boolean" ? s.active : undefined,
       label: typeof s.label === "string" ? s.label.slice(0, 24) : undefined,
       disabled: typeof s.disabled === "boolean" ? s.disabled : undefined,
+      menu: sanitizeMenu(s.menu),
     };
     const current = this.buttons.get(manifest.id) ?? {};
     this.buttons.set(manifest.id, { ...current, [id as string]: next });
@@ -704,4 +722,25 @@ export function forgetDeckRetained(sessionId: string) {
   const kept = saved.filter((e) => (e as Partial<WireEvent>)?.retain !== "deck");
   if (kept.length) lsSet(key, kept);
   else lsRemove(key);
+}
+
+/** A button menu as a plugin set it, reduced to rows Presio can draw. */
+function sanitizeMenu(raw: unknown): ButtonMenuEntry[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const entries: ButtonMenuEntry[] = [];
+  for (const r of raw.slice(0, MAX_MENU_ENTRIES)) {
+    if (typeof r !== "object" || r === null) continue;
+    const e = r as Record<string, unknown>;
+    if (e.separator === true) entries.push({ separator: true });
+    else if (typeof e.heading === "string" && e.heading) entries.push({ heading: e.heading.slice(0, 64) });
+    else if (typeof e.id === "string" && e.id && e.id.length <= 256 && typeof e.label === "string" && e.label) {
+      entries.push({
+        id: e.id,
+        label: e.label.slice(0, 64),
+        checked: typeof e.checked === "boolean" ? e.checked : undefined,
+        disabled: typeof e.disabled === "boolean" ? e.disabled : undefined,
+      });
+    }
+  }
+  return entries.length ? entries : undefined;
 }

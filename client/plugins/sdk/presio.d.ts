@@ -22,6 +22,12 @@ interface PresioView {
   scale: number;
 }
 
+/** A row of a button's menu (presio.ui.setButton's `menu`). */
+type PresioMenuEntry =
+  | { id: string; label: string; checked?: boolean; disabled?: boolean }
+  | { heading: string }
+  | { separator: true };
+
 /** A file the presenter picked for a button with "accept". */
 interface PresioFile {
   name: string;
@@ -68,6 +74,8 @@ interface Presio {
   };
   /** A contributed button was pressed; one with "accept" brings the file picked. */
   onButton(id: string, cb: (id: string, file?: PresioFile) => void): Unsubscribe;
+  /** An item was picked from a button's menu. */
+  onMenu(id: string, cb: (item: string, id: string) => void): Unsubscribe;
   /** A contributed keybinding's command (contributes.keybindings). */
   onCommand(command: string, cb: (command: string) => void): Unsubscribe;
   readonly deck: {
@@ -91,7 +99,7 @@ interface Presio {
   readonly ui: {
     setVisible(visible: boolean): void;
     setInteractive(value: boolean | { x: number; y: number; w: number; h: number }[]): void;
-    setButton(id: string, state: { active?: boolean; label?: string; disabled?: boolean }): void;
+    setButton(id: string, state: { active?: boolean; label?: string; disabled?: boolean; menu?: PresioMenuEntry[] }): void;
     /** Slide surface: the part of the page on screen (page fractions) and its zoom. */
     readonly view: PresioView;
     onViewChange(cb: (view: PresioView) => void): Unsubscribe;

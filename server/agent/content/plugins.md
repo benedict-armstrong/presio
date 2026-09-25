@@ -77,7 +77,9 @@ index.html
   accept>` value, e.g. `".json,application/json"`) Presio asks the presenter
   for a file first and the press arrives with it. Presses go to the
   `background` surface, or the `tile` when there is none — so a plugin with
-  buttons needs one of the two.
+  buttons needs one of the two. A button can also carry a small menu beside
+  it, set at runtime with `presio.ui.setButton(id, { menu })` (e.g. which
+  microphone to use); picks arrive at `presio.onMenu(id, …)`.
 - `contributes.keybindings` — up to 16 keyboard shortcuts for the presenter's
   controller, each a `command` id, a `label` and default `keys` (up to 3, each
   `{ "key": KeyboardEvent.key, "meta"?: true }`). They're listed under the
@@ -156,7 +158,10 @@ presio.storage.onChange(storage => {})     // another surface of this plugin cha
 
 presio.onButton(id, (id, file) => {})      // a contributed button was pressed; with "accept",
                                            // file is { name, type, bytes: Uint8Array }
-presio.ui.setButton(id, { active, label, disabled })  // presenter: update it
+presio.ui.setButton(id, { active, label, disabled, menu })  // presenter: update it (replaces the last call)
+                                           // menu: [{ id, label, checked?, disabled? } | { heading } | { separator: true }],
+                                           // drawn as a small menu beside the button
+presio.onMenu(id, (item, id) => {})        // an item was picked from button `id`'s menu
 presio.onCommand(command, () => {})        // a contributed keybinding was pressed
 
 presio.deck.attachments()   // → Promise<[{ filename, bytes: Uint8Array }]> ("deck" permission)

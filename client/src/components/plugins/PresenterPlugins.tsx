@@ -3,6 +3,8 @@ import {
   BarChart3,
   Bell,
   Check,
+  ChevronDown,
+  ChevronUp,
   Download,
   Eye,
   Hand,
@@ -18,8 +20,17 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import type { PluginHost } from "@/lib/plugins/host";
+import type { ButtonMenuEntry, PluginHost } from "@/lib/plugins/host";
 import type { ButtonContribution, ButtonLocation, LoadedPlugin } from "@/lib/plugins/manifest";
 import { PluginFrame } from "./PluginFrame";
 
@@ -113,9 +124,20 @@ function PluginButtonGroup({ host, plugin, location }: { host: PluginHost; plugi
           const state = states[button.id] ?? {};
           const Icon = button.icon ? ICONS[button.icon] : undefined;
           const title = `${button.tooltip ?? state.label ?? button.label} (${name})`;
+          const menu = state.menu && (
+            <ButtonMenu
+              host={host}
+              pluginId={id}
+              button={button}
+              entries={state.menu}
+              label={state.label ?? button.label}
+              active={state.active}
+              location={location}
+            />
+          );
           if (location === "controller.currentSlide") {
             // A card header's small icon action; the label is its tooltip.
-            return (
+            const icon = (
               <button
                 key={button.id}
                 type="button"
@@ -133,9 +155,17 @@ function PluginButtonGroup({ host, plugin, location }: { host: PluginHost; plugi
                 {Icon ? <Icon size={13} /> : <span className="text-[11px]">{state.label ?? button.label}</span>}
               </button>
             );
+            return menu ? (
+              <span key={button.id} className="inline-flex items-center">
+                {icon}
+                {menu}
+              </span>
+            ) : (
+              icon
+            );
           }
           if (location === "settings") {
-            return (
+            const main = (
               <Button
                 key={button.id}
                 variant="outline"
@@ -149,8 +179,16 @@ function PluginButtonGroup({ host, plugin, location }: { host: PluginHost; plugi
                 {state.label ?? button.label}
               </Button>
             );
+            return menu ? (
+              <ButtonGroup key={button.id}>
+                {main}
+                {menu}
+              </ButtonGroup>
+            ) : (
+              main
+            );
           }
-          return (
+          const main = (
             <Button
               key={button.id}
               variant={state.active ? "default" : "ghost"}
@@ -165,7 +203,90 @@ function PluginButtonGroup({ host, plugin, location }: { host: PluginHost; plugi
               {state.label ?? button.label}
             </Button>
           );
+          return menu ? (
+            <ButtonGroup key={button.id}>
+              {main}
+              {menu}
+            </ButtonGroup>
+          ) : (
+            main
+          );
         })}
     </>
+  );
+}
+
+/**
+ * The small menu a plugin can put beside one of its buttons (setButton's
+ * `menu`): a chevron that opens it, and picks sent to presio.onMenu. It opens
+ * upward from the bottom bar, like Download PDF's.
+ */
+function ButtonMenu({
+  host,
+  pluginId,
+  button,
+  entries,
+  label,
+  active,
+  location,
+}: {
+  host: PluginHost;
+  pluginId: string;
+  button: ButtonContribution;
+  entries: ButtonMenuEntry[];
+  label: string;
+  /** The button's own state, which the toolbar's chevron matches. */
+  active?: boolean;
+  location: ButtonLocation;
+}) {
+  const up = location === "controller.toolbar";
+  const Chevron = up ? ChevronUp : ChevronDown;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        {location === "controller.currentSlide" ? (
+          <button
+            type="button"
+            aria-label={`${label} options`}
+            data-testid={`plugin-menu-${pluginId}-${button.id}`}
+            className="inline-flex items-center justify-center h-5 w-3.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+          >
+            <Chevron size={11} />
+          </button>
+        ) : (
+          <Button
+            type="button"
+            variant={location === "settings" ? "outline" : active ? "default" : "ghost"}
+            size="sm"
+            aria-label={`${label} options`}
+            data-testid={`plugin-menu-${pluginId}-${button.id}`}
+            className="px-1.5"
+          >
+            <Chevron size={14} />
+          </Button>
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side={up ? "top" : "bottom"} align="end" className="max-w-80">
+        {entries.map((entry, i) =>
+          "separator" in entry ? (
+            <DropdownMenuSeparator key={i} />
+          ) : "heading" in entry ? (
+            <DropdownMenuLabel key={i} className="text-xs text-muted-foreground font-normal">
+              {entry.heading}
+            </DropdownMenuLabel>
+          ) : (
+            <DropdownMenuCheckboxItem
+              key={i}
+              checked={entry.checked ?? false}
+              disabled={entry.disabled}
+              data-testid={`plugin-menu-item-${pluginId}-${button.id}-${i}`}
+              onSelect={() => host.pickMenuItem(pluginId, button.id, entry.id)}
+            >
+              <span className="truncate">{entry.label}</span>
+            </DropdownMenuCheckboxItem>
+          )
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
