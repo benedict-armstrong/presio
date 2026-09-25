@@ -9,7 +9,7 @@
 // new points go out once a frame too, so nothing waits on a throttle and the
 // tail of a stroke is never dropped.
 
-import { Drawing, encodePoints, decodePoints, MAX_STROKE_POINTS, newId, opacityOf, parseBegin, parseFile, publish, serializeFile, type Stroke, type Tool } from "./model";
+import { Drawing, encodePoints, decodePoints, MAX_STROKE_POINTS, newId, opacityOf, parseBegin, publish, type Stroke, type Tool } from "./model";
 import { drawStrokes, LiveStroke } from "./render";
 import { Palette, type PenStyle } from "./palette";
 
@@ -388,25 +388,6 @@ export function runSlide() {
         clear: () => {
           publish(drawing.clear(slide));
           redrawCommitted();
-        },
-        canSave: () => drawing.drawnSlides().length > 0,
-        save: () => {
-          const url = URL.createObjectURL(new Blob([serializeFile(drawing)], { type: "application/json" }));
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = "slides-drawing.json";
-          document.body.append(a);
-          a.click();
-          a.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        },
-        load: async (file) => {
-          try {
-            publish(drawing.replaceAll(parseFile(await file.text(), presio.slide.total)));
-            redrawCommitted();
-          } catch (err) {
-            alert(err instanceof Error ? err.message : "Failed to load the drawing");
-          }
         },
         changed: () => requestAnimationFrame(updateInteractive),
       });

@@ -2,7 +2,7 @@
 //
 // Movable by its grip, and turned on its side by double-clicking it. With a
 // drawing tool active a second panel offers that tool's colors and widths,
-// undo and clear, and saving or loading the drawing; clicking the active tool
+// and undo and clear; clicking the active tool
 // again tucks that panel away. While a tool is in use and the pointer is away
 // from the palette, it collapses to the grip and the active tool, so it stays
 // out of the slide; and with the mouse off the slide altogether it fades out.
@@ -37,9 +37,6 @@ export interface PaletteActions {
   canUndo(): boolean;
   undo(): void;
   clear(): void;
-  canSave(): boolean;
-  save(): void;
-  load(file: File): void;
   /** The palette moved or changed shape: where it takes input changed. */
   changed(): void;
 }
@@ -48,7 +45,6 @@ export class Palette {
   readonly el = document.createElement("div");
   private tools = document.createElement("div");
   private options: HTMLElement | null = null;
-  private input = document.createElement("input");
   private optionsOpen = true;
   // Expanded while the mouse is on it, or "pinned" open: the touch path,
   // where there's no hover. Picking a tool pins it so it survives the finger
@@ -67,16 +63,7 @@ export class Palette {
     this.actions = actions;
     this.el.className = "palette";
     this.tools.className = "panel tools";
-    this.input.type = "file";
-    this.input.accept = ".json,application/json";
-    this.input.className = "hidden-input";
-    this.input.dataset.testid = "drawing-load-input";
-    this.input.onchange = () => {
-      const file = this.input.files?.[0];
-      if (file) actions.load(file);
-      this.input.value = "";
-    };
-    this.el.append(this.tools, this.input);
+    this.el.append(this.tools);
     this.el.addEventListener("pointerenter", (e) => {
       if (e.pointerType === "mouse") this.setHovered(true);
     });
@@ -191,7 +178,7 @@ export class Palette {
     this.options = null;
     if (drawing && expanded && this.optionsOpen) {
       this.options = this.renderOptions(tool);
-      this.el.insertBefore(this.options, this.input);
+      this.el.append(this.options);
     }
     this.place();
   }
@@ -269,9 +256,7 @@ export class Palette {
     actions.className = "actions";
     actions.append(
       this.button("undo", "Undo last stroke", "pen-undo", () => this.actions.undo(), false, !canUndo),
-      this.button("trash", "Clear drawings on this slide", "pen-clear", () => this.actions.clear(), false, !canUndo),
-      this.button("save", "Save the drawings to a file", "drawing-save", () => this.actions.save(), false, !this.actions.canSave()),
-      this.button("open", "Load drawings from a file", "drawing-load", () => this.input.click())
+      this.button("trash", "Clear drawings on this slide", "pen-clear", () => this.actions.clear(), false, !canUndo)
     );
 
     panel.append(colors, sizes, actions);

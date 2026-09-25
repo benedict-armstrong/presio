@@ -93,7 +93,9 @@
         ctx.hovered = m.hovered;
         each(hoverListeners, ctx.hovered);
       } else if (m.type === "button") {
-        each(buttonListeners[m.id] || [], m.id);
+        (buttonListeners[m.id] || []).slice().forEach(function (cb) {
+          try { cb(m.id, m.file); } catch (err) { console.error(err); }
+        });
       } else if (m.type === "command") {
         each(commandListeners[m.id] || [], m.id);
       } else if (m.type === "export") {
@@ -210,7 +212,9 @@
         onChange: function (cb) { return subscribe(storageListeners, cb); },
       },
       /** A contributed button (contributes.buttons) was pressed. Delivered to
-       *  the background surface, or the tile when there is none. */
+       *  the background surface, or the tile when there is none. cb(id, file):
+       *  a button with "accept" arrives with the file the presenter picked,
+       *  { name, type, bytes: Uint8Array }. */
       onButton: function (id, cb) {
         buttonListeners[id] = buttonListeners[id] || [];
         return subscribe(buttonListeners[id], cb);

@@ -16,6 +16,21 @@
         "icon": "pen",
         "tooltip": "Show or hide the drawing tools",
         "location": "controller.currentSlide"
+      },
+      {
+        "id": "saveFile",
+        "label": "Save to file",
+        "icon": "download",
+        "tooltip": "Download every slide's drawings as a JSON file",
+        "location": "settings"
+      },
+      {
+        "id": "loadFile",
+        "label": "Load from file",
+        "icon": "upload",
+        "tooltip": "Replace the drawings with a saved file's",
+        "location": "settings",
+        "accept": ".json,application/json"
       }
     ],
     "keybindings": [

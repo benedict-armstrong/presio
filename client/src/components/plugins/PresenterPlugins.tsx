@@ -3,6 +3,7 @@ import {
   BarChart3,
   Bell,
   Check,
+  Download,
   Eye,
   Hand,
   Megaphone,
@@ -12,13 +13,14 @@ import {
   Sparkles,
   Star,
   Timer,
+  Upload,
   Users,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { PluginHost } from "@/lib/plugins/host";
-import type { ButtonLocation, LoadedPlugin } from "@/lib/plugins/manifest";
+import type { ButtonContribution, ButtonLocation, LoadedPlugin } from "@/lib/plugins/manifest";
 import { PluginFrame } from "./PluginFrame";
 
 // The presenter's side of plugins, drawn by Presio from what each plugin
@@ -38,6 +40,8 @@ const ICONS: Record<string, LucideIcon> = {
   eye: Eye,
   megaphone: Megaphone,
   pen: PenLine,
+  download: Download,
+  upload: Upload,
 };
 
 /** A plugin's dashboard card. */
@@ -79,6 +83,25 @@ export function PluginButtons({
   );
 }
 
+/**
+ * Press a plugin's button. One that asks for a file is picked here, by
+ * Presio: the click is Presio's, and a plugin's frame couldn't open a file
+ * picker on it.
+ */
+function press(host: PluginHost, pluginId: string, button: ButtonContribution) {
+  if (!button.accept) return host.pressButton(pluginId, button.id);
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = button.accept;
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    host.pressButton(pluginId, button.id, { name: file.name, type: file.type, bytes });
+  };
+  input.click();
+}
+
 function PluginButtonGroup({ host, plugin, location }: { host: PluginHost; plugin: LoadedPlugin; location: ButtonLocation }) {
   const { id, name } = plugin.manifest;
   const states = useSyncExternalStore(host.subscribeButtons, () => host.buttonStates(id));
@@ -101,7 +124,7 @@ function PluginButtonGroup({ host, plugin, location }: { host: PluginHost; plugi
                 aria-label={state.label ?? button.label}
                 data-testid={`plugin-button-${id}-${button.id}`}
                 title={title}
-                onClick={() => host.pressButton(id, button.id)}
+                onClick={() => press(host, id, button)}
                 className={cn(
                   "inline-flex items-center justify-center h-5 min-w-5 px-0.5 rounded transition-colors disabled:opacity-40",
                   state.active ? "text-foreground bg-accent" : "text-muted-foreground hover:text-foreground hover:bg-accent"
@@ -109,6 +132,22 @@ function PluginButtonGroup({ host, plugin, location }: { host: PluginHost; plugi
               >
                 {Icon ? <Icon size={13} /> : <span className="text-[11px]">{state.label ?? button.label}</span>}
               </button>
+            );
+          }
+          if (location === "settings") {
+            return (
+              <Button
+                key={button.id}
+                variant="outline"
+                size="sm"
+                disabled={state.disabled}
+                data-testid={`plugin-button-${id}-${button.id}`}
+                title={button.tooltip}
+                onClick={() => press(host, id, button)}
+              >
+                {Icon && <Icon size={14} className="mr-1" />}
+                {state.label ?? button.label}
+              </Button>
             );
           }
           return (
@@ -120,7 +159,7 @@ function PluginButtonGroup({ host, plugin, location }: { host: PluginHost; plugi
               aria-pressed={state.active}
               data-testid={`plugin-button-${id}-${button.id}`}
               title={title}
-              onClick={() => host.pressButton(id, button.id)}
+              onClick={() => press(host, id, button)}
             >
               {Icon && <Icon size={14} className="mr-1" />}
               {state.label ?? button.label}

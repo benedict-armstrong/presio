@@ -105,7 +105,9 @@
                   "check",
                   "eye",
                   "megaphone",
-                  "pen"
+                  "pen",
+                  "download",
+                  "upload"
                 ]
               },
               "tooltip": {
@@ -115,8 +117,15 @@
               "location": {
                 "enum": [
                   "controller.toolbar",
-                  "controller.currentSlide"
+                  "controller.currentSlide",
+                  "settings"
                 ]
+              },
+              "accept": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "Ask the presenter for a file of these types (an <input accept> value) first; the press arrives with it."
               }
             }
           },

@@ -898,6 +898,8 @@ export function ControllerView({
               content: (
                 <PluginPage
                   plugin={plugin}
+                  host={plugins.host}
+                  running={plugins.plugins.find((p) => p.url === plugin.entry.url)}
                   onEnabled={showPluginTile}
                   shortcutsBefore={pluginShortcuts.slice(0, Math.max(0, pluginShortcuts.findIndex((p) => p.id === plugin.manifest?.id)))}
                 />

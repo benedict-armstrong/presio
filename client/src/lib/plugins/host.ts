@@ -42,6 +42,13 @@ export interface ButtonState {
   disabled?: boolean;
 }
 
+/** A file the presenter picked for a button that asks for one. */
+export interface ButtonFile {
+  name: string;
+  type: string;
+  bytes: Uint8Array;
+}
+
 /** A static layer item: an image at a position on the page (fractions). */
 export interface LayerItem {
   x: number;
@@ -380,10 +387,11 @@ export class PluginHost {
   /**
    * The presenter pressed one of a plugin's buttons. It goes to the plugin's
    * background frame when it has one, else to its tile — one handler, so a
-   * plugin running both doesn't act twice.
+   * plugin running both doesn't act twice. A button that asks for a file
+   * (`accept`) arrives with the one picked.
    */
-  pressButton(pluginId: string, buttonId: string) {
-    for (const conn of this.handlerFrames(pluginId)) conn.port.postMessage({ type: "button", id: buttonId });
+  pressButton(pluginId: string, buttonId: string, file?: ButtonFile) {
+    for (const conn of this.handlerFrames(pluginId)) conn.port.postMessage({ type: "button", id: buttonId, file });
   }
 
   /** The presenter pressed one of a plugin's keybindings; delivered like a button. */

@@ -53,16 +53,22 @@ const plugin: Adapter = {
   },
   inkCanvases: "canvas",
   async seed() {},
-  // Loaded the way a presenter would: a saved drawing file, picked from the
-  // palette's "Load drawings" input.
+  // Loaded the way a presenter would: a saved drawing file, picked with
+  // "Load from file" on the plugin's page in Settings.
   async afterLoad(page, strokes) {
-    const { frame } = await plugin.surface(page);
+    await plugin.surface(page);
     const file = { format: "presio-drawing", version: 1, annotations: { 1: strokes } };
-    await frame.locator('[data-testid="drawing-load-input"]').setInputFiles({
+    await page.locator('button[title="Settings"]').first().click();
+    await page.locator('[data-testid="settings-tab-plugin:/plugins/drawing/"]').click();
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator('[data-testid="plugin-button-drawing-loadFile"]').click();
+    await (await chooser).setFiles({
       name: "busy.json",
       mimeType: "application/json",
       buffer: Buffer.from(JSON.stringify(file)),
     });
+    // Not Escape: that's also the drawing plugin's "no tool" shortcut.
+    await page.getByRole("button", { name: "Close settings" }).click();
   },
   isStrokeUpdate: (p) => p.includes('"plugin":"drawing"') && /"type":"(p|b)"/.test(p),
   isDrawing: (p) => p.includes('"plugin":"drawing"'),
