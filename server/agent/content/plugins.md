@@ -3,8 +3,9 @@
 A Presio plugin adds a feature to a live presentation — a button in the
 presenter's bottom bar, a keyboard shortcut, a card on their dashboard, a layer
 on every viewer's screen or on the slide itself, its own settings. It is an
-HTML page plus a manifest, served from any https URL (or from
-`http://localhost` while you build it).
+HTML page plus a manifest, served from any https URL — a public GitHub repo
+is enough (see [Publish on GitHub](#publish-on-github)) — or from
+`http://localhost` while you build it.
 
 Like a VS Code extension, a plugin never edits Presio's interface: it
 *declares* what it adds, and Presio draws it.
@@ -224,6 +225,40 @@ Messaging:
    takes an https URL — a tunnel (e.g. `cloudflared tunnel --url
    http://localhost:5174`) or a real host.
    Reload the viewers after editing, or they'll refuse the changed plugin.
+
+## Publish on GitHub
+
+A public GitHub repo is all a plugin needs: put `presio-plugin.json` and its
+files at the repo root (or in a folder), commit, and presenters add it as
+
+```
+github:you/your-plugin            # latest release, else newest tag, else main's current commit
+github:you/your-plugin@v1.2.0     # a tag, branch or commit
+github:you/your-plugin@v1.2.0/dist   # the plugin in a folder
+```
+
+(or paste the repo's `github.com` link). Presio serves it through jsDelivr
+(`https://cdn.jsdelivr.net/gh/you/your-plugin@<ref>/`) and always pins the
+URL: a branch becomes the commit it's on, because viewers only run the exact
+version the presenter loaded and a CDN caches a branch for hours. Tag a
+release to ship an update; presenters re-add the plugin to move to it.
+
+- A plugin with a build step must commit its built files (jsDelivr serves the
+  repo, not release assets).
+- `raw.githubusercontent.com` URLs only work for a single-file plugin (inline
+  scripts and styles): it serves every file as `text/plain` with `nosniff`, so
+  browsers won't run a separate script. Presio turns such links into jsDelivr
+  ones. GitHub release downloads can't be loaded at all (no CORS).
+- Private repos can't be served to viewers.
+
+If some viewers can't load a plugin (a `localhost` URL phones can't reach, a
+version that changed under its URL), the presenter sees a warning in the
+controller's header, and the reason under the plugin in Settings.
+
+Keyboard shortcuts: Presio's own (`←` `→` Space PgUp PgDn `b` `c` `j`) win,
+then plugins in the order they're listed. A clashing key is flagged in the
+plugin's Settings page and under Keyboard shortcuts, where the presenter can
+rebind it — so pick a key Presio doesn't use.
 
 ## Example
 

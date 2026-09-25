@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import type { PluginManifest } from "./manifest";
-import { loadPlugin, usePluginEntries, type PluginEntry } from "./registry";
+import { describePluginUrl, loadPlugin, usePluginEntries, type PluginEntry } from "./registry";
 
 export interface InstalledPlugin {
   entry: PluginEntry;
@@ -44,11 +44,5 @@ export function useInstalledPlugins(errors: Record<string, string>): InstalledPl
 
 /** A readable name before the manifest has loaded (or when it can't). */
 export function pluginLabel({ entry, manifest }: InstalledPlugin): string {
-  if (manifest) return manifest.name;
-  try {
-    const url = new URL(entry.url, window.location.href);
-    return url.host + url.pathname.replace(/\/$/, "");
-  } catch {
-    return entry.url;
-  }
+  return manifest ? manifest.name : describePluginUrl(entry.url);
 }

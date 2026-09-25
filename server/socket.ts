@@ -8,6 +8,7 @@ import {
   sanitizePluginEvent,
   sanitizePublishedPlugin,
   sanitizePluginSettings,
+  sanitizePluginLoadFailure,
   MAX_PLUGINS_PER_SESSION,
   MAX_RETAINED_PER_PLUGIN,
   MAX_RETAINED_BYTES_PER_PLUGIN,
@@ -366,6 +367,21 @@ export function registerSocketHandlers(
       const controller = controllers.get(sessionId);
       if (!controller) return;
       io.to(controller).emit("plugin_event", { plugin, type, payload, from: "audience", sender: socket.id });
+    });
+
+    // A viewer couldn't load one of the published plugins (a presenter's
+    // localhost dev server, a version that changed under its URL): tell the
+    // presenter, who otherwise can't see it. Throttled like the audience's
+    // plugin messages, and only for the version actually published.
+    socket.on("plugin_load_failed", (raw: unknown) => {
+      const { sessionId } = socket.data;
+      if (!sessionId || controllers.get(sessionId) === socket.id) return;
+      const failure = sanitizePluginLoadFailure(raw);
+      if (!failure) return;
+      if (publishedPlugins.get(sessionId)?.get(failure.plugin)?.hash !== failure.hash) return;
+      if (!allowAudiencePluginEvent(socket)) return;
+      const controller = controllers.get(sessionId);
+      if (controller) io.to(controller).emit("plugin_load_failed", { ...failure, sender: socket.id });
     });
 
     socket.on("time_ping", (clientT1: number, ack?: (data: { serverTime: number; clientT1: number }) => void) => {

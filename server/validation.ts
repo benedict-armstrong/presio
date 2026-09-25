@@ -1,4 +1,3 @@
-
 // Pure validation/sanitization helpers, factored out of the request/socket
 // handlers so they can be unit-tested without a server or Supabase.
 
@@ -128,6 +127,17 @@ export function sanitizePluginSettings(raw: unknown): { plugin: string; settings
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) return null;
   if (jsonSize(settings) > MAX_PLUGIN_PAYLOAD_BYTES) return null;
   return { plugin: e.plugin, settings: settings as Record<string, unknown> };
+}
+
+// A viewer couldn't load a plugin the presenter published: which (by id and
+// the hash it was published with) and why, in a line for the presenter.
+export function sanitizePluginLoadFailure(raw: unknown): { plugin: string; hash: string; reason: string } | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const e = raw as Record<string, unknown>;
+  if (typeof e.plugin !== "string" || !PLUGIN_ID_RE.test(e.plugin)) return null;
+  if (typeof e.hash !== "string" || !/^[0-9a-f]{64}$/.test(e.hash)) return null;
+  const reason = typeof e.reason === "string" ? e.reason.slice(0, 200) : "";
+  return { plugin: e.plugin, hash: e.hash, reason };
 }
 
 const shortString = (v: unknown, max: number): string | undefined =>

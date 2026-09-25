@@ -39,6 +39,30 @@ interface SettingsUpdate {
   settings: Record<string, unknown>;
 }
 
+/** A viewer couldn't load a published plugin (relayed to the presenter). */
+interface LoadFailure {
+  plugin: string;
+  hash: string;
+  reason: string;
+  sender: string;
+}
+
+/** Why a viewer couldn't load a plugin, in a line the presenter can act on. */
+function loadFailureReason(e: unknown, url: string): string {
+  if (e instanceof TypeError) {
+    // fetch() rejects with a TypeError when it can't reach the host at all.
+    let host = url;
+    try {
+      host = new URL(url, window.location.href).host;
+    } catch {
+      /* keep the URL */
+    }
+    return `couldn't reach ${host}`;
+  }
+  const message = e instanceof Error ? e.message : String(e);
+  return /changed since/.test(message) ? "it got a different version — pin the plugin's URL to a version" : message;
+}
+
 /** Plugins that run on audience devices, which the presenter publishes. */
 function runsOnViewers(manifest: Pick<PluginManifest, "surfaces">): boolean {
   return manifest.surfaces.includes("viewer") || manifest.surfaces.includes("slide");
@@ -136,6 +160,8 @@ export interface PluginHostState {
   plugins: LoadedPlugin[];
   /** Load failures by plugin URL (presenter only), for Settings. */
   errors: Record<string, string>;
+  /** Presenter of a shared deck: plugins some viewers couldn't load, by URL. */
+  viewerErrors: Record<string, string>;
 }
 
 export function usePluginHost({
@@ -226,6 +252,12 @@ export function usePluginHost({
     }
   }, [host, plugins, settingsDoc, fromSession, local, isPresenter]);
 
+  // --- Viewers that couldn't load a plugin ---
+  // Viewers report once per plugin version; the presenter keeps who failed
+  // and why, per plugin id, for the version it published.
+  const [loadFailures, setLoadFailures] = useState<Record<string, { hash: string; senders: Record<string, string> }>>({});
+  const reportedRef = useRef(new Set<string>());
+
   // --- Shared deck: the session's socket ---
   const publishRef = useRef<(() => void) | null>(null);
   useEffect(() => {
@@ -313,8 +345,14 @@ export function usePluginHost({
           });
         } catch (e) {
           // Unreachable from here (a presenter's localhost dev server), or
-          // changed since: this viewer goes without it.
+          // changed since: this viewer goes without it, and says so to the
+          // presenter (once per version: the watchdog re-joins every 30s).
           console.warn(`Plugin ${manifest.id} not loaded:`, e);
+          const key = `${manifest.id}:${hash}`;
+          if (!reportedRef.current.has(key)) {
+            reportedRef.current.add(key);
+            socket.emit("plugin_load_failed", { plugin: manifest.id, hash, reason: loadFailureReason(e, url) });
+          }
         }
       }
       const changed =
@@ -322,14 +360,24 @@ export function usePluginHost({
       if (changed) setSessionPlugins(next);
     };
 
+    const onLoadFailed = (failure: LoadFailure) => {
+      if (!isPresenter) return;
+      setLoadFailures((prev) => {
+        const current = prev[failure.plugin]?.hash === failure.hash ? prev[failure.plugin].senders : {};
+        return { ...prev, [failure.plugin]: { hash: failure.hash, senders: { ...current, [failure.sender]: failure.reason } } };
+      });
+    };
+
     socket.on("plugin_event", onEvent);
     socket.on("plugin_settings", onSettings);
     socket.on("plugins_state", onState);
+    socket.on("plugin_load_failed", onLoadFailed);
     publishRef.current = publish;
     return () => {
       socket.off("plugin_event", onEvent);
       socket.off("plugin_settings", onSettings);
       socket.off("plugins_state", onState);
+      socket.off("plugin_load_failed", onLoadFailed);
       host.setOutbound(() => {});
       publishRef.current = null;
     };
@@ -352,5 +400,16 @@ export function usePluginHost({
     publishRef.current?.();
   }, [publishKey, local, isPresenter]);
 
-  return { host, plugins, errors: localActive.errors };
+  // Only failures for the version running now: a fix republishes a new hash.
+  const viewerErrors: Record<string, string> = {};
+  for (const plugin of plugins) {
+    const failure = loadFailures[plugin.manifest.id];
+    if (!failure || failure.hash !== plugin.hash) continue;
+    const reasons = Object.values(failure.senders);
+    if (!reasons.length) continue;
+    const n = reasons.length;
+    viewerErrors[plugin.url] = `${n} viewer${n === 1 ? "" : "s"} couldn't load it: ${reasons[0]}`;
+  }
+
+  return { host, plugins, errors: localActive.errors, viewerErrors };
 }

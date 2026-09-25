@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { cn, getSessionAuth, setSessionAuth } from "@/lib/utils";
-import { Settings, Check, Option, Plus, Share2, ExternalLink, QrCode, User, LayoutGrid, Puzzle, KeyRound, Keyboard, FileJson } from "lucide-react";
+import { Settings, TriangleAlert, Check, Option, Plus, Share2, ExternalLink, QrCode, User, LayoutGrid, Puzzle, KeyRound, Keyboard, FileJson } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
@@ -501,7 +501,14 @@ export function ControllerView({
   // Running plugins that contribute a dashboard tile, and every card the
   // Layout settings can toggle.
   const tilePlugins = plugins.plugins.filter((p) => p.manifest.surfaces.includes("tile"));
-  const installedPlugins = useInstalledPlugins(plugins.errors);
+  const pluginErrors = useMemo(() => ({ ...plugins.errors, ...plugins.viewerErrors }), [plugins.errors, plugins.viewerErrors]);
+  const installedPlugins = useInstalledPlugins(pluginErrors);
+  // A plugin some viewers couldn't load: worth a look, but only in Settings.
+  const viewerFailedUrl = Object.keys(plugins.viewerErrors)[0];
+  // Enabled plugins' shortcuts in order: an earlier one wins a shared key.
+  const pluginShortcuts = installedPlugins.flatMap(({ entry, manifest }) =>
+    entry.enabled && manifest ? [{ id: manifest.id, name: manifest.name, keybindings: manifest.contributes.keybindings }] : []
+  );
   // Switching on a plugin with a tile is asking to see it.
   const showPluginTile = (manifest: PluginManifest) => {
     const key = pluginTileKey(manifest.id);
@@ -546,6 +553,20 @@ export function ControllerView({
 
   const desktopActions = (
     <>
+      {viewerFailedUrl && (
+        <button
+          type="button"
+          onClick={() => {
+            setSettingsCategory(`plugin:${viewerFailedUrl}`);
+            setSettingsOpen(true);
+          }}
+          title={plugins.viewerErrors[viewerFailedUrl]}
+          data-testid="plugin-viewer-errors"
+          className="inline-flex items-center justify-center h-8 w-8 rounded-md text-amber-500 hover:bg-amber-500/10 transition-colors"
+        >
+          <TriangleAlert size={15} />
+        </button>
+      )}
       <button
         type="button"
         onClick={() => setSettingsOpen(true)}
@@ -855,11 +876,7 @@ export function ControllerView({
                 <ShortcutsEditor
                   keymap={keymap}
                   onChange={setKeymap}
-                  plugins={installedPlugins.flatMap(({ entry, manifest }) =>
-                    entry.enabled && manifest
-                      ? [{ id: manifest.id, name: manifest.name, keybindings: manifest.contributes.keybindings }]
-                      : []
-                  )}
+                  plugins={pluginShortcuts}
                 />
               ),
             },
@@ -878,7 +895,13 @@ export function ControllerView({
               icon: Puzzle,
               dimmed: !plugin.entry.enabled,
               description: plugin.manifest?.description,
-              content: <PluginPage plugin={plugin} onEnabled={showPluginTile} />,
+              content: (
+                <PluginPage
+                  plugin={plugin}
+                  onEnabled={showPluginTile}
+                  shortcutsBefore={pluginShortcuts.slice(0, Math.max(0, pluginShortcuts.findIndex((p) => p.id === plugin.manifest?.id)))}
+                />
+              ),
             })),
             {
               id: "add-plugin",

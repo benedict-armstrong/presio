@@ -72,6 +72,30 @@ export function coreActionFor(keymap: Keymap, binding: KeyBinding): KeymapAction
   return KEYMAP_ACTIONS.find((action) => keymap[action].some((b) => sameBinding(b, binding))) ?? null;
 }
 
+/** A plugin's keyboard shortcuts, as far as clashes are concerned. */
+export interface PluginShortcutSet {
+  id: string;
+  name: string;
+  keybindings: { command: string; label: string; keys: KeyBinding[] }[];
+}
+
+/**
+ * What a plugin's binding clashes with, as a phrase ("Presio's “Show join
+ * code”"), or null when the key is free. Presio's own shortcuts win, then
+ * plugins in order, so only `earlier` plugins (the ones before it) can take
+ * a key from it.
+ */
+export function shortcutTakenBy(keymap: Keymap, binding: KeyBinding, earlier: readonly PluginShortcutSet[]): string | null {
+  if (!binding.key) return null;
+  const core = coreActionFor(keymap, binding);
+  if (core) return `Presio's “${KEYMAP_LABELS[core]}”`;
+  for (const plugin of earlier) {
+    const kb = plugin.keybindings.find((k) => pluginBindings(keymap, plugin.id, k).some((b) => sameBinding(b, binding)));
+    if (kb) return `${plugin.name}'s “${kb.label}”`;
+  }
+  return null;
+}
+
 export function formatBinding(b: KeyBinding): string {
   const parts: string[] = [];
   if (b.meta) parts.push("⌘");

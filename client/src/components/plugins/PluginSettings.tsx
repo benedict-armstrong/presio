@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { PluginManifest, PluginSettingSpec } from "@/lib/plugins/manifest";
-import { resolvePluginSettings, setPluginSetting, useSettingsDocument } from "@/lib/settings";
-import { addPlugin, removePlugin, setPluginEnabled } from "@/lib/plugins/registry";
+import { resolvePluginSettings, setPluginSetting, useSetting, useSettingsDocument } from "@/lib/settings";
+import { formatBinding, pluginBindings, shortcutTakenBy, type PluginShortcutSet } from "@/lib/keymap";
+import { addPlugin, describePluginUrl, removePlugin, setPluginEnabled } from "@/lib/plugins/registry";
 import { pluginLabel, type InstalledPlugin } from "@/lib/plugins/installed";
 
 // Settings for plugins: one page per installed plugin (switch it on or off,
@@ -26,18 +27,22 @@ const SURFACE_LABELS: Record<string, string> = {
 export function PluginPage({
   plugin,
   onEnabled,
+  shortcutsBefore = [],
 }: {
   plugin: InstalledPlugin;
   /** It was just switched on. */
   onEnabled?: (manifest: PluginManifest) => void;
+  /** Enabled plugins listed before this one, whose shortcuts win a shared key. */
+  shortcutsBefore?: PluginShortcutSet[];
 }) {
   const { entry, manifest, error } = plugin;
+  const [keymap] = useSetting("keybindings");
   const settings = manifest ? Object.keys(manifest.contributes.settings) : [];
   const buttons = manifest?.contributes.buttons ?? [];
   const details = [
     manifest && `v${manifest.version}`,
     manifest?.author && `by ${manifest.author}`,
-    entry.builtin ? "built in" : entry.url,
+    entry.builtin ? "built in" : describePluginUrl(entry.url),
   ].filter(Boolean);
 
   return (
@@ -69,9 +74,25 @@ export function PluginPage({
                 A “{b.label}” button {b.location === "controller.currentSlide" ? "in the current slide's header" : "in the bottom bar"}
               </li>
             ))}
-            {manifest.contributes.keybindings.map((k) => (
-              <li key={k.command}>A keyboard shortcut: {k.label}</li>
-            ))}
+            {manifest.contributes.keybindings.map((k) => {
+              const keys = pluginBindings(keymap, manifest.id, k);
+              // A key Presio (or an earlier plugin) already uses never reaches
+              // this one: say so here, where the plugin was just added.
+              const clash = keys
+                .map((b) => ({ b, by: shortcutTakenBy(keymap, b, shortcutsBefore) }))
+                .find((c) => c.by);
+              return (
+                <li key={k.command}>
+                  A keyboard shortcut: {k.label}
+                  {keys.length > 0 && ` (${keys.map(formatBinding).join(", ")})`}
+                  {clash && (
+                    <span className="block text-amber-600 dark:text-amber-400" data-testid={`plugin-shortcut-clash-${k.command}`}>
+                      {formatBinding(clash.b)} is already {clash.by}, which wins — rebind it under Keyboard shortcuts.
+                    </span>
+                  )}
+                </li>
+              );
+            })}
             {/* A background part that only serves its buttons or shortcuts
                 says nothing those lines didn't already. */}
             {manifest.surfaces
@@ -131,7 +152,7 @@ export function AddPluginPage({ onAdded }: { onAdded?: (url: string, manifest: P
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && url) void add(); }}
-          placeholder="https://… or http://localhost:5174/"
+          placeholder="github:you/repo, https://… or http://localhost:5174/"
           data-testid="plugin-url-input"
           className={`flex-1 min-w-0 ${fieldClass}`}
         />
