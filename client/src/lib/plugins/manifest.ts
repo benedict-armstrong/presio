@@ -24,6 +24,15 @@ export type PluginSurface =
    *  for it (presio.ui.setInteractive). */
   | "slide";
 
+/**
+ * What a "slide" surface covers. "page" (the default): the page itself, so
+ * fractions of the frame are page positions. "area": the whole slide area
+ * around it — the viewer's screen, the current slide card — letterbox bars
+ * included, with presio.ui.page saying where the page is. For what belongs
+ * beside the slide rather than on it: captions, a tool palette.
+ */
+export type SlideSurfaceArea = "page" | "area";
+
 export type PluginPermission =
   /** Read the deck: its embedded attachments and the PDF's bytes
    *  (presio.deck.attachments() / bytes()). */
@@ -79,6 +88,7 @@ export interface PluginManifest {
   /** The plugin's HTML file, relative to the manifest. */
   main: string;
   surfaces: PluginSurface[];
+  slideSurface: SlideSurfaceArea;
   /** When the plugin runs for a deck: "always", or "attachment:<glob>" to run
    *  only when the PDF carries a matching attachment (e.g. "attachment:poll-*.json"). */
   activation: string[];
@@ -144,6 +154,10 @@ export function parseManifest(raw: unknown): PluginManifest {
   const main = str("main", 200, false) ?? "index.html";
   if (/^[a-z]+:|^\/|\.\./i.test(main)) throw new Error('presio-plugin.json: "main" must be a relative path');
   const surfaces = list("surfaces", SURFACES);
+  const slideSurface = m.slideSurface ?? "page";
+  if (slideSurface !== "page" && slideSurface !== "area") {
+    throw new Error('presio-plugin.json: "slideSurface" must be "page" or "area"');
+  }
   const contributes = parseContributes(m.contributes);
   if (contributes.buttons.length && !surfaces.includes("background") && !surfaces.includes("tile")) {
     throw new Error('presio-plugin.json: buttons need a "background" or "tile" surface to handle them');
@@ -159,6 +173,7 @@ export function parseManifest(raw: unknown): PluginManifest {
     description: str("description", 300, false),
     main,
     surfaces,
+    slideSurface,
     activation: list("activation"),
     permissions: list("permissions", PERMISSIONS),
     contributes,

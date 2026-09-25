@@ -58,17 +58,34 @@ export function runSlide() {
   laserDot.dataset.testid = "laser-dot";
   laserDot.dataset.laser = presenter ? "local" : "remote";
   laserDot.hidden = true;
-  root.append(committed.c, liveLayer, laserDot);
+  // The surface covers the whole slide area (the current slide card, a
+  // viewer's screen), so the palette can sit anywhere on it; what's drawn
+  // lives on the page within it, in page fractions.
+  const pageEl = document.createElement("div");
+  pageEl.className = "page";
+  pageEl.append(committed.c, liveLayer, laserDot);
+  root.append(pageEl);
+
+  // The page's box in the surface, in CSS pixels.
+  let page = { x: 0, y: 0, w: 1, h: 1 };
+  const placePage = () => {
+    const p = presio.ui.page ?? { x: 0, y: 0, w: 1, h: 1 };
+    page = { x: p.x * innerWidth, y: p.y * innerHeight, w: Math.max(1, p.w * innerWidth), h: Math.max(1, p.h * innerHeight) };
+    Object.assign(pageEl.style, { left: `${page.x}px`, top: `${page.y}px`, width: `${page.w}px`, height: `${page.h}px` });
+  };
+  const onPage = (e: PointerEvent) =>
+    e.clientX >= page.x && e.clientX <= page.x + page.w && e.clientY >= page.y && e.clientY <= page.y + page.h;
 
   let W = 0;
   let H = 0;
   let resolution = 1;
   const resize = () => {
+    placePage();
     const dpr = window.devicePixelRatio || 1;
     const scale = Math.max(1, presio.ui.view?.scale ?? 1);
-    resolution = Math.min(dpr * scale, MAX_CANVAS_PX / Math.max(1, innerWidth));
-    const w = Math.max(1, Math.round(innerWidth * resolution));
-    const h = Math.max(1, Math.round(innerHeight * resolution));
+    resolution = Math.min(dpr * scale, MAX_CANVAS_PX / page.w);
+    const w = Math.max(1, Math.round(page.w * resolution));
+    const h = Math.max(1, Math.round(page.h * resolution));
     if (w === W && h === H) return;
     W = w;
     H = h;
@@ -148,8 +165,8 @@ export function runSlide() {
   let pinching = false;
 
   const toPage = (e: PointerEvent) => [
-    Math.min(1, Math.max(0, e.clientX / innerWidth)),
-    Math.min(1, Math.max(0, e.clientY / innerHeight)),
+    Math.min(1, Math.max(0, (e.clientX - page.x) / page.w)),
+    Math.min(1, Math.max(0, (e.clientY - page.y) / page.h)),
   ];
 
   const addPoint = (e: PointerEvent) => {
@@ -157,7 +174,7 @@ export function runSlide() {
     const p = draft.stroke.points;
     const [x, y] = toPage(e);
     const n = p.length;
-    if (n && Math.hypot((x - p[n - 2]) * innerWidth, (y - p[n - 1]) * innerHeight) < MIN_POINT_PX) return;
+    if (n && Math.hypot((x - p[n - 2]) * page.w, (y - p[n - 1]) * page.h) < MIN_POINT_PX) return;
     p.push(x, y);
     // Past what one message holds: finish this one and carry on in a new one
     // from the same spot, so the line is unbroken.
@@ -178,15 +195,15 @@ export function runSlide() {
     if (!p || p.length < 4 || !ahead.length) return [];
     const n = p.length;
     const [x, y] = toPage(ahead[ahead.length - 1]);
-    const lx = (p[n - 2] - p[n - 4]) * innerWidth;
-    const ly = (p[n - 1] - p[n - 3]) * innerHeight;
-    const dx = (x - p[n - 2]) * innerWidth;
-    const dy = (y - p[n - 1]) * innerHeight;
+    const lx = (p[n - 2] - p[n - 4]) * page.w;
+    const ly = (p[n - 1] - p[n - 3]) * page.h;
+    const dx = (x - p[n - 2]) * page.w;
+    const dy = (y - p[n - 1]) * page.h;
     const last = Math.hypot(lx, ly);
     const reach = Math.hypot(dx, dy);
     if (!last || !reach || (lx * dx + ly * dy) / (last * reach) < 0.9) return [];
     const k = Math.min(1, last / reach, PREDICT_MAX_PX / reach);
-    return [p[n - 2] + (dx * k) / innerWidth, p[n - 1] + (dy * k) / innerHeight];
+    return [p[n - 2] + (dx * k) / page.w, p[n - 1] + (dy * k) / page.h];
   };
 
   const startStroke = (stroke: Stroke) => {
@@ -229,7 +246,7 @@ export function runSlide() {
   let laserSent: { x: number; y: number } | null = null;
   const showLaser = (x: number, y: number) => {
     laserDot.hidden = false;
-    laserDot.style.transform = `translate(${x * innerWidth}px, ${y * innerHeight}px)`;
+    laserDot.style.transform = `translate(${x * page.w}px, ${y * page.h}px)`;
   };
   const sendLaser = () => {
     if (!laser || (laserSent && laserSent.x === laser.x && laserSent.y === laser.y)) return;
@@ -291,7 +308,8 @@ export function runSlide() {
           return;
         }
       }
-      if (!e.isPrimary || pinching || onPalette(e)) return;
+      // The bars around the page are the palette's room, not the slide.
+      if (!e.isPrimary || pinching || onPalette(e) || !onPage(e)) return;
       if (drawingTool() && e.button === 0) {
         document.body.setPointerCapture?.(e.pointerId);
         const t = tool as "pen" | "highlighter";
@@ -311,7 +329,7 @@ export function runSlide() {
         for (const c of e.getCoalescedEvents?.() ?? [e]) addPoint(c);
         predicted = predict(e);
         schedule();
-      } else if (tool === "laser" && !onPalette(e) && (e.pointerType === "mouse" || e.buttons)) {
+      } else if (tool === "laser" && !onPalette(e) && onPage(e) && (e.pointerType === "mouse" || e.buttons)) {
         const [x, y] = toPage(e);
         laser = { x, y };
         showLaser(x, y);
@@ -433,6 +451,7 @@ export function runSlide() {
     palette?.setView(view);
     resize();
   });
+  presio.ui.onPageChange(() => resize());
   window.addEventListener("resize", () => {
     resize();
     palette?.setView(presio.ui.view);

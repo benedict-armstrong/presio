@@ -62,6 +62,14 @@ index.html
     slide (the plugin still sees them, and should drop what the first began).
     Pair it with `presio.layers` so the same content shows, still, in
     thumbnails and the next-slide preview.
+- `slideSurface` — what the `slide` surface covers: `"page"` (the default),
+  the page itself, or `"area"`, the whole slide area around it — the viewer's
+  screen, the presenter's current slide card — letterbox bars included. For
+  what belongs beside the slide rather than on it: captions that move into the
+  bar below the slide when there is one, a tool palette that can sit anywhere
+  on the card. `presio.ui.page` says where the page is within the surface;
+  `presio.ui.view` and `setInteractive` areas are fractions of the surface
+  either way.
 - `activation` — `"always"`, or `"attachment:<glob>"` to run only for decks
   whose PDF embeds a matching attachment (e.g. `"attachment:poll-*.json"`).
 - `permissions` — `"deck"` to read the PDF (its bytes and embedded
@@ -171,9 +179,13 @@ presio.deck.save(bytes)     // presenter: → Promise; same pages, saved where t
 presio.deck.onChange(kind => {})  // the deck was swapped: "edit" (same pages, e.g. notes saved) or "replace"
 presio.deck.onExport(async (bytes, { mode }) => bytes)  // transform the PDF this device downloads
 presio.ui.setVisible(bool)  // viewer surface: show/hide the layer
-presio.ui.setInteractive(true | false | [{ x, y, w, h }])  // slide surface: take input (page fractions)
-presio.ui.view              // slide surface: { x, y, w, h, scale } — the part of the page on screen, and its zoom
+presio.ui.setInteractive(true | false | [{ x, y, w, h }])  // slide surface: take input (fractions of the surface)
+                                           // in areas, touches arrive forwarded: pointer events sent to the element
+                                           // touched (setPointerCapture throws for them; wrap it), a tap as a click
+presio.ui.view              // slide surface: { x, y, w, h, scale } — the part of it on screen, and its zoom
 presio.ui.onViewChange(view => {})
+presio.ui.page              // slide surface: { x, y, w, h } — where the page is in it (all of it, unless "slideSurface": "area")
+presio.ui.onPageChange(page => {})
 presio.ui.hovered           // slide surface, presenter: a mouse is over the slide (never for touch)
 presio.ui.onHover(hovered => {})
 

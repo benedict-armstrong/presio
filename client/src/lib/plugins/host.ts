@@ -90,8 +90,8 @@ export type ExportMode = "everything" | "no-attachments";
  *  place, or a different document. */
 export type DeckChange = "edit" | "replace";
 
-/** The part of the page a "slide" surface has on screen (page fractions), and
- *  the zoom it's drawn at. */
+/** The part of a "slide" surface on screen (fractions of it: page fractions
+ *  for one sized to the page), and the zoom it's drawn at. */
 export interface SlideView {
   x: number;
   y: number;
@@ -102,8 +102,19 @@ export interface SlideView {
 
 export const FULL_VIEW: SlideView = { x: 0, y: 0, w: 1, h: 1, scale: 1 };
 
+/** Where the page is within a "slide" surface, as fractions of it: all of it,
+ *  unless the surface covers the slide area around the page too. */
+export interface SlidePage {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export const FULL_PAGE: SlidePage = { x: 0, y: 0, w: 1, h: 1 };
+
 /** Where a "slide" surface takes pointer input: nowhere, everywhere, or in
- *  these page-fraction areas. */
+ *  these areas (fractions of it). */
 export type Interactive = boolean | { x: number; y: number; w: number; h: number }[];
 
 /** What a mounted frame wants told about it. */
@@ -120,6 +131,7 @@ export interface FrameHooks {
 export interface FrameLink {
   disconnect(): void;
   setView(view: SlideView): void;
+  setPage(page: SlidePage): void;
   setHovered(hovered: boolean): void;
 }
 
@@ -274,6 +286,7 @@ export class PluginHost {
       clockOffset: this.clock,
       baseUrl: plugin.baseUrl,
       view: FULL_VIEW,
+      page: FULL_PAGE,
       hovered: false,
     };
   }
@@ -475,6 +488,7 @@ export class PluginHost {
       if (event.plugin === plugin.manifest.id) this.deliver(conn, event);
     }
     let view = FULL_VIEW;
+    let page = FULL_PAGE;
     let hovered = false;
     return {
       disconnect: () => {
@@ -485,6 +499,11 @@ export class PluginHost {
         if (next.x === view.x && next.y === view.y && next.w === view.w && next.h === view.h && next.scale === view.scale) return;
         view = next;
         port.postMessage({ type: "view", view });
+      },
+      setPage: (next) => {
+        if (next.x === page.x && next.y === page.y && next.w === page.w && next.h === page.h) return;
+        page = next;
+        port.postMessage({ type: "page", page });
       },
       setHovered: (next) => {
         if (next === hovered) return;

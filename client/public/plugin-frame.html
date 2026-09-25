@@ -31,6 +31,7 @@
     var storageListeners = [];
     var deckListeners = [];
     var viewListeners = [];
+    var pageListeners = [];
     var hoverListeners = [];
     var buttonListeners = {};
     var commandListeners = {};
@@ -90,6 +91,9 @@
       } else if (m.type === "view") {
         ctx.view = m.view;
         each(viewListeners, ctx.view);
+      } else if (m.type === "page") {
+        ctx.page = m.page;
+        each(pageListeners, ctx.page);
       } else if (m.type === "hover") {
         ctx.hovered = m.hovered;
         each(hoverListeners, ctx.hovered);
@@ -142,7 +146,8 @@
       /** "background" (hidden, presenter's device), "tile" (presenter's
        *  dashboard card), "viewer" (full screen on every viewer) or "slide"
        *  (over the slide itself, on the presenter's current slide and every
-       *  viewer — sized to the page, so fractions of it are page positions). */
+       *  viewer — sized to the page, so fractions of it are page positions,
+       *  or to the slide area around it with "slideSurface": "area"). */
       get surface() { return ctx.surface; },
       /** "presenter" or "audience": who is holding this device. */
       get role() { return ctx.role; },
@@ -287,16 +292,25 @@
         /**
          * "slide" surface: whether it takes pointer input. false (the
          * default) lets everything through to the slide; true takes all of
-         * it; a list of { x, y, w, h } page fractions takes only those areas.
+         * it; a list of { x, y, w, h } fractions of the surface (page
+         * fractions, unless it covers the slide area) takes only those areas.
          */
         setInteractive: function (value) { post({ type: "interactive", value: value }); },
         /**
-         * "slide" surface: the part of the page on screen, as page fractions,
-         * and the zoom it's shown at — the presenter can pinch in on their
-         * current slide. { x, y, w, h, scale }; the whole page at 1 elsewhere.
+         * "slide" surface: the part of it on screen, as fractions of it, and
+         * the zoom it's shown at — the presenter can pinch in on their
+         * current slide. { x, y, w, h, scale }; all of it at 1 elsewhere.
          */
         get view() { return ctx.view; },
         onViewChange: function (cb) { return subscribe(viewListeners, cb); },
+        /**
+         * "slide" surface: where the page is within it, { x, y, w, h } as
+         * fractions of it. The whole of it, unless the manifest asks for the
+         * slide area ("slideSurface": "area"): then the page sits inside,
+         * with letterbox bars around it when the shapes differ.
+         */
+        get page() { return ctx.page || { x: 0, y: 0, w: 1, h: 1 }; },
+        onPageChange: function (cb) { return subscribe(pageListeners, cb); },
         /** "slide" surface: whether a mouse is over the slide (never true for
          *  touch), wherever the frame takes input or not. */
         get hovered() { return !!ctx.hovered; },

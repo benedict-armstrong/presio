@@ -50,6 +50,11 @@
       },
       "description": "background: hidden on the presenter's device; handles buttons, keybindings and state. tile: a card of its own on the presenter's dashboard. viewer: a full-screen layer on every viewer screen, hidden until the plugin shows it. slide: a layer over the slide itself, sized to the page, on the presenter's current slide and every viewer; lets input through unless the plugin claims it."
     },
+    "slideSurface": {
+      "enum": ["page", "area"],
+      "default": "page",
+      "description": "What the slide surface covers. page: the page itself, so fractions of the layer are page positions. area: the whole slide area around it (the viewer's screen, the current slide card), letterbox bars included; presio.ui.page says where the page is within it."
+    },
     "activation": {
       "type": "array",
       "items": {

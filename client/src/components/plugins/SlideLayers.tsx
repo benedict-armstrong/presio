@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useContainedCanvasRect } from "@/hooks/useContainedCanvasRect";
-import { FULL_VIEW, type Interactive, type PluginHost, type SlideView } from "@/lib/plugins/host";
+import { FULL_PAGE, FULL_VIEW, type Interactive, type PluginHost, type SlidePage, type SlideView } from "@/lib/plugins/host";
 import type { LoadedPlugin } from "@/lib/plugins/manifest";
 import type { PluginHostState } from "@/lib/plugins/usePluginHost";
 import { PluginFrame } from "./PluginFrame";
@@ -15,6 +15,8 @@ import { PluginFrame } from "./PluginFrame";
 //
 // Positioned over the page: over the letterboxed canvas in `containerRef`,
 // or filling the parent when it already has the page's shape (a thumbnail).
+// A plugin that asks for the slide area ("slideSurface": "area") gets the
+// whole container instead, bars and all, and is told where the page is in it.
 // Live layers sit above the slide's link regions: a surface that takes input
 // (a drawing tool) must get it first, and one that doesn't lets it through.
 
@@ -44,6 +46,8 @@ export function SlideLayers({
   const live = mode === "live" ? plugins.plugins.filter((p) => p.manifest.surfaces.includes("slide")) : [];
   const liveIds = new Set(live.map((p) => p.manifest.id));
   const stills = layers.filter((l) => !liveIds.has(l.pluginId));
+  const onPage = live.filter((p) => p.manifest.slideSurface !== "area");
+  const onArea = live.filter((p) => p.manifest.slideSurface === "area");
   if (!stills.length && !live.length) return null;
 
   const content = (view: SlideView) => (
@@ -66,17 +70,62 @@ export function SlideLayers({
           />
         ))
       )}
-      {live.map((plugin) => (
-        <SlideSurface key={plugin.hash} host={host} plugin={plugin} view={view} />
+      {onPage.map((plugin) => (
+        <SlideSurface key={plugin.hash} host={host} plugin={plugin} view={view} page={FULL_PAGE} />
       ))}
     </>
   );
 
-  return containerRef ? (
-    <PageBox containerRef={containerRef} slide={slide} zoom={zoom}>{content}</PageBox>
-  ) : (
-    <div className="absolute inset-0 pointer-events-none">{content(FULL_VIEW)}</div>
+  if (!containerRef) return <div className="absolute inset-0 pointer-events-none">{content(FULL_VIEW)}</div>;
+  return (
+    <>
+      <PageBox containerRef={containerRef} slide={slide} zoom={zoom}>{content}</PageBox>
+      {onArea.length > 0 && (
+        <AreaBox containerRef={containerRef} slide={slide} zoom={zoom}>
+          {(view, page) =>
+            onArea.map((plugin) => <SlideSurface key={plugin.hash} host={host} plugin={plugin} view={view} page={page} />)
+          }
+        </AreaBox>
+      )}
+    </>
   );
+}
+
+/** `containerRef`'s box within the parent the layers are positioned in. */
+function useContainerBox(containerRef: React.RefObject<HTMLElement | null>) {
+  const [box, setBox] = useState({ left: 0, top: 0, width: 0, height: 0 });
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () =>
+      setBox((b) => {
+        const next = { left: el.offsetLeft, top: el.offsetTop, width: el.clientWidth, height: el.clientHeight };
+        return next.left === b.left && next.top === b.top && next.width === b.width && next.height === b.height ? b : next;
+      });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [containerRef]);
+  return box;
+}
+
+/**
+ * What of a box `width` × `height` (at `left`, `top` in the container) is on
+ * screen under the container's pinch-zoom, as fractions of the box. The zoom
+ * keeps the container's own box filled, so that's what's on screen.
+ */
+function visiblePart(zoom: LayerZoom | undefined, container: { width: number; height: number }, box: { left: number; top: number; width: number; height: number }): SlideView {
+  if (!zoom || zoom.scale <= 1 || box.width === 0) return FULL_VIEW;
+  const left = -zoom.x / zoom.scale;
+  const top = -zoom.y / zoom.scale;
+  const right = left + container.width / zoom.scale;
+  const bottom = top + container.height / zoom.scale;
+  const x0 = Math.max(0, (left - box.left) / box.width);
+  const y0 = Math.max(0, (top - box.top) / box.height);
+  const x1 = Math.min(1, (right - box.left) / box.width);
+  const y1 = Math.min(1, (bottom - box.top) / box.height);
+  return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0), scale: zoom.scale };
 }
 
 /** A box exactly over the page drawn letterboxed in `containerRef`. */
@@ -92,28 +141,49 @@ function PageBox({
   children: (view: SlideView) => React.ReactNode;
 }) {
   const rect = useContainedCanvasRect(containerRef, slide);
-  const view = useMemo(() => {
-    if (!zoom || zoom.scale <= 1 || rect.width === 0) return FULL_VIEW;
-    // What of the container is on screen, in its own (unzoomed) pixels, as
-    // fractions of the page within it. The page is centered in it, so the
-    // container is the page plus its margins twice over.
-    const left = -zoom.x / zoom.scale;
-    const top = -zoom.y / zoom.scale;
-    const right = left + (rect.width + 2 * rect.left) / zoom.scale;
-    const bottom = top + (rect.height + 2 * rect.top) / zoom.scale;
-    const x0 = Math.max(0, (left - rect.left) / rect.width);
-    const y0 = Math.max(0, (top - rect.top) / rect.height);
-    const x1 = Math.min(1, (right - rect.left) / rect.width);
-    const y1 = Math.min(1, (bottom - rect.top) / rect.height);
-    return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0), scale: zoom.scale };
-  }, [zoom, rect]);
+  const container = useContainerBox(containerRef);
+  const view = useMemo(() => visiblePart(zoom, container, rect), [zoom, container, rect]);
   if (rect.width === 0) return null;
   return (
     <div
       className="absolute z-[5] pointer-events-none"
-      style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+      style={{ left: container.left + rect.left, top: container.top + rect.top, width: rect.width, height: rect.height }}
     >
       {children(view)}
+    </div>
+  );
+}
+
+/** A box over all of `containerRef`, for surfaces that cover the slide area:
+ *  told what of it is on screen and where the page is in it. */
+function AreaBox({
+  containerRef,
+  slide,
+  zoom,
+  children,
+}: {
+  containerRef: React.RefObject<HTMLElement | null>;
+  slide: number;
+  zoom?: LayerZoom;
+  children: (view: SlideView, page: SlidePage) => React.ReactNode;
+}) {
+  const rect = useContainedCanvasRect(containerRef, slide);
+  const container = useContainerBox(containerRef);
+  const view = useMemo(() => visiblePart(zoom, container, { left: 0, top: 0, width: container.width, height: container.height }), [zoom, container]);
+  const page = useMemo<SlidePage>(
+    () =>
+      container.width && container.height
+        ? { x: rect.left / container.width, y: rect.top / container.height, w: rect.width / container.width, h: rect.height / container.height }
+        : FULL_PAGE,
+    [rect, container]
+  );
+  if (rect.width === 0 || container.width === 0) return null;
+  return (
+    <div
+      className="absolute z-[5] pointer-events-none"
+      style={{ left: container.left, top: container.top, width: container.width, height: container.height }}
+    >
+      {children(view, page)}
     </div>
   );
 }
@@ -137,12 +207,13 @@ function onTop(frame: HTMLIFrameElement, x: number, y: number): boolean {
  * One plugin's live "slide" surface. It lets pointer input through to the
  * slide (links, pinch) unless the plugin claims it: all of it, or only some
  * areas (presio.ui.setInteractive). For areas, a mouse makes the frame take
- * input while it hovers one; a tap, which has no hover, is forwarded into the
- * frame as a click at the same spot. Two fingers are always Presio's: touches
+ * input while it hovers one; a touch, which has no hover, is forwarded into
+ * the frame — its pointer events, to the element it began on, and a tap as a
+ * click at the same spot. Two fingers are always Presio's: touches
  * that land in a frame taking input are handed on to the slide's pinch-zoom
  * once a second one comes down.
  */
-function SlideSurface({ host, plugin, view }: { host: PluginHost; plugin: LoadedPlugin; view: SlideView }) {
+function SlideSurface({ host, plugin, view, page }: { host: PluginHost; plugin: LoadedPlugin; view: SlideView; page: SlidePage }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [interactive, setInteractive] = useState<Interactive>(false);
   const [hot, setHot] = useState(false);
@@ -261,11 +332,59 @@ function SlideSurface({ host, plugin, view }: { host: PluginHost; plugin: Loaded
       if (e.pointerType !== "mouse") return;
       setHot(inside(regions, ...fraction(e.clientX, e.clientY)));
     };
-    // A tap on one of the areas is the plugin's (forwarded as a click below),
-    // so the slide under it mustn't take it too — as a tap to turn the page.
+    // A touch on one of the areas is the plugin's, so the slide under it
+    // mustn't take it too (as a tap to turn the page). It has no hover to
+    // make the frame take input first, so its pointer events are forwarded
+    // into the frame instead — all to the element it began on, as a touch's
+    // are — and a tap arrives as a click (below). A second finger ends it:
+    // two are for pinching.
+    let touch: { id: number; target: Element } | null = null;
+    const forward = (type: string, e: PointerEvent, target: Element) => {
+      const inner = frame.contentWindow as (Window & typeof globalThis) | null;
+      if (!inner) return;
+      const [fx, fy] = fraction(e.clientX, e.clientY);
+      target.dispatchEvent(
+        new inner.PointerEvent(type, {
+          pointerId: e.pointerId,
+          pointerType: e.pointerType,
+          isPrimary: e.isPrimary,
+          button: e.button,
+          buttons: e.buttons,
+          clientX: fx * frame.clientWidth,
+          clientY: fy * frame.clientHeight,
+          bubbles: true,
+          cancelable: true,
+          view: inner,
+        })
+      );
+    };
     const onDown = (e: PointerEvent) => {
       if (e.pointerType === "mouse") return;
-      if (inside(regions, ...fraction(e.clientX, e.clientY)) && onTop(frame, e.clientX, e.clientY)) e.stopPropagation();
+      if (touch) {
+        if (e.pointerId !== touch.id) {
+          forward("pointercancel", e, touch.target);
+          touch = null;
+        }
+        return;
+      }
+      const [fx, fy] = fraction(e.clientX, e.clientY);
+      if (!inside(regions, fx, fy) || !onTop(frame, e.clientX, e.clientY)) return;
+      e.stopPropagation();
+      const target = frame.contentDocument?.elementFromPoint(fx * frame.clientWidth, fy * frame.clientHeight);
+      if (!target || !e.isPrimary) return;
+      touch = { id: e.pointerId, target };
+      forward("pointerdown", e, target);
+    };
+    const onTouchMove = (e: PointerEvent) => {
+      if (!touch || e.pointerId !== touch.id) return;
+      e.stopPropagation();
+      forward("pointermove", e, touch.target);
+    };
+    const onTouchEnd = (e: PointerEvent) => {
+      if (!touch || e.pointerId !== touch.id) return;
+      e.stopPropagation();
+      forward(e.type, e, touch.target);
+      touch = null;
     };
     const onClick = (e: MouseEvent) => {
       const [fx, fy] = fraction(e.clientX, e.clientY);
@@ -287,12 +406,18 @@ function SlideSurface({ host, plugin, view }: { host: PluginHost; plugin: Loaded
     const onInnerLeave = () => setHot(false);
     window.addEventListener("pointermove", onMove, true);
     window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointermove", onTouchMove, true);
+    window.addEventListener("pointerup", onTouchEnd, true);
+    window.addEventListener("pointercancel", onTouchEnd, true);
     window.addEventListener("click", onClick, true);
     inner?.addEventListener("pointermove", onInnerMove);
     inner?.document.documentElement.addEventListener("pointerleave", onInnerLeave);
     return () => {
       window.removeEventListener("pointermove", onMove, true);
       window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointermove", onTouchMove, true);
+      window.removeEventListener("pointerup", onTouchEnd, true);
+      window.removeEventListener("pointercancel", onTouchEnd, true);
       window.removeEventListener("click", onClick, true);
       inner?.removeEventListener("pointermove", onInnerMove);
       inner?.document.documentElement.removeEventListener("pointerleave", onInnerLeave);
@@ -302,20 +427,33 @@ function SlideSurface({ host, plugin, view }: { host: PluginHost; plugin: Loaded
 
   const takesInput = interactive === true || (!!regions && hot);
   return (
-    <PluginFrame
-      host={host}
-      plugin={plugin}
-      surface="slide"
-      frameRef={frameRef}
-      onInteractiveChange={(v) => {
-        setInteractive(v);
-        setHot(false);
-      }}
-      onReady={() => setReadyCount((n) => n + 1)}
-      view={view}
-      hovered={presenter ? hovered : undefined}
-      className="absolute inset-0 w-full h-full"
-      style={{ pointerEvents: takesInput ? "auto" : "none" }}
-    />
+    <>
+      {/* Under the frame, over its input areas: here a touch that starts on
+          one can't turn into the browser's pan, which would cancel it. */}
+      {regions?.map((r, i) => (
+        <div
+          key={i}
+          aria-hidden
+          className="absolute pointer-events-auto touch-none"
+          style={{ left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` }}
+        />
+      ))}
+      <PluginFrame
+        host={host}
+        plugin={plugin}
+        surface="slide"
+        frameRef={frameRef}
+        onInteractiveChange={(v) => {
+          setInteractive(v);
+          setHot(false);
+        }}
+        onReady={() => setReadyCount((n) => n + 1)}
+        view={view}
+        page={page}
+        hovered={presenter ? hovered : undefined}
+        className="absolute inset-0 w-full h-full"
+        style={{ pointerEvents: takesInput ? "auto" : "none" }}
+      />
+    </>
   );
 }

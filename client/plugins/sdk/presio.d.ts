@@ -100,9 +100,13 @@ interface Presio {
     setVisible(visible: boolean): void;
     setInteractive(value: boolean | { x: number; y: number; w: number; h: number }[]): void;
     setButton(id: string, state: { active?: boolean; label?: string; disabled?: boolean; menu?: PresioMenuEntry[] }): void;
-    /** Slide surface: the part of the page on screen (page fractions) and its zoom. */
+    /** Slide surface: the part of it on screen (fractions of it) and its zoom. */
     readonly view: PresioView;
     onViewChange(cb: (view: PresioView) => void): Unsubscribe;
+    /** Slide surface: where the page is within it (fractions of it) — all of
+     *  it unless the manifest has "slideSurface": "area". */
+    readonly page: { x: number; y: number; w: number; h: number };
+    onPageChange(cb: (page: { x: number; y: number; w: number; h: number }) => void): Unsubscribe;
     /** Slide surface: whether a mouse is over the slide. */
     readonly hovered: boolean;
     onHover(cb: (hovered: boolean) => void): Unsubscribe;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLatestRef } from "@/hooks/useLatestRef";
-import type { FrameLink, Interactive, PluginHost, SlideView } from "@/lib/plugins/host";
+import type { FrameLink, Interactive, PluginHost, SlidePage, SlideView } from "@/lib/plugins/host";
 import type { LoadedPlugin, PluginSurface } from "@/lib/plugins/manifest";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +23,7 @@ export function PluginFrame({
   onInteractiveChange,
   onReady,
   view,
+  page,
   hovered,
   frameRef,
   className,
@@ -35,8 +36,10 @@ export function PluginFrame({
   onInteractiveChange?: (value: Interactive) => void;
   /** The plugin's document is in place — e.g. to listen to it (same origin). */
   onReady?: (frame: HTMLIFrameElement) => void;
-  /** Slide surface: the part of the page on screen, and its zoom. */
+  /** Slide surface: the part of it on screen, and its zoom. */
   view?: SlideView;
+  /** Slide surface: where the page is within it. */
+  page?: SlidePage;
   /** Slide surface: whether a mouse is over the slide. */
   hovered?: boolean;
   frameRef?: React.RefObject<HTMLIFrameElement | null>;
@@ -51,6 +54,9 @@ export function PluginFrame({
   useEffect(() => {
     if (view) link?.setView(view);
   }, [link, view]);
+  useEffect(() => {
+    if (page) link?.setPage(page);
+  }, [link, page]);
   useEffect(() => {
     if (hovered !== undefined) link?.setHovered(hovered);
   }, [link, hovered]);

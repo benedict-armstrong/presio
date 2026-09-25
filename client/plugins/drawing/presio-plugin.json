@@ -6,6 +6,7 @@
   "description": "A pen, a highlighter and a laser pointer on your current slide, drawn live on every screen, shown in your previews and kept in the PDF you download.",
   "main": "index.html",
   "surfaces": ["background", "slide"],
+  "slideSurface": "area",
   "activation": ["always"],
   "permissions": ["deck"],
   "contributes": {
