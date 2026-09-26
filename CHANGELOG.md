@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.0](https://github.com/benedict-armstrong/presio/compare/v2.0.0...v2.1.0) (2026-09-26)
+
+
+### Features
+
+* **deploy:** retire the Let's Encrypt resolver and monitor origin certs ([#122](https://github.com/benedict-armstrong/presio/issues/122)) ([fe8d86a](https://github.com/benedict-armstrong/presio/commit/fe8d86a5115da1597942d5c1e364a609ddc11d75)), closes [#64](https://github.com/benedict-armstrong/presio/issues/64)
+* plugins ([#130](https://github.com/benedict-armstrong/presio/issues/130)) ([85c629b](https://github.com/benedict-armstrong/presio/commit/85c629b0963db61e4f19437715423cc41e1ed965))
+
 ## [2.0.0](https://github.com/benedict-armstrong/presio/compare/v1.1.0...v2.0.0) (2026-09-21)
 
 
