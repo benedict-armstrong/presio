@@ -4,26 +4,21 @@
 // the same spot on every screen. Widths are pixels on a 960px-wide slide,
 // scaled with the page.
 //
-// Every device keeps the same model, built from the same messages:
+// What's drawn is the deck's edit history (presio.history): ops that add a
+// stroke, erase strokes or bring erased ones back, each naming strokes by id,
+// so two devices' ops combine without conflict. Every device applies the same
+// ops in the same order and gets the same drawing; the history lasts with the
+// deck on the presenter's device, and a device joining late loads it.
 //
-//  - "c<slide>.<k>" (retain: "deck"): chunk k of a slide's committed strokes,
-//    { v, n, s }. A slide's strokes are its chunks 0..n-1 in order, with n
-//    taken from the newest (highest v) chunk message seen for the slide. A
-//    commit re-sends only the slide's last chunk (a new one when it's full),
-//    so a busy slide never costs more than a chunk per stroke; undo and clear
-//    re-send what changed and forget emptied chunks (a null payload). Retained,
-//    they're the whole drawing for anyone joining late, and — the presenter's
-//    retained messages being saved on their device — for the presenter after a
-//    reload. Scoped to the deck: replacing it forgets them everywhere.
+// While a stroke is being drawn it travels live, outside the history:
+//
 //  - "b" { i, s, t, c, w, d }: the presenter began stroke i on slide s.
 //  - "p" { i, d }: its newest points, about 60 times a second.
 //  - "x" { i }: it was abandoned (a pinch took over).
 //  - "l" { x, y } | null: the laser, volatile.
 //
-// Any of the presenter's surfaces may change the drawing (the slide surface
-// commits strokes, the background answers keyboard shortcuts): each applies
-// the change to its own model and sends it, and the host hands it to the
-// others on the page like to every other device.
+// Undo is this device's: the op that reverses its own latest change on the
+// slide (see undoOps).
 
 export type Tool = "none" | "laser" | "pen" | "highlighter";
 
@@ -39,19 +34,8 @@ export interface Stroke {
 
 export const REFERENCE_WIDTH = 960;
 export const HIGHLIGHTER_OPACITY = 0.35;
-/** A stroke longer than this goes on as a new one, so any stroke fits in a message. */
+/** A stroke longer than this goes on as a new one, so any stroke fits in an op. */
 export const MAX_STROKE_POINTS = 2000;
-/** A chunk fills up at about this many bytes of JSON, well under a message's 16 KB. */
-const CHUNK_BYTES = 12_000;
-
-// Each stroke's wire form, made once: a commit re-sends the whole last chunk.
-const wireCache = new WeakMap<Stroke, WireStroke>();
-const wire = (s: Stroke) => {
-  let w = wireCache.get(s);
-  if (!w) wireCache.set(s, (w = toWire(s)));
-  return w;
-};
-const bytes = (strokes: Stroke[]) => strokes.reduce((n, s) => n + s.id.length + s.color.length + wire(s).d.length + 40, 0);
 
 export const opacityOf = (stroke: Pick<Stroke, "tool">) => (stroke.tool === "highlighter" ? HIGHLIGHTER_OPACITY : 1);
 
@@ -88,7 +72,7 @@ export function decodePoints(data: unknown): number[] | null {
   return out;
 }
 
-interface WireStroke {
+export interface WireStroke {
   i: string;
   t: "p" | "h";
   c: string;
@@ -130,162 +114,186 @@ export function parseBegin(raw: unknown): (Stroke & { slide: number }) | null {
 
 // --- The model ---
 
-interface Chunk {
-  v: number;
-  strokes: Stroke[];
+/** One slide: every stroke it has had, in order, and which are erased. */
+export interface SlideState {
+  all: readonly Stroke[];
+  gone: ReadonlySet<string>;
 }
 
-interface SlideDrawing {
-  /** The newest chunk message's version, and the chunk count it gave. */
-  v: number;
-  n: number;
-  chunks: Map<number, Chunk>;
-  /** Strokes in order, rebuilt when a chunk changes. */
-  cache: Stroke[] | null;
+/** What's drawn, per slide. Never changed in place: each op makes a new one. */
+export interface DrawingState {
+  slides: ReadonlyMap<number, SlideState>;
 }
 
-const CHUNK_RE = /^c(\d{1,5})\.(\d{1,4})$/;
+interface OpBase {
+  /** The slide. */
+  s: number;
+  /** Ops made together (a loaded file, a long stroke) are undone together. */
+  g?: string;
+  /** This op undoes that one (the id of an op of this device's). */
+  u?: string;
+}
+export type Op =
+  | (OpBase & { t: "add"; k: WireStroke })
+  | (OpBase & { t: "erase"; ids: string[] })
+  | (OpBase & { t: "restore"; ids: string[] });
 
-export class Drawing {
-  private slides = new Map<number, SlideDrawing>();
+/** At most this many ids in one op: well under a message's 16 KB. */
+const MAX_IDS = 1000;
 
-  /**
-   * Apply a chunk message ("c<slide>.<k>"). Returns the slide it changed, or
-   * null when the type isn't a chunk.
-   */
-  apply(type: string, payload: unknown): number | null {
-    const m = CHUNK_RE.exec(type);
-    if (!m) return null;
-    const slide = Number(m[1]);
-    const k = Number(m[2]);
-    const d = this.slide(slide);
-    if (payload === null) {
-      d.chunks.delete(k);
-      d.cache = null;
-      return slide;
-    }
-    if (!isRecord(payload) || typeof payload.v !== "number" || typeof payload.n !== "number" || !Array.isArray(payload.s)) return null;
-    this.setChunk(slide, k, payload.v, payload.n, payload.s.map(fromWire).filter((s): s is Stroke => s !== null));
-    return slide;
-  }
+const EMPTY: DrawingState = { slides: new Map() };
 
-  private setChunk(slide: number, k: number, v: number, n: number, strokes: Stroke[]) {
-    const d = this.slide(slide);
-    d.chunks.set(k, { v, strokes });
-    if (v >= d.v) {
-      d.v = v;
-      d.n = n;
-      // Chunks past the end are leftovers of an undo or clear this device
-      // missed while away.
-      for (const key of d.chunks.keys()) if (key >= d.n) d.chunks.delete(key);
-    }
-    d.cache = null;
-  }
-
-  strokes(slide: number): Stroke[] {
-    const d = this.slides.get(slide);
-    if (!d) return [];
-    if (!d.cache) {
-      d.cache = [];
-      for (let k = 0; k < d.n; k++) d.cache.push(...(d.chunks.get(k)?.strokes ?? []));
-    }
-    return d.cache;
-  }
-
-  /** Slides with anything drawn on them. */
-  drawnSlides(): number[] {
-    return [...this.slides.keys()].filter((s) => this.strokes(s).length > 0).sort((a, b) => a - b);
-  }
-
-  /** Forget everything (the deck was replaced; its retained chunks go with it). */
-  reset() {
-    this.slides.clear();
-  }
-
-  private slide(n: number): SlideDrawing {
-    let d = this.slides.get(n);
-    if (!d) this.slides.set(n, (d = { v: 0, n: 0, chunks: new Map(), cache: null }));
-    return d;
-  }
-
-  // --- Changes (presenter). Each returns the messages that make it, already
-  // applied here; the caller sends them. ---
-
-  commit(slide: number, stroke: Stroke): Message[] {
-    const d = this.slide(slide);
-    const last = d.n > 0 ? d.chunks.get(d.n - 1) : undefined;
-    if (last && bytes(last.strokes) + bytes([stroke]) <= CHUNK_BYTES) {
-      return this.put(slide, d.n - 1, [...last.strokes, stroke], d.n);
-    }
-    return this.put(slide, d.n, [stroke], d.n + 1);
-  }
-
-  undo(slide: number): Message[] {
-    const strokes = this.strokes(slide);
-    const d = this.slides.get(slide);
-    if (!d || !strokes.length) return [];
-    // Only the last chunk changes, unless it empties: then it's forgotten and
-    // the one before re-sent, as it was, with the new count.
-    const last = d.chunks.get(d.n - 1)?.strokes ?? [];
-    if (last.length > 1 || d.n === 1) return this.put(slide, d.n - 1, last.slice(0, -1), last.length > 1 ? d.n : 0);
-    const drop = this.drop(slide, d.n - 1);
-    return [drop, ...this.put(slide, d.n - 2, d.chunks.get(d.n - 2)?.strokes ?? [], d.n - 1)];
-  }
-
-  clear(slide: number): Message[] {
-    if (!this.strokes(slide).length) return [];
-    return this.setSlide(slide, []);
-  }
-
-  /** Replace the whole drawing (a loaded file). */
-  replaceAll(bySlide: Map<number, Stroke[]>): Message[] {
-    const out: Message[] = [];
-    for (const slide of this.drawnSlides()) if (!bySlide.has(slide)) out.push(...this.clear(slide));
-    for (const [slide, strokes] of bySlide) out.push(...this.setSlide(slide, strokes));
-    return out;
-  }
-
-  /**
-   * Re-send a slide as these strokes, packed into chunks, forgetting chunks
-   * it no longer needs. An empty slide keeps chunk 0, empty, to carry the
-   * count to devices that missed the change.
-   */
-  private setSlide(slide: number, strokes: Stroke[]): Message[] {
-    const packed: Stroke[][] = [];
-    for (const stroke of strokes) {
-      const last = packed[packed.length - 1];
-      if (last && bytes(last) + bytes([stroke]) <= CHUNK_BYTES) last.push(stroke);
-      else packed.push([stroke]);
-    }
-    const d = this.slide(slide);
-    const out: Message[] = [];
-    for (let k = d.n - 1; k >= Math.max(1, packed.length); k--) out.push(this.drop(slide, k));
-    if (!packed.length) return [...out, ...this.put(slide, 0, [], 0)];
-    packed.forEach((chunk, k) => out.push(...this.put(slide, k, chunk, packed.length)));
-    return out;
-  }
-
-  private put(slide: number, k: number, strokes: Stroke[], n: number): Message[] {
-    const v = Math.max(Date.now(), this.slide(slide).v + 1);
-    this.setChunk(slide, k, v, n, strokes);
-    return [{ type: `c${slide}.${k}`, payload: { v, n, s: strokes.map(wire) } }];
-  }
-
-  private drop(slide: number, k: number): Message {
-    const type = `c${slide}.${k}`;
-    this.apply(type, null);
-    return { type, payload: null };
-  }
+// Strokes decoded once: the frame applies pending ops again every time the
+// ordered state moves, and the canvas only draws what's new when the strokes
+// it already has are the same objects.
+const decoded = new Map<string, { d: string; stroke: Stroke }>();
+function strokeOf(k: WireStroke): Stroke | null {
+  const hit = decoded.get(k.i);
+  if (hit && hit.d === k.d) return hit.stroke;
+  const stroke = fromWire(k);
+  if (stroke) decoded.set(k.i, { d: k.d, stroke });
+  return stroke;
 }
 
-export interface Message {
-  type: string;
-  payload: unknown;
+// A slide's visible strokes, worked out once per SlideState.
+const liveCache = new WeakMap<SlideState, Stroke[]>();
+export function strokes(state: DrawingState, slide: number): Stroke[] {
+  const d = state.slides.get(slide);
+  if (!d) return [];
+  let live = liveCache.get(d);
+  if (!live) liveCache.set(d, (live = d.gone.size ? d.all.filter((s) => !d.gone.has(s.id)) : (d.all as Stroke[])));
+  return live;
 }
 
-/** Send a change's messages: retained for this deck, for everyone. */
-export function publish(messages: Message[]) {
-  for (const { type, payload } of messages) presio.send(type, payload, { retain: "deck" });
+/** Slides with anything drawn on them. */
+export function drawnSlides(state: DrawingState): number[] {
+  return [...state.slides.keys()].filter((s) => strokes(state, s).length > 0).sort((a, b) => a - b);
+}
+
+const validSlide = (s: unknown): s is number => typeof s === "number" && Number.isInteger(s) && s >= 1 && s <= 100_000;
+const idList = (ids: unknown): string[] | null =>
+  Array.isArray(ids) && ids.every((i) => typeof i === "string") ? (ids as string[]) : null;
+
+function withSlide(state: DrawingState, slide: number, d: SlideState): DrawingState {
+  const slides = new Map(state.slides);
+  slides.set(slide, d);
+  return { slides };
+}
+
+/** The history's apply: the drawing after one more op. */
+export function apply(state: DrawingState, op: Op): DrawingState {
+  if (!isRecord(op) || !validSlide(op.s)) return state;
+  const d = state.slides.get(op.s) ?? { all: [], gone: new Set<string>() };
+  if (op.t === "add") {
+    const stroke = strokeOf(op.k);
+    if (!stroke || d.all.some((s) => s.id === stroke.id)) return state;
+    return withSlide(state, op.s, { all: [...d.all, stroke], gone: d.gone });
+  }
+  const ids = idList(op.ids);
+  if (!ids) return state;
+  if (op.t === "erase") {
+    const has = new Set(d.all.map((s) => s.id));
+    const hit = ids.filter((id) => has.has(id) && !d.gone.has(id));
+    if (!hit.length) return state;
+    return withSlide(state, op.s, { all: d.all, gone: new Set([...d.gone, ...hit]) });
+  }
+  if (op.t === "restore") {
+    const hit = ids.filter((id) => d.gone.has(id));
+    if (!hit.length) return state;
+    const gone = new Set(d.gone);
+    for (const id of hit) gone.delete(id);
+    return withSlide(state, op.s, { all: d.all, gone });
+  }
+  return state;
+}
+
+// A snapshot keeps what's visible: what was erased before it can't be undone
+// any more (this device's undo reaches back to the latest snapshot).
+export function snapshot(state: DrawingState): unknown {
+  const slides: Record<number, WireStroke[]> = {};
+  for (const slide of drawnSlides(state)) slides[slide] = strokes(state, slide).map(toWire);
+  return { v: 1, slides };
+}
+
+export function restore(snap: unknown): DrawingState {
+  if (!isRecord(snap) || snap.v !== 1 || !isRecord(snap.slides)) return EMPTY;
+  const slides = new Map<number, SlideState>();
+  for (const [key, list] of Object.entries(snap.slides)) {
+    const slide = Number(key);
+    if (!validSlide(slide) || !Array.isArray(list)) continue;
+    const all = list.map((k) => (isRecord(k) ? strokeOf(k as unknown as WireStroke) : null)).filter((s): s is Stroke => s !== null);
+    if (all.length) slides.set(slide, { all, gone: new Set() });
+  }
+  return { slides };
+}
+
+export type DrawingHistory = PresioHistory<DrawingState, Op>;
+
+/** Open the deck's drawing history (once per frame). */
+export function openDrawing(): DrawingHistory {
+  return presio.history.open<DrawingState, Op>({ init: () => EMPTY, apply, snapshot, restore });
+}
+
+/** The deck was replaced by another document: decoded strokes can go. */
+export function forgetDecoded() {
+  decoded.clear();
+}
+
+// --- Changes (presenter): the ops that make them, for the caller to commit ---
+
+const groupId = () => `g${newId()}`;
+
+/** Draw a stroke: one op, or several for a very long one (undone together). */
+export function addOps(slide: number, stroke: Stroke): Op[] {
+  const pieces = splitLong(stroke);
+  const g = pieces.length > 1 ? groupId() : undefined;
+  return pieces.map((p) => ({ t: "add", s: slide, k: toWire(p), ...(g && { g }) }));
+}
+
+function idOps(t: "erase" | "restore", slide: number, ids: string[], extra: { g?: string; u?: string }): Op[] {
+  const out: Op[] = [];
+  const g = extra.g ?? (ids.length > MAX_IDS ? groupId() : undefined);
+  for (let i = 0; i < ids.length; i += MAX_IDS) out.push({ t, s: slide, ids: ids.slice(i, i + MAX_IDS), ...(g && { g }), ...(extra.u && { u: extra.u }) });
+  return out;
+}
+
+/** Clear a slide: erase what's on it now (strokes drawn meanwhile elsewhere stay). */
+export function clearOps(state: DrawingState, slide: number): Op[] {
+  return idOps("erase", slide, strokes(state, slide).map((s) => s.id), {});
+}
+
+/** Replace the whole drawing with a loaded file's, as one change. */
+export function loadOps(state: DrawingState, bySlide: Map<number, Stroke[]>): Op[] {
+  const g = groupId();
+  const out: Op[] = [];
+  for (const slide of drawnSlides(state)) out.push(...idOps("erase", slide, strokes(state, slide).map((s) => s.id), { g }));
+  for (const [slide, list] of bySlide) for (const stroke of list) out.push({ t: "add", s: slide, k: toWire(stroke), g });
+  return out;
+}
+
+/**
+ * The ops that undo this device's latest change on a slide (its ops in one
+ * group, when it made several together), or none. Undoing is itself a change
+ * that names what it undoes, so a later undo moves on to the change before.
+ */
+export function undoOps(h: DrawingHistory, slide: number): Op[] {
+  const mine = h.mine();
+  const undone = new Set(mine.map((m) => m.op?.u).filter((u): u is string => typeof u === "string"));
+  const open = mine.filter((m) => isRecord(m.op) && !m.op.u && !undone.has(m.id));
+  const last = open.find((m) => m.op.s === slide);
+  if (!last) return [];
+  const batch = last.op.g ? open.filter((m) => m.op.g === last.op.g) : [last];
+  return batch.flatMap(({ id, op }) =>
+    op.t === "add" ? idOps("erase", op.s, [op.k.i], { u: id }) : idOps(op.t === "erase" ? "restore" : "erase", op.s, op.ids, { u: id })
+  );
+}
+
+/** Whether this device has a change on the slide to undo. */
+export const canUndo = (h: DrawingHistory, slide: number) => undoOps(h, slide).length > 0;
+
+/** Commit ops, in order. */
+export function commitAll(h: DrawingHistory, ops: Op[]) {
+  for (const op of ops) h.commit(op);
 }
 
 /** Split a stroke too long for one message into consecutive ones. */
@@ -313,10 +321,10 @@ interface FileStroke {
   points: number[];
 }
 
-export function serializeFile(drawing: Drawing): string {
+export function serializeFile(state: DrawingState): string {
   const annotations: Record<number, FileStroke[]> = {};
-  for (const slide of drawing.drawnSlides()) {
-    annotations[slide] = drawing.strokes(slide).map((s) => ({
+  for (const slide of drawnSlides(state)) {
+    annotations[slide] = strokes(state, slide).map((s) => ({
       tool: s.tool,
       color: s.color,
       size: s.width / REFERENCE_WIDTH,

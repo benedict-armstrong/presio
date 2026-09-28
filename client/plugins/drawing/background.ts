@@ -1,10 +1,10 @@
 // The presenter's hidden surface: a still of each slide's drawing for Next
 // Slide and the thumbnails, the keyboard shortcuts and the buttons (the
 // header's, and saving or loading the drawing from its Settings page), and
-// baking the drawing into a downloaded PDF. It keeps the same model as the
-// slide surface, from the same messages (see model.ts).
+// baking the drawing into a downloaded PDF. It reads the same history as the
+// slide surface (see model.ts).
 
-import { Drawing, parseFile, publish, serializeFile, type Tool } from "./model";
+import { clearOps, commitAll, drawnSlides, loadOps, openDrawing, parseFile, serializeFile, strokes, undoOps, type DrawingState, type Tool } from "./model";
 import { drawStrokes } from "./render";
 import { saveFile } from "../../src/lib/saveFile";
 
@@ -14,20 +14,20 @@ const PREVIEW_WIDTH = 640;
 const PREVIEW_DELAY_MS = 250;
 
 export function runBackground() {
-  const drawing = new Drawing();
+  const history = openDrawing();
   let pages: { width: number; height: number }[] = [];
   const previews = new Map<number, string>();
   const pending = new Map<number, ReturnType<typeof setTimeout>>();
   // Saving to a file needs something drawn.
-  const showSaveFile = () => presio.ui.setButton("saveFile", { disabled: drawing.drawnSlides().length === 0 });
+  const showSaveFile = () => presio.ui.setButton("saveFile", { disabled: drawnSlides(history.state).length === 0 });
 
   // --- Previews (presio.layers) ---
 
   const preview = async (slide: number) => {
     pending.delete(slide);
-    const strokes = drawing.strokes(slide);
+    const list = strokes(history.state, slide);
     const old = previews.get(slide);
-    if (!strokes.length) {
+    if (!list.length) {
       presio.layers.set(slide, []);
       previews.delete(slide);
     } else {
@@ -35,9 +35,9 @@ export function runBackground() {
       const canvas = document.createElement("canvas");
       canvas.width = PREVIEW_WIDTH;
       canvas.height = Math.max(1, Math.round((PREVIEW_WIDTH * size.height) / size.width));
-      drawStrokes(canvas.getContext("2d")!, strokes, canvas.width, canvas.height);
+      drawStrokes(canvas.getContext("2d")!, list, canvas.width, canvas.height);
       const blob = await new Promise<Blob | null>((done) => canvas.toBlob(done, "image/png"));
-      if (!blob || drawing.strokes(slide) !== strokes) return;
+      if (!blob || strokes(history.state, slide) !== list) return;
       const url = URL.createObjectURL(blob);
       previews.set(slide, url);
       presio.layers.set(slide, [{ x: 0, y: 0, w: 1, h: 1, image: url, fit: "cover" }]);
@@ -50,22 +50,25 @@ export function runBackground() {
     pending.set(slide, setTimeout(() => void preview(slide), PREVIEW_DELAY_MS));
   };
 
-  presio.onMessage(({ type, payload }) => {
-    const slide = drawing.apply(type, payload);
-    if (slide !== null) {
-      schedulePreview(slide);
-      showSaveFile();
+  // Redraw the previews of the slides whose strokes changed.
+  let shown: DrawingState = history.state;
+  history.onChange((state) => {
+    const prev = shown;
+    shown = state;
+    for (const slide of new Set([...prev.slides.keys(), ...state.slides.keys()])) {
+      if (strokes(prev, slide) !== strokes(state, slide)) schedulePreview(slide);
     }
+    showSaveFile();
   });
 
   const loadPages = async () => {
     pages = await presio.deck.pages().catch(() => pages);
-    for (const slide of drawing.drawnSlides()) schedulePreview(slide);
+    for (const slide of drawnSlides(history.state)) schedulePreview(slide);
   };
+  // A replaced deck keeps its drawing when its page count is the same (a
+  // recompile); otherwise its history starts over, and the change says so.
   presio.deck.onChange((kind) => {
     if (kind === "replace") {
-      drawing.reset();
-      showSaveFile();
       presio.layers.clear();
       for (const url of previews.values()) URL.revokeObjectURL(url);
       previews.clear();
@@ -87,8 +90,8 @@ export function runBackground() {
   presio.onCommand("highlighter", () => setTool("highlighter"));
   presio.onCommand("laser", () => setTool("laser"));
   presio.onCommand("pointer", () => setTool("none"));
-  presio.onCommand("undo", () => publish(drawing.undo(presio.slide.current)));
-  presio.onCommand("clear", () => publish(drawing.clear(presio.slide.current)));
+  presio.onCommand("undo", () => commitAll(history, undoOps(history, presio.slide.current)));
+  presio.onCommand("clear", () => commitAll(history, clearOps(history.state, presio.slide.current)));
 
   // --- The palette's button in the current slide's header ---
 
@@ -100,16 +103,13 @@ export function runBackground() {
   // --- Saving and loading, from its page in Settings ---
 
   presio.onButton("saveFile", () => {
-    saveFile(new Blob([serializeFile(drawing)], { type: "application/json" }), "slides-drawing.json");
+    saveFile(new Blob([serializeFile(history.state)], { type: "application/json" }), "slides-drawing.json");
   });
   presio.onButton("loadFile", (_id, file) => {
     if (!file) return;
     try {
       const loaded = parseFile(new TextDecoder().decode(file.bytes), presio.slide.total);
-      const changed = new Set([...drawing.drawnSlides(), ...loaded.keys()]);
-      publish(drawing.replaceAll(loaded));
-      changed.forEach(schedulePreview);
-      showSaveFile();
+      commitAll(history, loadOps(history.state, loaded));
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to load the drawing");
     }
@@ -117,5 +117,5 @@ export function runBackground() {
   showSaveFile();
 
   // pdf-lib only loads when a download asks for it.
-  presio.deck.onExport(async (bytes) => (await import("./bake")).bakeDrawing(bytes, drawing));
+  presio.deck.onExport(async (bytes) => (await import("./bake")).bakeDrawing(bytes, (await history.whenReady()).state));
 }

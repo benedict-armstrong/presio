@@ -102,7 +102,7 @@ test("a pen stroke is drawn on the viewer and survives leaving and returning to 
   await expect.poll(() => inkPixels(viewer)).toBeGreaterThan(0);
 
   // The stroke was committed, not just previewed: leaving the slide and coming
-  // back re-renders it from the session's retained drawing rather than from
+  // back re-renders it from the deck's drawing history rather than from
   // the in-flight draft.
   await controller.keyboard.press("ArrowRight");
   await expect(viewer.getByTestId("viewer-slide")).toHaveAttribute("data-slide", "2");

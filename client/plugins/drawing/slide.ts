@@ -9,7 +9,24 @@
 // new points go out once a frame too, so nothing waits on a throttle and the
 // tail of a stroke is never dropped.
 
-import { Drawing, encodePoints, decodePoints, MAX_STROKE_POINTS, newId, opacityOf, parseBegin, publish, type Stroke, type Tool } from "./model";
+import {
+  addOps,
+  canUndo,
+  clearOps,
+  commitAll,
+  decodePoints,
+  encodePoints,
+  forgetDecoded,
+  MAX_STROKE_POINTS,
+  newId,
+  opacityOf,
+  openDrawing,
+  parseBegin,
+  strokes as strokesOf,
+  undoOps,
+  type Stroke,
+  type Tool,
+} from "./model";
 import { drawStrokes, LiveStroke } from "./render";
 import { Palette, type PenStyle } from "./palette";
 
@@ -35,7 +52,7 @@ interface Draft {
 export function runSlide() {
   const presenter = presio.role === "presenter";
   const root = document.getElementById("root")!;
-  const drawing = new Drawing();
+  const history = openDrawing();
   let slide = presio.slide.current;
 
   // --- Layers ---
@@ -107,7 +124,7 @@ export function runSlide() {
   // null when it has to be drawn afresh.
   let drawn: Stroke[] | null = null;
   const redrawCommitted = () => {
-    const strokes = drawing.strokes(slide);
+    const strokes = strokesOf(history.state, slide);
     const prev = drawn;
     const extends_ = !!prev && prev.length <= strokes.length && prev.every((s, i) => strokes[i] === s);
     if (!extends_) committed.ctx.clearRect(0, 0, W, H);
@@ -115,7 +132,18 @@ export function runSlide() {
     drawn = strokes;
     // A stroke being drawn that has now arrived committed is done.
     if (draft && strokes.some((s) => s.id === draft!.stroke.id)) endDraft();
-    palette?.render();
+    renderPalette();
+  };
+
+  // The palette's undo and clear follow the drawing; it's redrawn only when
+  // they change, so a change elsewhere never closes a menu that's open.
+  let actionsKey = "";
+  const renderPalette = (force = false) => {
+    if (!palette) return;
+    const key = `${canUndo(history, slide)}${strokesOf(history.state, slide).length > 0}`;
+    if (!force && key === actionsKey) return;
+    actionsKey = key;
+    palette.render();
   };
 
   // --- The stroke being drawn ---
@@ -230,8 +258,7 @@ export function runSlide() {
     sendPoints();
     const { stroke, slide: on } = draft;
     endDraft();
-    publish(drawing.commit(on, stroke));
-    if (on === slide) redrawCommitted();
+    commitAll(history, addOps(on, stroke));
   };
 
   const abandonStroke = () => {
@@ -398,15 +425,10 @@ export function runSlide() {
           if (style.color && style.color !== current.color) void presio.settings.set(`${t}Color`, style.color);
           if (style.size && style.size !== current.size) void presio.settings.set(`${t}Size`, style.size);
         },
-        canUndo: () => drawing.strokes(slide).length > 0,
-        undo: () => {
-          publish(drawing.undo(slide));
-          redrawCommitted();
-        },
-        clear: () => {
-          publish(drawing.clear(slide));
-          redrawCommitted();
-        },
+        canUndo: () => canUndo(history, slide),
+        canClear: () => strokesOf(history.state, slide).length > 0,
+        undo: () => commitAll(history, undoOps(history, slide)),
+        clear: () => commitAll(history, clearOps(history.state, slide)),
         changed: () => requestAnimationFrame(updateInteractive),
       });
       palette.setView(presio.ui.view);
@@ -444,7 +466,7 @@ export function runSlide() {
   } else {
     // A viewer's own download gets what's drawn too.
     // pdf-lib only loads when a download asks for it.
-    presio.deck.onExport(async (bytes) => (await import("./bake")).bakeDrawing(bytes, drawing));
+    presio.deck.onExport(async (bytes) => (await import("./bake")).bakeDrawing(bytes, (await history.whenReady()).state));
   }
 
   presio.ui.onViewChange((view) => {
@@ -459,12 +481,12 @@ export function runSlide() {
 
   // --- Messages ---
 
+  history.onChange(() => {
+    if (strokesOf(history.state, slide) !== drawn) redrawCommitted();
+    else renderPalette();
+  });
+
   presio.onMessage(({ type, payload }) => {
-    const changed = drawing.apply(type, payload);
-    if (changed !== null) {
-      if (changed === slide) redrawCommitted();
-      return;
-    }
     if (presenter) return;
     if (type === "b") {
       const b = parseBegin(payload);
@@ -498,13 +520,12 @@ export function runSlide() {
     }
   });
 
-  // A different document: what was drawn belonged to the old one's slides
-  // (and its retained chunks are forgotten everywhere with it).
+  // A different document: a stroke in progress was on the old one. (What's
+  // drawn stays with the same page count; otherwise the history starts over.)
   presio.deck.onChange((kind) => {
     if (kind !== "replace") return;
     if (draft) endDraft();
-    drawing.reset();
-    redrawCommitted();
+    forgetDecoded();
   });
 
   resize();

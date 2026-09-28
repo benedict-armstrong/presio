@@ -2,7 +2,7 @@
 // into its page as vector paths, the same curves as on screen.
 
 import { LineCapStyle, PDFDocument, rgb } from "pdf-lib";
-import { opacityOf, REFERENCE_WIDTH, type Drawing } from "./model";
+import { drawnSlides, opacityOf, REFERENCE_WIDTH, strokes, type DrawingState } from "./model";
 
 function hexToRgb(hex: string) {
   const n = parseInt(hex.slice(1), 16);
@@ -24,8 +24,8 @@ function svgPath(p: number[], w: number, h: number): string {
   return parts.join(" ");
 }
 
-export async function bakeDrawing(bytes: Uint8Array, drawing: Drawing): Promise<Uint8Array> {
-  const slides = drawing.drawnSlides();
+export async function bakeDrawing(bytes: Uint8Array, state: DrawingState): Promise<Uint8Array> {
+  const slides = drawnSlides(state);
   if (!slides.length) return bytes;
   const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
   const pages = doc.getPages();
@@ -34,7 +34,7 @@ export async function bakeDrawing(bytes: Uint8Array, drawing: Drawing): Promise<
     if (!page) continue;
     // Points are fractions of what's shown of the page: its crop box.
     const crop = page.getCropBox();
-    for (const stroke of drawing.strokes(slide)) {
+    for (const stroke of strokes(state, slide)) {
       // drawSvgPath reads y downward from the origin given: the box's top-left.
       page.drawSvgPath(svgPath(stroke.points, crop.width, crop.height), {
         x: crop.x,

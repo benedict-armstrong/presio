@@ -8,7 +8,7 @@
   "surfaces": ["background", "slide"],
   "slideSurface": "area",
   "activation": ["always"],
-  "permissions": ["deck"],
+  "permissions": ["deck", "history"],
   "contributes": {
     "buttons": [
       {

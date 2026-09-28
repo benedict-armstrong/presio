@@ -33,8 +33,10 @@ export interface PaletteActions {
   setTool(tool: Tool): void;
   style(tool: "pen" | "highlighter"): PenStyle;
   setStyle(tool: "pen" | "highlighter", style: Partial<PenStyle>): void;
-  /** Whether the current slide has anything to undo or clear. */
+  /** Whether this device has a change on the current slide to undo. */
   canUndo(): boolean;
+  /** Whether the current slide has anything drawn on it. */
+  canClear(): boolean;
   undo(): void;
   clear(): void;
   /** The palette moved or changed shape: where it takes input changed. */
@@ -256,7 +258,7 @@ export class Palette {
     actions.className = "actions";
     actions.append(
       this.button("undo", "Undo last stroke", "pen-undo", () => this.actions.undo(), false, !canUndo),
-      this.button("trash", "Clear drawings on this slide", "pen-clear", () => this.actions.clear(), false, !canUndo)
+      this.button("trash", "Clear drawings on this slide", "pen-clear", () => this.actions.clear(), false, !this.actions.canClear())
     );
 
     panel.append(colors, sizes, actions);
