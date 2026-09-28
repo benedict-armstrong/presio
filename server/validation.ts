@@ -54,7 +54,7 @@ export function isValidSlideNumber(slideNumber: unknown, total: unknown): boolea
 // published (where to load them — never the plugins themselves). These caps
 // bound what a controller or viewer can make it hold.
 
-const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+export const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const PLUGIN_TYPE_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
 // A plugin page's SHA-256, hex.
 const HASH_RE = /^[0-9a-f]{64}$/;

@@ -12,9 +12,11 @@ import {
   MAX_PLUGINS_PER_SESSION,
   MAX_RETAINED_PER_PLUGIN,
   MAX_RETAINED_BYTES_PER_PLUGIN,
+  PLUGIN_ID_RE,
   type PublishedPlugin,
   type Retain,
 } from "./validation.js";
+import { HistoryError, HistoryStore, parseBase, sanitizeHead, sanitizeHistoryCommit, SHA256_RE, type HistoryBucket } from "./history.js";
 
 // A presenter plugin message kept for viewers who join later (the plugin's
 // current "state of the world": which poll is open, whether the join code is
@@ -41,6 +43,8 @@ export interface SocketState {
   pluginRetained: Map<string, Map<string, RetainedPluginEvent>>;
   // The presenter's settings for each plugin, which viewers run with.
   pluginSettings: Map<string, Map<string, Record<string, unknown>>>;
+  // Plugins' edit histories (presio.history) and their blobs, per session.
+  history: HistoryStore;
 }
 
 export function createSocketState(): SocketState {
@@ -50,6 +54,7 @@ export function createSocketState(): SocketState {
     publishedPlugins: new Map(),
     pluginRetained: new Map(),
     pluginSettings: new Map(),
+    history: new HistoryStore(),
   };
 }
 
@@ -60,6 +65,7 @@ export function clearSessionState(state: SocketState, sessionId: string) {
   state.publishedPlugins.delete(sessionId);
   state.pluginRetained.delete(sessionId);
   state.pluginSettings.delete(sessionId);
+  void state.history.drop(sessionId).catch((err) => console.warn(`Couldn't drop the history of session ${sessionId}:`, err));
 }
 
 // The session's deck was replaced: forget what plugins retained for the old
@@ -132,7 +138,8 @@ export function registerSocketHandlers(
   supabase: SupabaseClient,
   state: SocketState
 ) {
-  const { controllers, blankedSessions, publishedPlugins, pluginRetained, pluginSettings } = state;
+  const { controllers, blankedSessions, publishedPlugins, pluginRetained, pluginSettings, history } = state;
+  history.setBucket(supabase.storage.from("presentations") as unknown as HistoryBucket);
 
   // What a joining (or re-joining) socket needs to mount the session's
   // plugins: which ones run and where each loads from (by URL and hash; the
@@ -362,6 +369,86 @@ export function registerSocketHandlers(
       const controller = controllers.get(sessionId);
       if (controller) io.to(controller).emit("plugin_load_failed", { ...failure, sender: socket.id });
     });
+
+    // --- Plugin histories (presio.history, see history.ts) ---
+
+    // Anyone in the session may catch up on a history: a device sends the
+    // head it has and gets what it's missing. Viewers are throttled like
+    // their plugin messages; they only sync on joining or after a gap.
+    socket.on("history_sync", async (raw: unknown, ack?: (reply: unknown) => void) => {
+      const { sessionId } = socket.data;
+      if (typeof ack !== "function") return;
+      const r = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+      const head = sanitizeHead(r.head);
+      if (!sessionId || typeof r.plugin !== "string" || !PLUGIN_ID_RE.test(r.plugin) || !head) return ack({ error: "Bad request" });
+      if (controllers.get(sessionId) !== socket.id && !allowAudiencePluginEvent(socket)) return ack({ error: "Too many requests" });
+      try {
+        ack(await history.sync(sessionId, r.plugin, head));
+      } catch (err) {
+        console.warn("history_sync failed:", err);
+        ack({ error: "Couldn't read the history" });
+      }
+    });
+
+    // The controller's edits: ordered here, then sent to everyone in the
+    // session, the sender included — that's how it learns the entry's place.
+    socket.on("history_commit", controllerOnly(socket, async (sessionId, raw: unknown, ack?: (reply: unknown) => void) => {
+      const reply = typeof ack === "function" ? ack : () => {};
+      const commit = sanitizeHistoryCommit(raw);
+      if (!commit) return reply({ error: "Bad commit" });
+      try {
+        const entry = await history.commit(sessionId, commit);
+        if (entry) io.to(sessionId).emit("history_entry", { plugin: commit.plugin, entry });
+        reply({ ok: true });
+      } catch (err) {
+        reply({ error: err instanceof HistoryError ? err.message : "Couldn't save the edit" });
+        if (!(err instanceof HistoryError)) console.warn("history_commit failed:", err);
+      }
+    }));
+
+    // A deck shared with edits already on it: the controller's copy becomes
+    // the session's, from a seed blob it uploaded first.
+    socket.on("history_seed", controllerOnly(socket, async (sessionId, raw: unknown, ack?: (reply: unknown) => void) => {
+      const reply = typeof ack === "function" ? ack : () => {};
+      const r = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+      if (typeof r.plugin !== "string" || !PLUGIN_ID_RE.test(r.plugin) || typeof r.sha !== "string" || !SHA256_RE.test(r.sha)) {
+        return reply({ error: "Bad seed" });
+      }
+      try {
+        const seeded = await history.seed(sessionId, r.plugin, r.sha);
+        if (seeded) socket.to(sessionId).emit("history_reset", { plugin: r.plugin });
+        reply({ ok: seeded });
+      } catch (err) {
+        console.warn("history_seed failed:", err);
+        reply({ ok: false });
+      }
+    }));
+
+    // The controller took a snapshot: the log may start from it.
+    socket.on("history_snapshot", controllerOnly(socket, async (sessionId, raw: unknown, ack?: (reply: unknown) => void) => {
+      const reply = typeof ack === "function" ? ack : () => {};
+      const r = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+      const base = parseBase(r.base);
+      if (typeof r.plugin !== "string" || !PLUGIN_ID_RE.test(r.plugin) || !base?.snapshot) return reply({ ok: false });
+      try {
+        reply({ ok: await history.snapshot(sessionId, r.plugin, { seq: base.seq, hash: base.hash, sha: base.snapshot }) });
+      } catch (err) {
+        console.warn("history_snapshot failed:", err);
+        reply({ ok: false });
+      }
+    }));
+
+    // A different deck: start the plugin's history afresh, everywhere.
+    socket.on("history_reset", controllerOnly(socket, async (sessionId, raw: unknown) => {
+      const r = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+      if (typeof r.plugin !== "string" || !PLUGIN_ID_RE.test(r.plugin)) return;
+      try {
+        await history.reset(sessionId, r.plugin);
+        socket.to(sessionId).emit("history_reset", { plugin: r.plugin });
+      } catch (err) {
+        console.warn("history_reset failed:", err);
+      }
+    }));
 
     socket.on("time_ping", (clientT1: number, ack?: (data: { serverTime: number; clientT1: number }) => void) => {
       if (typeof ack === "function") ack({ serverTime: Date.now(), clientT1 });

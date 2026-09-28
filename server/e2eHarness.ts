@@ -58,7 +58,8 @@ const sessionRow = (id: string, deck: "example" | "links" = "example") => ({
 const fake = new FakeSupabase([sessionRow(SESSION_ID)]);
 
 const io = new Server();
-const inner = createApp({ supabase: fake as unknown as SupabaseClient, io });
+const socketState = createSocketState();
+const inner = createApp({ supabase: fake as unknown as SupabaseClient, io, socketState });
 
 // Wrap createApp so the example PDF route is matched before its catch-all.
 const app = express();
@@ -88,7 +89,7 @@ app.use(inner);
 
 const server = http.createServer(app);
 io.attach(server);
-registerSocketHandlers(io, fake as unknown as SupabaseClient, createSocketState());
+registerSocketHandlers(io, fake as unknown as SupabaseClient, socketState);
 
 server.listen(port, () => {
   console.log(`E2E harness on http://localhost:${port}`);

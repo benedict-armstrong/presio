@@ -42,6 +42,44 @@ interface PresioMessage {
   sender?: string;
 }
 
+/** An op's place in a history (presio.history), as apply() sees it. */
+interface PresioHistoryEntryInfo {
+  id: string;
+  /** The device that committed it (compare with PresioHistory.device). */
+  by: string | null;
+  /** Server time it was ordered at; absent while pending. */
+  at?: number;
+  /** Its place in the order; absent while pending. */
+  seq?: number;
+  pending: boolean;
+}
+
+interface PresioHistorySpec<S, Op> {
+  init(): S;
+  /** The next state; must not change the one it's given. */
+  apply(state: S, op: Op, entry: PresioHistoryEntryInfo): S;
+  /** JSON the history can start from, for a history that grows. */
+  snapshot?(state: S): unknown;
+  restore?(snapshot: unknown): S;
+}
+
+interface PresioHistory<S, Op> {
+  /** Ordered entries applied to init(), then this device's pending ops. */
+  readonly state: S;
+  /** The ordered entries only: what every device agrees on. */
+  readonly confirmed: S;
+  readonly ready: boolean;
+  whenReady(): Promise<PresioHistory<S, Op>>;
+  /** This browser's id: entries' `by`. */
+  readonly device: string | null;
+  /** Presenter: add an op (JSON, at most 16 KB). Returns its id. */
+  commit(op: Op): string;
+  /** This device's ops, newest first; seq is null while pending. */
+  mine(): { id: string; op: Op; seq: number | null }[];
+  onChange(cb: (state: S, change: { kind: "state" | "entry" | "pending"; entry?: unknown }) => void): Unsubscribe;
+  onError(cb: (id: string, message: string) => void): Unsubscribe;
+}
+
 interface Presio {
   readonly pluginId: string;
   /** The plugin's own folder, absolute: relative URLs resolve against it. */
@@ -96,6 +134,15 @@ interface Presio {
     clear(): void;
   };
   readonly clock: { now(): number };
+  /** The deck's edit history ("history" permission): open once per frame. */
+  readonly history: {
+    open<S, Op = unknown>(spec: PresioHistorySpec<S, Op>): PresioHistory<S, Op>;
+  };
+  /** Content-addressed bytes ("history"): put resolves to the SHA-256. */
+  readonly blobs: {
+    put(data: Blob | Uint8Array | ArrayBuffer): Promise<string>;
+    get(sha: string): Promise<Blob | null>;
+  };
   readonly ui: {
     setVisible(visible: boolean): void;
     setInteractive(value: boolean | { x: number; y: number; w: number; h: number }[]): void;

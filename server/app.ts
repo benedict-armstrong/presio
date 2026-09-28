@@ -12,6 +12,8 @@ import { canonicalBaseUrl, originPair } from "./lib/baseUrl.js";
 import { localBlobsDir } from "./local/paths.js";
 import { isLocalMode } from "./local/mode.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
+import { registerHistoryRoutes } from "./routes/history.js";
+import type { HistoryBucket } from "./history.js";
 import { registerNewsletterRoutes } from "./routes/newsletter.js";
 import { registerCheckRoute } from "./routes/check.js";
 import { registerLanAddressRoute } from "./routes/lanAddress.js";
@@ -139,6 +141,10 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   registerAgentDocRoutes(app);
 
   registerSessionRoutes(app, { supabase, io, socketState });
+  if (socketState) {
+    socketState.history.setBucket(supabase.storage.from("presentations") as unknown as HistoryBucket);
+    registerHistoryRoutes(app, { supabase, history: socketState.history });
+  }
   registerNewsletterRoutes(app, supabase);
   registerCheckRoute(app);
   // Local/dev only: lets share surfaces resolve this machine's LAN address

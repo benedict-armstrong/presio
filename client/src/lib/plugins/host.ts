@@ -9,6 +9,7 @@ import { lsGet, lsRemove, lsSet, pluginRetainedKey, pluginStateKey } from "@/lib
 import { sanitizeSettingValue, setPluginSetting } from "@/lib/settings";
 import { clockOffset } from "@/lib/clock";
 import { asRecord, type LoadedPlugin, type PluginSurface } from "./manifest";
+import { HistoryHub, MAX_BLOB_BYTES, type HistoryFrameMessage } from "./history";
 
 export type PluginRole = "presenter" | "audience";
 
@@ -141,6 +142,9 @@ interface Conn extends FrameHooks {
   port: MessagePort;
   /** It registered presio.deck.onExport. */
   exporter?: boolean;
+  /** It opened presio.history (and can take snapshots of it). */
+  history?: boolean;
+  snapshots?: boolean;
 }
 
 const TYPE_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
@@ -165,6 +169,10 @@ const NO_BUTTONS: Record<string, ButtonState> = {};
 export const retainKey = ({ plugin, type }: Pick<WireEvent, "plugin" | "type">) => `${plugin}\u0000${type}`;
 /** How long one plugin may take over its part of a download. */
 const EXPORT_TIMEOUT_MS = 60_000;
+/** How long a frame may take to hand over a snapshot of its history. */
+const SNAPSHOT_TIMEOUT_MS = 10_000;
+/** An op's id, as a frame makes it. */
+const OP_ID_RE = /^[A-Za-z0-9_-]{8,40}$/;
 
 export class PluginHost {
   private conns = new Set<Conn>();
@@ -192,9 +200,19 @@ export class PluginHost {
   private running: readonly string[] = [];
   private exports = new Map<number, (result: { bytes?: unknown; error?: unknown }) => void>();
   private nextExport = 1;
+  private snapshots = new Map<number, (result: { seq?: unknown; data?: unknown }) => void>();
+  private nextSnapshot = 1;
+  /** Plugins' edit histories (presio.history), and the way to other devices'. */
+  readonly history: HistoryHub;
 
   constructor(ctx: PluginContext) {
     this.ctx = ctx;
+    this.history = new HistoryHub({
+      deck: ctx.session.id,
+      presenter: ctx.role === "presenter",
+      deliver: (plugin, message) => this.deliverHistory(plugin, message),
+      requestSnapshot: (plugin) => this.requestSnapshot(plugin),
+    });
     // The presenter's retained messages outlive a reload of their page: they
     // are the plugins' shared state (what's drawn, what's showing), and after
     // a server restart they're what the session is re-seeded from.
@@ -243,6 +261,12 @@ export class PluginHost {
     const kind = this.nextDeckChange;
     this.nextDeckChange = "replace";
     for (const conn of this.conns) conn.port.postMessage({ type: "deck", kind });
+    // Histories are the deck's: one with a different page count is a
+    // different document (see HistoryHub.setPages).
+    void pages().then(
+      (sizes) => { if (sizes.length && this.deckBytes === bytes) this.history.setPages(sizes.length); },
+      () => {}
+    );
   }
 
   /** The next deck swap is an edit of the same pages (a notes save), not a
@@ -263,6 +287,8 @@ export class PluginHost {
   updateContext(next: PluginContext) {
     const prev = this.ctx;
     this.ctx = next;
+    this.history.setDeck(next.session.id);
+    this.history.setPresenter(next.role === "presenter");
     const slideChanged = prev.slide.current !== next.slide.current || prev.slide.total !== next.slide.total;
     const otherChanged =
       prev.role !== next.role ||
@@ -432,6 +458,53 @@ export class PluginHost {
     const mine = [...this.conns].filter((c) => c.plugin.manifest.id === pluginId);
     const background = mine.filter((c) => c.surface === "background");
     return background.length ? background : mine.filter((c) => c.surface === "tile");
+  }
+
+  // --- Histories (presio.history) ---
+
+  private deliverHistory(plugin: string, message: HistoryFrameMessage) {
+    for (const conn of this.conns) {
+      if (conn.history && conn.plugin.manifest.id === plugin) conn.port.postMessage({ type: "history", ...message });
+    }
+  }
+
+  /** Ask one of a plugin's frames (its background, if open) for a snapshot. */
+  private requestSnapshot(plugin: string): Promise<{ seq: number; data: unknown } | null> {
+    const frames = [...this.conns].filter((c) => c.plugin.manifest.id === plugin && c.history && c.snapshots);
+    const conn = frames.find((c) => c.surface === "background") ?? frames[0];
+    if (!conn) return Promise.resolve(null);
+    const id = this.nextSnapshot++;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.snapshots.delete(id);
+        resolve(null);
+      }, SNAPSHOT_TIMEOUT_MS);
+      this.snapshots.set(id, ({ seq, data }) => {
+        clearTimeout(timer);
+        this.snapshots.delete(id);
+        resolve(typeof seq === "number" && Number.isInteger(seq) && data !== undefined ? { seq, data } : null);
+      });
+      conn.port.postMessage({ type: "history", kind: "snapshot", id });
+    });
+  }
+
+  private onHistoryMessage(conn: Conn, m: Record<string, unknown>) {
+    const plugin = conn.plugin.manifest.id;
+    if (!conn.plugin.manifest.permissions.includes("history")) {
+      console.warn(`Plugin "${plugin}" needs the "history" permission for presio.history`);
+      return;
+    }
+    if (m.kind === "open") {
+      conn.history = true;
+      conn.snapshots = m.snapshots === true;
+      this.history.open(plugin);
+    } else if (m.kind === "commit") {
+      if (typeof m.id !== "string" || !OP_ID_RE.test(m.id)) return;
+      const result = this.history.commit(plugin, m.id, m.op);
+      if (result) conn.port.postMessage({ type: "history", kind: "error", id: m.id, error: result });
+    } else if (m.kind === "snapshot") {
+      if (typeof m.id === "number") this.snapshots.get(m.id)?.({ seq: m.seq, data: m.data });
+    }
   }
 
   // --- Downloads (presio.deck.onExport) ---
@@ -631,6 +704,8 @@ export class PluginHost {
       conn.exporter = m.on === true;
     } else if (m?.type === "exported") {
       if (typeof m.id === "number") this.exports.get(m.id)?.({ bytes: m.bytes, error: m.error });
+    } else if (m?.type === "history") {
+      this.onHistoryMessage(conn, m);
     } else if (m?.type === "request") {
       void this.answer(conn, m.id, m.kind, m.args);
     }
@@ -660,6 +735,9 @@ export class PluginHost {
     const readsDeck = kind === "attachments" || kind === "deckBytes" || kind === "pages";
     if (readsDeck && !manifest.permissions.includes("deck")) {
       return reply(null, 'Reading the deck needs the "deck" permission in presio-plugin.json');
+    }
+    if ((kind === "blobPut" || kind === "blobGet") && !manifest.permissions.includes("history")) {
+      return reply(null, 'Blobs need the "history" permission in presio-plugin.json');
     }
     switch (kind) {
       case "attachments": {
@@ -707,6 +785,24 @@ export class PluginHost {
         if (sanitizeSettingValue(spec, a.value) === undefined) return reply(null, `Invalid value for "${a.name as string}"`);
         setPluginSetting(manifest.id, a.name as string, spec, a.value);
         return reply(null);
+      }
+      case "blobPut": {
+        const data = a.data;
+        const blob =
+          data instanceof Blob ? data
+          : data instanceof Uint8Array || data instanceof ArrayBuffer ? new Blob([data as BlobPart])
+          : null;
+        if (!blob) return reply(null, "blobs.put() takes a Blob, a Uint8Array or an ArrayBuffer");
+        if (blob.size > MAX_BLOB_BYTES) return reply(null, `A blob is at most ${MAX_BLOB_BYTES / 1024 / 1024} MB`);
+        try {
+          return reply(await this.history.putBlob(blob));
+        } catch (e) {
+          return reply(null, e instanceof Error ? e.message : "Couldn't keep the blob");
+        }
+      }
+      case "blobGet": {
+        if (typeof a.sha !== "string" || !/^[0-9a-f]{64}$/.test(a.sha)) return reply(null, "blobs.get() takes a blob's hash");
+        return reply(await this.history.getBlob(a.sha));
       }
       default:
         return reply(null, `Unknown request "${String(kind)}"`);

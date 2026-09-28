@@ -37,6 +37,8 @@
     var commandListeners = {};
     var menuListeners = {};
     var exporter = null;
+    // presio.history, once opened: this frame's copy of the plugin's state.
+    var history = null;
     // Messages that arrive before the plugin subscribes (retained state is
     // replayed right after boot) wait here instead of being dropped.
     var pending = [];
@@ -113,6 +115,8 @@
         each(commandListeners[m.id] || [], m.id);
       } else if (m.type === "export") {
         runExport(m);
+      } else if (m.type === "history") {
+        if (history) history.receive(m);
       } else if (m.type === "message") {
         if (messageListeners.length) each(messageListeners, m.message);
         else pending.push(m.message);
@@ -141,6 +145,142 @@
             post({ type: "exported", id: m.id, error: String((err && err.message) || err) });
           }
         );
+    }
+
+    // presio.history: the plugin's ordered edits, the same on every device.
+    // State is init() (or the snapshot the log starts from, restored), then
+    // every ordered entry applied in turn — "confirmed" — and, on top, this
+    // device's ops still waiting for their place — "pending" — so a commit
+    // shows at once.
+    function openHistory(spec) {
+      if (!spec || typeof spec.init !== "function" || typeof spec.apply !== "function") {
+        throw new Error("presio.history.open() needs init() and apply(state, op, entry)");
+      }
+      var confirmed = spec.init();
+      var confirmedSeq = 0;
+      var entries = [];
+      var pending = [];
+      // Committed here but not yet in anything the host sent back: kept on
+      // top until it is, so the op never blinks out.
+      var local = [];
+      var device = null;
+      var ready = false;
+      var view = confirmed;
+      var changeListeners = [];
+      var errorListeners = [];
+      var readyWaiters = [];
+      var counter = 0;
+
+      function ops() {
+        var ids = {};
+        pending.forEach(function (p) { ids[p.id] = true; });
+        return pending.concat(local.filter(function (p) { return !ids[p.id]; }));
+      }
+      function recompute(change) {
+        view = ops().reduce(function (s, p) {
+          return spec.apply(s, p.op, { id: p.id, by: p.by, pending: true });
+        }, confirmed);
+        each(changeListeners, view, change);
+      }
+      function settle(ids) {
+        local = local.filter(function (p) { return !ids[p.id]; });
+      }
+      function applyEntry(e) {
+        confirmed = spec.apply(confirmed, e.op, { id: e.id, by: e.by, at: e.at, seq: e.seq, pending: false });
+        confirmedSeq = e.seq;
+        entries.push(e);
+      }
+
+      var h = {
+        /** The state: ordered entries, then this device's pending ops. */
+        get state() { return view; },
+        /** Only the ordered entries' state (what every device agrees on). */
+        get confirmed() { return confirmed; },
+        /** false until the history has loaded (state is init() until then). */
+        get ready() { return ready; },
+        whenReady: function () {
+          return ready ? Promise.resolve(h) : new Promise(function (resolve) { readyWaiters.push(resolve); });
+        },
+        /** This browser's id: entries' `by`. */
+        get device() { return device; },
+        /**
+         * Presenter: add an op. Shown here at once (pending), then ordered —
+         * by the server for a shared deck — and applied on every device.
+         * JSON, at most 16 KB. Returns its id.
+         */
+        commit: function (op) {
+          var id = device ? device.slice(0, 8) : "op";
+          id += "-" + Date.now().toString(36) + "-" + (counter++).toString(36) + Math.random().toString(36).slice(2, 6);
+          local.push({ id: id, by: device, op: op });
+          post({ type: "history", kind: "commit", id: id, op: op });
+          recompute({ kind: "pending" });
+          return id;
+        },
+        /**
+         * This device's ops, newest first — ordered ones and pending ones —
+         * for undo: [{ id, op, seq (null while pending) }].
+         */
+        mine: function () {
+          var out = [];
+          entries.forEach(function (e) { if (e.by === device) out.push({ id: e.id, op: e.op, seq: e.seq }); });
+          ops().forEach(function (p) { out.push({ id: p.id, op: p.op, seq: null }); });
+          return out.reverse();
+        },
+        /** cb(state, { kind: "state" | "entry" | "pending", entry? }) */
+        onChange: function (cb) { return subscribe(changeListeners, cb); },
+        /** cb(id, message): an op was refused (it's dropped from pending). */
+        onError: function (cb) { return subscribe(errorListeners, cb); },
+      };
+      // What the host tells this frame about the history.
+      function receive(m) {
+        if (m.kind === "state") {
+          device = m.device;
+          confirmed = spec.init();
+          if (m.base.snapshot && m.snapshot !== null) confirmed = spec.restore ? spec.restore(m.snapshot) : m.snapshot;
+          confirmedSeq = m.base.seq;
+          entries = [];
+          m.entries.forEach(applyEntry);
+          pending = m.pending;
+          var ids = {};
+          pending.forEach(function (p) { ids[p.id] = true; });
+          m.entries.forEach(function (e) { ids[e.id] = true; });
+          settle(ids);
+          var wasReady = ready;
+          ready = true;
+          recompute({ kind: "state" });
+          if (!wasReady) {
+            var waiters = readyWaiters;
+            readyWaiters = [];
+            waiters.forEach(function (resolve) { resolve(h); });
+          }
+        } else if (m.kind === "entry") {
+          if (m.entry.seq !== confirmedSeq + 1) return;
+          applyEntry(m.entry);
+          pending = m.pending;
+          var done = {};
+          done[m.entry.id] = true;
+          pending.forEach(function (p) { done[p.id] = true; });
+          settle(done);
+          recompute({ kind: "entry", entry: m.entry });
+        } else if (m.kind === "pending") {
+          pending = m.pending;
+          var seen = {};
+          pending.forEach(function (p) { seen[p.id] = true; });
+          settle(seen);
+          recompute({ kind: "pending" });
+        } else if (m.kind === "error") {
+          local = local.filter(function (p) { return p.id !== m.id; });
+          each(errorListeners, m.id, m.error);
+          recompute({ kind: "pending" });
+        } else if (m.kind === "snapshot") {
+          var data = null;
+          try { data = spec.snapshot ? spec.snapshot(confirmed) : null; } catch (err) { console.error(err); }
+          post({ type: "history", kind: "snapshot", id: m.id, seq: confirmedSeq, data: data === null ? undefined : data });
+        }
+      }
+      history = { handle: h, receive: receive };
+      post({ type: "history", kind: "open", snapshots: typeof spec.snapshot === "function" });
+      return h;
     }
 
     var api = {
@@ -276,6 +416,28 @@
         /** items: [{ x, y, w, h, image, fit? ("cover" | "contain") }] */
         set: function (slide, items) { post({ type: "layers", slide: slide, items: items || [] }); },
         clear: function () { post({ type: "layers", clear: true }); },
+      },
+      /**
+       * The plugin's edit history for this deck — needs the "history"
+       * permission. open({ init, apply, snapshot?, restore? }), once per
+       * frame: apply(state, op, entry) returns the next state without
+       * changing the one it's given. Every device applies the same ordered
+       * ops, so every copy comes out the same; the presenter's device keeps
+       * it (per deck) across sessions.
+       */
+      history: {
+        open: function (spec) { return history ? history.handle : openHistory(spec); },
+      },
+      /**
+       * Content-addressed bytes (images, anything too big for an op) — needs
+       * "history". put(Blob | Uint8Array | ArrayBuffer) (presenter, at most
+       * 5 MB) resolves to its hash; put the hash in an op. get(hash) resolves
+       * to a Blob (or null), fetched only when asked for — fetch what's on
+       * screen, not everything.
+       */
+      blobs: {
+        put: function (data) { return request("blobPut", { data: data }); },
+        get: function (sha) { return request("blobGet", { sha: sha }); },
       },
       /** The server's clock, shared by every device in the session (ms). */
       clock: {

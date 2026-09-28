@@ -17,6 +17,8 @@ import { isActivatedBy, type LoadedPlugin, type PluginManifest } from "./manifes
 import { loadPlugin, usePluginEntries } from "./registry";
 import { clockOffset, onClockSample } from "@/lib/clock";
 import { resolvePluginSettings, useSettingsDocument } from "@/lib/settings";
+import { getSessionAuth } from "@/lib/utils";
+import { blobSha, type HistoryEntry, type HistoryLink, type SyncReply } from "./history";
 
 /** A plugin viewers run: where to load it, and what it must hash to. */
 interface PublishedPlugin {
@@ -154,6 +156,101 @@ function useLocallyActivePlugins(enabled: boolean, readAll: () => Promise<PdfAtt
   return { plugins: enabled ? plugins : [], errors };
 }
 
+/** How long to wait on the server's answer about a history. */
+const HISTORY_ACK_MS = 15_000;
+// A blob another device just added may not be uploaded yet: ask again after
+// these waits before giving up (the plugin can ask again later).
+const BLOB_RETRY_MS = [1000, 2000, 4000, 8000];
+
+/** A shared deck's way to the server's copy of the histories, and its blobs. */
+function sharedHistoryLink(
+  id: string,
+  isPresenter: boolean,
+  localBlob: (sha: string) => Promise<Blob | null>
+): HistoryLink & { retryUploads(): void } {
+  const ask = async <T,>(event: string, args: unknown): Promise<T> => socket.timeout(HISTORY_ACK_MS).emitWithAck(event, args);
+  const blobUrl = (sha: string) => `/api/sessions/${encodeURIComponent(id)}/blobs/${sha}`;
+  // Blobs that couldn't be uploaded yet (offline): tried again on reconnecting.
+  const unsent = new Map<string, Blob>();
+
+  const upload = async (sha: string, blob: Blob) => {
+    const res = await fetch(blobUrl(sha), {
+      method: "PUT",
+      headers: { "Content-Type": "application/octet-stream", "x-controller-token": getSessionAuth(id).controllerToken ?? "" },
+      body: blob,
+    });
+    if (res.ok) {
+      unsent.delete(sha);
+      return;
+    }
+    const body = await res.json().catch(() => ({}));
+    // Refused for good (too big, storage full): the plugin should hear.
+    if (res.status === 413 || res.status === 422) throw new Error(body.error || "The server refused the blob");
+    throw new TypeError(body.error || `upload failed (${res.status})`);
+  };
+
+  const tryUpload = async (sha: string, blob: Blob) => {
+    try {
+      await upload(sha, blob);
+    } catch (e) {
+      if (!(e instanceof TypeError)) throw e;
+      unsent.set(sha, blob);
+    }
+  };
+
+  return {
+    sync: async (plugin, head) => {
+      const reply = await ask<SyncReply | { error: string }>("history_sync", { plugin, head });
+      if ("error" in reply) throw new Error(reply.error);
+      return reply;
+    },
+    ...(isPresenter
+      ? {
+          commit: async (plugin, op) => {
+            const reply = await ask<{ ok?: boolean; error?: string }>("history_commit", { plugin, id: op.id, by: op.by, op: op.op });
+            return reply?.error ?? null;
+          },
+          seed: async (plugin, log) => {
+            if (log.base.snapshot) {
+              const snapshot = await localBlob(log.base.snapshot);
+              if (!snapshot) return false;
+              await upload(log.base.snapshot, snapshot);
+            }
+            const seed = new Blob([JSON.stringify({ base: log.base, entries: log.entries })], { type: "application/json" });
+            const sha = await blobSha(seed);
+            await upload(sha, seed);
+            const reply = await ask<{ ok?: boolean }>("history_seed", { plugin, sha });
+            return reply?.ok === true;
+          },
+          snapshot: async (plugin, base) => {
+            if (base.snapshot && unsent.has(base.snapshot)) return false;
+            const reply = await ask<{ ok?: boolean }>("history_snapshot", { plugin, base });
+            return reply?.ok === true;
+          },
+          reset: (plugin) => void socket.emit("history_reset", { plugin }),
+          uploadBlob: tryUpload,
+        }
+      : {}),
+    fetchBlob: async (sha) => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          // Low priority: a blob never gets ahead of the slides themselves.
+          const res = await fetch(blobUrl(sha), { priority: "low" } as RequestInit);
+          if (res.ok) return await res.blob();
+          if (res.status !== 404) return null;
+        } catch {
+          /* offline: try again */
+        }
+        if (attempt >= BLOB_RETRY_MS.length) return null;
+        await new Promise((r) => setTimeout(r, BLOB_RETRY_MS[attempt]));
+      }
+    },
+    retryUploads: () => {
+      for (const [sha, blob] of unsent) void tryUpload(sha, blob).catch(() => unsent.delete(sha));
+    },
+  };
+}
+
 export interface PluginHostState {
   host: PluginHost;
   /** Plugins running on this device. */
@@ -220,16 +317,53 @@ export function usePluginHost({
     if (local !== true) return;
     const channel = new BroadcastChannel(`presio-plugins-${id}`);
     host.setOutbound((event) => channel.postMessage({ kind: "event", event }));
+    // Histories: the presenter's window orders edits and passes each on; the
+    // viewer window asks it for what it's missing (blobs it reads itself,
+    // from this browser's IndexedDB).
+    const syncs = new Map<number, (reply: SyncReply) => void>();
+    let nextSync = 1;
+    host.history.setLink(
+      isPresenter
+        ? {
+            ordersHere: true,
+            publish: (plugin, entry) => channel.postMessage({ kind: "history_entry", plugin, entry }),
+            reset: (plugin) => channel.postMessage({ kind: "history_reset", plugin }),
+            loaded: (plugin) => channel.postMessage({ kind: "history_reset", plugin }),
+          }
+        : {
+            sync: (plugin, head) =>
+              new Promise<SyncReply>((resolve, reject) => {
+                const reqId = nextSync++;
+                const timer = setTimeout(() => {
+                  syncs.delete(reqId);
+                  reject(new Error("the presenter's window didn't answer"));
+                }, 5000);
+                syncs.set(reqId, (reply) => {
+                  clearTimeout(timer);
+                  syncs.delete(reqId);
+                  resolve(reply);
+                });
+                channel.postMessage({ kind: "history_sync", reqId, plugin, head });
+              }),
+          },
+      true
+    );
     channel.onmessage = (e) => {
-      const { kind, event, events } = e.data ?? {};
+      const { kind, event, events, plugin, entry, head, reqId, reply } = e.data ?? {};
       if (kind === "event") host.receive(event);
       else if (kind === "retained") host.seedRetained(events);
       else if (kind === "hello" && isPresenter) channel.postMessage({ kind: "retained", events: host.retainedEvents() });
+      else if (kind === "history_entry" && !isPresenter) host.history.receive(plugin, entry as HistoryEntry);
+      else if (kind === "history_reset" && !isPresenter) host.history.receiveReset(plugin);
+      else if (kind === "history_sync" && isPresenter) {
+        channel.postMessage({ kind: "history_sync_reply", reqId, reply: host.history.answerSync(plugin, head) });
+      } else if (kind === "history_sync_reply" && !isPresenter) syncs.get(reqId)?.(reply);
     };
     if (!isPresenter) channel.postMessage({ kind: "hello" });
     return () => {
       channel.close();
       host.setOutbound(() => {});
+      host.history.setLink({}, false);
     };
   }, [host, id, local, isPresenter]);
 
@@ -266,6 +400,13 @@ export function usePluginHost({
     // while the socket can't take it: a late one is worse than none.
     host.setOutbound((event) => (event.volatile ? socket.volatile : socket).emit("plugin_event", event));
 
+    // Histories: the server orders edits (server/history.ts); blobs go over
+    // HTTP. The link is ready once the socket has joined (plugins_state).
+    const historyLink = sharedHistoryLink(id, isPresenter, (sha) => host.history.getBlob(sha));
+    const onHistoryEntry = ({ plugin, entry }: { plugin: string; entry: HistoryEntry }) => host.history.receive(plugin, entry);
+    const onHistoryReset = ({ plugin }: { plugin: string }) => host.history.receiveReset(plugin);
+    const onDisconnect = () => host.history.setLink(historyLink, false);
+
     // Only where to find each plugin: viewers load it themselves (cached like
     // any web page), never through the server.
     const publish = () => {
@@ -293,6 +434,8 @@ export function usePluginHost({
     };
 
     const onState = async (state: PluginsState) => {
+      historyLink.retryUploads();
+      host.history.setLink(historyLink, true);
       if (isPresenter) {
         // The server's copy can lag ours (it restarted, or we changed plugins
         // before joining): republish, and re-seed retained state it lost.
@@ -371,16 +514,23 @@ export function usePluginHost({
     socket.on("plugin_settings", onSettings);
     socket.on("plugins_state", onState);
     socket.on("plugin_load_failed", onLoadFailed);
+    socket.on("history_entry", onHistoryEntry);
+    socket.on("history_reset", onHistoryReset);
+    socket.on("disconnect", onDisconnect);
     publishRef.current = publish;
     return () => {
       socket.off("plugin_event", onEvent);
       socket.off("plugin_settings", onSettings);
       socket.off("plugins_state", onState);
       socket.off("plugin_load_failed", onLoadFailed);
+      socket.off("history_entry", onHistoryEntry);
+      socket.off("history_reset", onHistoryReset);
+      socket.off("disconnect", onDisconnect);
       host.setOutbound(() => {});
+      host.history.setLink({}, false);
       publishRef.current = null;
     };
-  }, [host, local, isPresenter]);
+  }, [host, id, local, isPresenter]);
 
   // Republish when the presenter's own set changes mid-session (a plugin
   // switched on in Settings). Until something has been published, an empty

@@ -74,7 +74,8 @@ index.html
   whose PDF embeds a matching attachment (e.g. `"attachment:poll-*.json"`).
 - `permissions` — `"deck"` to read the PDF (its bytes and embedded
   attachments); `"editDeck"` to save an edited PDF over it from the presenter's
-  device.
+  device; `"history"` to keep an edit history for the deck (`presio.history`)
+  and blobs (`presio.blobs`).
 - `contributes.buttons` — up to 4 buttons Presio draws natively. `location`:
   `controller.toolbar` (the controller's bottom bar),
   `controller.currentSlide` (the current slide card's header, as an icon with
@@ -192,6 +193,17 @@ presio.ui.onHover(hovered => {})
 presio.layers.set(slide, [{ x, y, w, h, image, fit }])  // still images on a slide, shown in every view
 presio.layers.clear()
 presio.clock.now()          // the server's clock (ms), the same on every device
+
+const h = presio.history.open({ init, apply, snapshot?, restore? })  // the deck's edit history ("history")
+h.state                     // ordered entries applied to init(), then this device's pending ops
+h.confirmed                 // the ordered entries only: what every device agrees on
+h.ready / h.whenReady()     // loaded (state is init() until then)
+h.commit(op)                // presenter: → id; JSON, at most 16 KB; shown here at once
+h.mine()                    // this device's ops, newest first: [{ id, op, seq }] (seq null while pending)
+h.onChange((state, { kind, entry }) => {})  // kind: "state" | "entry" | "pending"
+h.onError((id, message) => {})              // an op was refused (and dropped)
+presio.blobs.put(data)      // presenter: Blob | Uint8Array | ArrayBuffer, at most 5 MB → Promise<sha256>
+presio.blobs.get(sha)       // → Promise<Blob | null>, fetched only when asked for ("history")
 ```
 
 Storage: `presio.storage` is the presenter's per-session state on their own
@@ -231,6 +243,35 @@ Messaging:
   (rate-limited), with `from: "audience"` and a per-connection `sender` id.
   The presenter aggregates and broadcasts results back.
 - Payloads are JSON, at most 16 KB; `type` is up to 64 of `A-Za-z0-9_.:-`.
+
+History: `presio.history` is for edits that should last — a drawing's
+strokes, a board's cards. The presenter commits ops; they're put in one order
+(by the server while the deck is shared, by the presenter's page for a local
+deck) and every device applies the same entries in the same order, so every
+copy of the state comes out the same. `apply(state, op, entry)` returns the
+next state and must not change the one it's given: pending ops are applied on
+top of the ordered state, and again when it moves. `entry` is `{ id, by, at,
+seq, pending }`; `by` is the device that committed it (compare with
+`h.device`) — undo is the plugin's own op that reverses this device's last one
+(`h.mine()[0]`).
+
+- Name the things ops change by id ("erase stroke `b7`"), not by position:
+  two devices' ops then combine without conflict, and when both change the
+  same thing, the later one wins.
+- The history belongs to the deck: the presenter's device keeps it
+  (IndexedDB) across sessions, and it starts the session's copy when the deck
+  is shared. A deck replaced by one with a different page count starts a new
+  history.
+- Give `snapshot(state)` (JSON) and `restore(snapshot)` for a history that
+  grows: every couple of hundred entries the presenter's device takes one, and
+  the log starts there — devices joining later load the snapshot and what came
+  after it. `h.mine()` only goes back to the latest snapshot. A plugin without
+  them may keep up to 4 MB of entries.
+- Blobs are content-addressed bytes for what doesn't fit in an op (images):
+  put the bytes, put the hash in an op. They travel over HTTP, never the
+  session's socket, and `get` fetches one only when asked — fetch what's on
+  screen, not everything, and draw a placeholder until it arrives. At most
+  5 MB each and 50 MB per session.
 
 ## Develop
 

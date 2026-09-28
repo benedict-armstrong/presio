@@ -68,10 +68,11 @@
       "items": {
         "enum": [
           "deck",
-          "editDeck"
+          "editDeck",
+          "history"
         ]
       },
-      "description": "deck: read the PDF (its bytes and embedded attachments). editDeck: save an edited PDF over the deck (presenter's device only)."
+      "description": "deck: read the PDF (its bytes and embedded attachments). editDeck: save an edited PDF over the deck (presenter's device only). history: keep an edit history for the deck, shared with every device, and blobs (presio.history, presio.blobs)."
     },
     "contributes": {
       "type": "object",

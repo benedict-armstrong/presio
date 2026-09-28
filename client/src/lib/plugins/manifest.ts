@@ -39,7 +39,10 @@ export type PluginPermission =
   | "deck"
   /** Save an edited PDF over the deck, from the presenter's device
    *  (presio.deck.save()). */
-  | "editDeck";
+  | "editDeck"
+  /** Keep an edit history for the deck, shared with every device, and
+   *  blobs (presio.history, presio.blobs). */
+  | "history";
 
 /** Where a contributed button can go. */
 export type ButtonLocation =
@@ -127,7 +130,7 @@ export function asRecord(value: unknown): Record<string, unknown> {
 const SURFACES: PluginSurface[] = ["background", "tile", "viewer", "slide"];
 const BUTTON_LOCATIONS: ButtonLocation[] = ["controller.toolbar", "controller.currentSlide", "settings"];
 const NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
-const PERMISSIONS: PluginPermission[] = ["deck", "editDeck"];
+const PERMISSIONS: PluginPermission[] = ["deck", "editDeck", "history"];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** Validate a parsed presio-plugin.json, throwing a readable error. */
