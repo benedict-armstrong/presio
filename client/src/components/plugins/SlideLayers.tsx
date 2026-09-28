@@ -213,6 +213,11 @@ function onTop(frame: HTMLIFrameElement, x: number, y: number): boolean {
  * that land in a frame taking input are handed on to the slide's pinch-zoom
  * once a second one comes down.
  */
+/** "pen" mode: touches this soon after the pen lifts are still the hand. */
+const PALM_QUIET_MS = 250;
+/** "pen" mode: what in a plugin's frame a finger works, rather than the slide. */
+const PLUGIN_CONTROL = "button, a, input, select, textarea, [role='button'], [data-control]";
+
 function SlideSurface({ host, plugin, view, page }: { host: PluginHost; plugin: LoadedPlugin; view: SlideView; page: SlidePage }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [interactive, setInteractive] = useState<Interactive>(false);
@@ -267,33 +272,72 @@ function SlideSurface({ host, plugin, view, page }: { host: PluginHost; plugin: 
 
   // Touches the frame took, passed on to the page once two are down: the
   // pinch-zoom (useSlidePinchZoom) listens above the frame, where input that
-  // lands inside it never arrives. One finger stays the plugin's.
+  // lands inside it never arrives. One finger stays the plugin's — except in
+  // "pen" mode, where every finger is passed on from the start (to pan, pinch
+  // and turn the page) and only a pen's input is the plugin's. There, a touch
+  // while the pen is down, or just after, is a hand resting on the screen:
+  // it's never passed on, and a pen landing ends what fingers had begun.
+  const penOnly = interactive === "pen";
+  const penOnlyRef = useRef(penOnly);
+  useEffect(() => {
+    penOnlyRef.current = penOnly;
+    const frame = frameRef.current;
+    // For the page's own touch handling (useSlideTapNav, useSlidePinchZoom):
+    // a finger double-tap here may be the plugin's, so taps wait for it.
+    if (penOnly) frame?.setAttribute("data-pen-input", "");
+    else frame?.removeAttribute("data-pen-input");
+  }, [penOnly]);
   useEffect(() => {
     const frame = frameRef.current;
     const inner = frame?.contentWindow;
     if (!presenter || !frame || !inner) return;
     const down = new Map<number, PointerEvent>();
     let forwarding = false;
+    let pens = 0;
+    let penAt = -Infinity;
     const forward = (type: string, e: PointerEvent) => {
       const box = frame.getBoundingClientRect();
       const scale = frame.clientWidth ? box.width / frame.clientWidth : 1;
-      frame.parentElement?.dispatchEvent(
+      const x = box.left + e.clientX * scale;
+      const y = box.top + e.clientY * scale;
+      // To what the touch would have landed on without the frame (the slide,
+      // which turns the page on a tap), else to the frame's box; both bubble
+      // up to the pinch-zoom.
+      const layer = frame.parentElement;
+      const stack = document.elementsFromPoint(x, y);
+      const at = stack.indexOf(frame);
+      const under = at < 0 ? null : stack.slice(at + 1).find((el) => !layer?.contains(el));
+      (under ?? layer)?.dispatchEvent(
         new PointerEvent(type, {
           pointerId: e.pointerId,
           pointerType: "touch",
           isPrimary: e.isPrimary,
-          clientX: box.left + e.clientX * scale,
-          clientY: box.top + e.clientY * scale,
+          clientX: x,
+          clientY: y,
           bubbles: true,
           cancelable: true,
         })
       );
     };
     const onDown = (e: PointerEvent) => {
+      if (e.pointerType === "pen") {
+        pens++;
+        penAt = performance.now();
+        if (penOnlyRef.current && forwarding) for (const d of down.values()) forward("pointercancel", d);
+        if (penOnlyRef.current) {
+          down.clear();
+          forwarding = false;
+        }
+        return;
+      }
       if (e.pointerType !== "touch") return;
+      if (penOnlyRef.current && (pens > 0 || performance.now() - penAt < PALM_QUIET_MS)) return;
+      // The plugin's own controls (its buttons, a handle to drag) take a
+      // finger even in "pen" mode.
+      if (penOnlyRef.current && down.size === 0 && e.target instanceof Element && e.target.closest(PLUGIN_CONTROL)) return;
       down.set(e.pointerId, e);
       if (forwarding) forward("pointerdown", e);
-      else if (down.size >= 2) {
+      else if (down.size >= 2 || penOnlyRef.current) {
         forwarding = true;
         for (const d of down.values()) forward("pointerdown", d);
       }
@@ -304,6 +348,11 @@ function SlideSurface({ host, plugin, view, page }: { host: PluginHost; plugin: 
       if (forwarding) forward("pointermove", e);
     };
     const onEnd = (e: PointerEvent) => {
+      if (e.pointerType === "pen") {
+        pens = Math.max(0, pens - 1);
+        penAt = performance.now();
+        return;
+      }
       if (!down.delete(e.pointerId)) return;
       if (forwarding) forward(e.type, e);
       if (!down.size) forwarding = false;
@@ -427,7 +476,7 @@ function SlideSurface({ host, plugin, view, page }: { host: PluginHost; plugin: 
     // readyCount: the plugin's document replaces the frame's, so re-listen.
   }, [regions, readyCount]);
 
-  const takesInput = interactive === true || (!!regions && hot);
+  const takesInput = interactive === true || penOnly || (!!regions && hot);
   return (
     <>
       {/* Under the frame, over its input areas: here a touch that starts on

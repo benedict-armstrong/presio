@@ -20,7 +20,7 @@
 // Undo is this device's: the op that reverses its own latest change on the
 // slide (see undoOps).
 
-export type Tool = "none" | "laser" | "pen" | "highlighter";
+export type Tool = "none" | "laser" | "pen" | "highlighter" | "eraser" | "lasso";
 
 export interface Stroke {
   id: string;
@@ -133,10 +133,13 @@ interface OpBase {
   /** This op undoes that one (the id of an op of this device's). */
   u?: string;
 }
+/** Scale by k about (ox, oy), then move by (dx, dy): page fractions. */
+export type Transform = [k: number, dx: number, dy: number, ox: number, oy: number];
 export type Op =
   | (OpBase & { t: "add"; k: WireStroke })
   | (OpBase & { t: "erase"; ids: string[] })
-  | (OpBase & { t: "restore"; ids: string[] });
+  | (OpBase & { t: "restore"; ids: string[] })
+  | (OpBase & { t: "move"; ids: string[]; m: Transform });
 
 /** At most this many ids in one op: well under a message's 16 KB. */
 const MAX_IDS = 1000;
@@ -204,7 +207,32 @@ export function apply(state: DrawingState, op: Op): DrawingState {
     for (const id of hit) gone.delete(id);
     return withSlide(state, op.s, { all: d.all, gone });
   }
+  if (op.t === "move") {
+    const m = validTransform(op.m);
+    const set = new Set(ids);
+    if (!m || !d.all.some((s) => set.has(s.id))) return state;
+    return withSlide(state, op.s, { all: d.all.map((s) => (set.has(s.id) ? transformStroke(s, m) : s)), gone: d.gone });
+  }
   return state;
+}
+
+function validTransform(m: unknown): Transform | null {
+  if (!Array.isArray(m) || m.length !== 5 || !m.every((n) => typeof n === "number" && Number.isFinite(n))) return null;
+  return m[0] > 0.01 && m[0] < 100 ? (m as Transform) : null;
+}
+
+/** A stroke moved and scaled; its width scales along, so it keeps its look. */
+export function transformStroke(s: Stroke, [k, dx, dy, ox, oy]: Transform): Stroke {
+  return {
+    ...s,
+    width: Math.min(96, Math.max(0.2, s.width * k)),
+    points: s.points.map((n, i) => (i % 2 === 0 ? ox + (n - ox) * k + dx : oy + (n - oy) * k + dy)),
+  };
+}
+
+/** The transform that takes a transformed stroke back. */
+function inverseTransform([k, dx, dy, ox, oy]: Transform): Transform {
+  return [1 / k, -dx, -dy, ox + dx, oy + dy];
 }
 
 // A snapshot keeps what's visible: what was erased before it can't be undone
@@ -259,8 +287,23 @@ function idOps(t: "erase" | "restore", slide: number, ids: string[], extra: { g?
 
 /** Clear a slide: erase what's on it now (strokes drawn meanwhile elsewhere stay). */
 export function clearOps(state: DrawingState, slide: number): Op[] {
-  return idOps("erase", slide, strokes(state, slide).map((s) => s.id), {});
+  return eraseOps(slide, strokes(state, slide).map((s) => s.id));
 }
+
+/** Erase strokes. Pass a group for erasing that goes on (an eraser dragged), so it undoes as one. */
+export function eraseOps(slide: number, ids: string[], g?: string): Op[] {
+  return idOps("erase", slide, ids, { g });
+}
+
+/** Move and scale strokes (the lasso). */
+export function moveOps(slide: number, ids: string[], m: Transform): Op[] {
+  const g = ids.length > MAX_IDS ? groupId() : undefined;
+  const out: Op[] = [];
+  for (let i = 0; i < ids.length; i += MAX_IDS) out.push({ t: "move", s: slide, ids: ids.slice(i, i + MAX_IDS), m, ...(g && { g }) });
+  return out;
+}
+
+export const newGroup = groupId;
 
 /** Replace the whole drawing with a loaded file's, as one change. */
 export function loadOps(state: DrawingState, bySlide: Map<number, Stroke[]>): Op[] {
@@ -271,25 +314,77 @@ export function loadOps(state: DrawingState, bySlide: Map<number, Stroke[]>): Op
   return out;
 }
 
+// --- Undo and redo: this device's own, per slide ---
+//
+// Undoing commits the op's inverse, marked with the id it undoes (u); redoing
+// commits the inverse of that undo, marked the same way. So every op is one of
+// three kinds: a change (no u), an undo (u names a change) or a redo (u names
+// an undo), and an op is in effect unless something in effect undoes it.
+
+type Mine = { id: string; op: Op; seq: number | null };
+
+function inverse(op: Op): Op[] {
+  if (op.t === "add") return [{ t: "erase", s: op.s, ids: [op.k.i] }];
+  if (op.t === "erase") return [{ t: "restore", s: op.s, ids: op.ids }];
+  if (op.t === "restore") return [{ t: "erase", s: op.s, ids: op.ids }];
+  return [{ t: "move", s: op.s, ids: op.ids, m: inverseTransform(op.m) }];
+}
+
+function undoState(h: DrawingHistory) {
+  // Oldest first.
+  const mine = h.mine().filter((m): m is Mine => isRecord(m.op) && validSlide(m.op.s)).reverse();
+  const byId = new Map(mine.map((m) => [m.id, m]));
+  const undoers = new Map<string, string[]>();
+  for (const m of mine) if (typeof m.op.u === "string") undoers.set(m.op.u, [...(undoers.get(m.op.u) ?? []), m.id]);
+  const memo = new Map<string, boolean>();
+  const live = (id: string): boolean => {
+    let v = memo.get(id);
+    if (v === undefined) memo.set(id, (v = !(undoers.get(id) ?? []).some(live)));
+    return v;
+  };
+  const kind = (m: Mine): "change" | "undo" | "redo" => {
+    if (typeof m.op.u !== "string") return "change";
+    const target = byId.get(m.op.u);
+    return target && typeof target.op.u === "string" ? "redo" : "undo";
+  };
+  return { mine, live, kind };
+}
+
+// The ops of one step: the op and those committed with it (same group).
+function step(list: Mine[], last: Mine, fits: (m: Mine) => boolean): Mine[] {
+  return last.op.g ? list.filter((m) => m.op.g === last.op.g && fits(m)) : [last];
+}
+
+function reverseOps(batch: Mine[]): Op[] {
+  const g = batch.length > 1 ? groupId() : undefined;
+  return batch
+    .slice()
+    .reverse()
+    .flatMap(({ id, op }) => inverse(op).map((inv) => ({ ...inv, u: id, ...(g && { g }) }) as Op));
+}
+
 /**
- * The ops that undo this device's latest change on a slide (its ops in one
- * group, when it made several together), or none. Undoing is itself a change
- * that names what it undoes, so a later undo moves on to the change before.
+ * The ops that undo this device's latest change on a slide (with the ops made
+ * together with it), or none.
  */
 export function undoOps(h: DrawingHistory, slide: number): Op[] {
-  const mine = h.mine();
-  const undone = new Set(mine.map((m) => m.op?.u).filter((u): u is string => typeof u === "string"));
-  const open = mine.filter((m) => isRecord(m.op) && !m.op.u && !undone.has(m.id));
-  const last = open.find((m) => m.op.s === slide);
-  if (!last) return [];
-  const batch = last.op.g ? open.filter((m) => m.op.g === last.op.g) : [last];
-  return batch.flatMap(({ id, op }) =>
-    op.t === "add" ? idOps("erase", op.s, [op.k.i], { u: id }) : idOps(op.t === "erase" ? "restore" : "erase", op.s, op.ids, { u: id })
-  );
+  const { mine, live, kind } = undoState(h);
+  const fits = (m: Mine) => m.op.s === slide && kind(m) === "change" && live(m.id);
+  const last = [...mine].reverse().find(fits);
+  return last ? reverseOps(step(mine, last, fits)) : [];
+}
+
+/** The ops that redo this device's latest undo on a slide, unless it has changed the slide since. */
+export function redoOps(h: DrawingHistory, slide: number): Op[] {
+  const { mine, live, kind } = undoState(h);
+  const last = [...mine].reverse().find((m) => m.op.s === slide && kind(m) !== "redo" && live(m.id));
+  if (!last || kind(last) !== "undo") return [];
+  return reverseOps(step(mine, last, (m) => m.op.s === slide && kind(m) === "undo" && live(m.id)));
 }
 
 /** Whether this device has a change on the slide to undo. */
 export const canUndo = (h: DrawingHistory, slide: number) => undoOps(h, slide).length > 0;
+export const canRedo = (h: DrawingHistory, slide: number) => redoOps(h, slide).length > 0;
 
 /** Commit ops, in order. */
 export function commitAll(h: DrawingHistory, ops: Op[]) {

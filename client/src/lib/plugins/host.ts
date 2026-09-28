@@ -116,7 +116,10 @@ export const FULL_PAGE: SlidePage = { x: 0, y: 0, w: 1, h: 1 };
 
 /** Where a "slide" surface takes pointer input: nowhere, everywhere, or in
  *  these areas (fractions of it). */
-export type Interactive = boolean | { x: number; y: number; w: number; h: number }[];
+/** Where a slide surface takes pointer input: none, all, some areas, or
+ *  "pen": a pen's and a mouse's, while fingers stay Presio's (pan, pinch, tap
+ *  to turn the page) — the plugin still sees them. */
+export type Interactive = boolean | "pen" | { x: number; y: number; w: number; h: number }[];
 
 /** What a mounted frame wants told about it. */
 export interface FrameHooks {
@@ -819,7 +822,7 @@ function parseRect(r: Record<string, unknown>): SlidePage | null {
 }
 
 function sanitizeInteractive(value: unknown): Interactive {
-  if (typeof value === "boolean") return value;
+  if (typeof value === "boolean" || value === "pen") return value;
   if (!Array.isArray(value)) return false;
   return value.slice(0, 32).flatMap((raw) => parseRect(asRecord(raw)) ?? []);
 }

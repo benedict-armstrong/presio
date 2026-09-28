@@ -3,7 +3,7 @@
   "name": "Drawing",
   "version": "1.0.0",
   "author": "Presio",
-  "description": "A pen, a highlighter and a laser pointer on your current slide, drawn live on every screen, shown in your previews and kept in the PDF you download.",
+  "description": "A pen, a highlighter and a laser pointer on your current slide, drawn live on every screen, shown in your previews and kept in the PDF you download. With a pen (Apple Pencil) it also erases, selects and moves, and snaps lines and boxes.",
   "main": "index.html",
   "surfaces": ["background", "slide"],
   "slideSurface": "area",
@@ -39,7 +39,11 @@
       { "command": "highlighter", "label": "Highlighter", "keys": [{ "key": "h" }] },
       { "command": "laser", "label": "Laser pointer", "keys": [{ "key": "l" }] },
       { "command": "pointer", "label": "No tool (pointer)", "keys": [{ "key": "Escape" }] },
+      { "command": "eraser", "label": "Eraser", "keys": [{ "key": "e" }] },
+      { "command": "lasso", "label": "Lasso (select and move)", "keys": [] },
       { "command": "undo", "label": "Undo the last stroke", "keys": [{ "key": "z", "meta": true }] },
+      { "command": "redo", "label": "Redo", "keys": [{ "key": "y", "meta": true }] },
+      { "command": "toggleDrawings", "label": "Hide or show the drawings", "keys": [] },
       { "command": "clear", "label": "Clear the slide's drawings", "keys": [] }
     ],
     "settings": {
@@ -47,6 +51,28 @@
         "type": "boolean",
         "default": true,
         "description": "Show the drawing tools on the current slide."
+      },
+      "advanced": {
+        "type": "boolean",
+        "default": false,
+        "description": "Advanced tools: the eraser, the lasso, and snapping a stroke held still at its end to a line or a box. Turned on the first time you draw with a pen."
+      },
+      "hidden": {
+        "type": "boolean",
+        "default": false,
+        "description": "Hide the drawings on every screen (they're kept, and still in the PDF you download)."
+      },
+      "laserSize": {
+        "type": "number",
+        "default": 16,
+        "minimum": 4,
+        "maximum": 48,
+        "description": "The laser pointer's size, in pixels on a 960px-wide slide."
+      },
+      "laserTrail": {
+        "type": "boolean",
+        "default": false,
+        "description": "The laser leaves a fading line while pressed, rather than showing a dot."
       },
       "penColor": {
         "type": "enum",

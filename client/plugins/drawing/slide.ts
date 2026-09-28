@@ -11,24 +11,36 @@
 
 import {
   addOps,
+  canRedo,
   canUndo,
   clearOps,
   commitAll,
   decodePoints,
   encodePoints,
+  eraseOps,
   forgetDecoded,
   MAX_STROKE_POINTS,
+  moveOps,
+  newGroup,
   newId,
   opacityOf,
   openDrawing,
   parseBegin,
+  redoOps,
   strokes as strokesOf,
+  transformStroke,
   undoOps,
   type Stroke,
   type Tool,
+  type Transform,
 } from "./model";
 import { drawStrokes, LiveStroke } from "./render";
-import { Palette, type PenStyle } from "./palette";
+import { Palette, type LaserStyle, type PenStyle } from "./palette";
+import { lassoContains, strokeHit, strokesBounds, type Bounds } from "./geometry";
+import { snapShape } from "./snap";
+import { LaserTrail } from "./trail";
+import { watchTaps } from "./taps";
+import { icon } from "./icons";
 
 // How long a viewer keeps showing a laser dot that stopped moving (covers a
 // lost "hide").
@@ -40,6 +52,16 @@ const MIN_POINT_PX = 0.75;
 const PREDICT_MAX_PX = 8;
 // The canvases' resolution follows the zoom, up to this many pixels across.
 const MAX_CANVAS_PX = 4096;
+// Holding the pen still this long at the end of a stroke snaps it to a line
+// or a box (advanced tools), and moving less than this doesn't count.
+const SNAP_HOLD_MS = 500;
+const SNAP_HOLD_SLOP_PX = 4;
+// The eraser's reach (CSS pixels).
+const ERASER_RADIUS_PX = 10;
+
+const TOOLS: Tool[] = ["none", "laser", "pen", "highlighter", "eraser", "lasso"];
+const isTool = (t: unknown): t is Tool => TOOLS.includes(t as Tool);
+const laserSizeOf = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.min(48, Math.max(4, v)) : 16);
 
 interface Draft {
   stroke: Stroke;
@@ -75,12 +97,42 @@ export function runSlide() {
   laserDot.dataset.testid = "laser-dot";
   laserDot.dataset.laser = presenter ? "local" : "remote";
   laserDot.hidden = true;
+  const trailCanvas = document.createElement("canvas");
+  trailCanvas.className = "laser-trail";
+  const eraserRing = document.createElement("div");
+  eraserRing.className = "eraser-ring";
+  eraserRing.hidden = true;
+  const lassoLoop = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  lassoLoop.classList.add("lasso-loop");
+  lassoLoop.setAttribute("viewBox", "0 0 1 1");
+  lassoLoop.setAttribute("preserveAspectRatio", "none");
+  const lassoPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  lassoLoop.append(lassoPath);
+  const selectionEl = document.createElement("div");
+  selectionEl.className = "selection";
+  selectionEl.dataset.testid = "lasso-selection";
+  // A finger moves it even in pencil mode.
+  selectionEl.dataset.control = "";
+  selectionEl.hidden = true;
+  for (const corner of ["nw", "ne", "sw", "se"]) {
+    const h = document.createElement("div");
+    h.className = `handle ${corner}`;
+    h.dataset.corner = corner;
+    selectionEl.append(h);
+  }
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "btn delete";
+  deleteBtn.title = "Delete the selection";
+  deleteBtn.dataset.testid = "lasso-delete";
+  deleteBtn.innerHTML = icon("trash");
+  selectionEl.append(deleteBtn);
   // The surface covers the whole slide area (the current slide card, a
   // viewer's screen), so the palette can sit anywhere on it; what's drawn
   // lives on the page within it, in page fractions.
   const pageEl = document.createElement("div");
   pageEl.className = "page";
-  pageEl.append(committed.c, liveLayer, laserDot);
+  pageEl.append(committed.c, liveLayer, trailCanvas, lassoLoop, selectionEl, eraserRing, laserDot);
   root.append(pageEl);
 
   // The page's box in the surface, in CSS pixels.
@@ -123,8 +175,17 @@ export function runSlide() {
   // What's on the committed canvas now, so adding strokes draws only those;
   // null when it has to be drawn afresh.
   let drawn: Stroke[] | null = null;
+  // The lasso's selection while it's dragged: drawn moved, not yet committed.
+  let preview: { ids: Set<string>; m: Transform } | null = null;
   const redrawCommitted = () => {
     const strokes = strokesOf(history.state, slide);
+    if (preview) {
+      const { ids, m } = preview;
+      committed.ctx.clearRect(0, 0, W, H);
+      drawStrokes(committed.ctx, strokes.map((s) => (ids.has(s.id) ? transformStroke(s, m) : s)), W, H);
+      drawn = null;
+      return;
+    }
     const prev = drawn;
     const extends_ = !!prev && prev.length <= strokes.length && prev.every((s, i) => strokes[i] === s);
     if (!extends_) committed.ctx.clearRect(0, 0, W, H);
@@ -132,6 +193,7 @@ export function runSlide() {
     drawn = strokes;
     // A stroke being drawn that has now arrived committed is done.
     if (draft && strokes.some((s) => s.id === draft!.stroke.id)) endDraft();
+    placeSelection();
     renderPalette();
   };
 
@@ -140,7 +202,7 @@ export function runSlide() {
   let actionsKey = "";
   const renderPalette = (force = false) => {
     if (!palette) return;
-    const key = `${canUndo(history, slide)}${strokesOf(history.state, slide).length > 0}`;
+    const key = `${canUndo(history, slide)}${canRedo(history, slide)}${strokesOf(history.state, slide).length > 0}`;
     if (!force && key === actionsKey) return;
     actionsKey = key;
     palette.render();
@@ -268,9 +330,21 @@ export function runSlide() {
   };
 
   // --- Laser ---
+  //
+  // A dot that follows the pointer (a mouse's even hovering), or a fading
+  // line drawn while pressed. "l" carries { x, y, s: size, t: 1 for the line }.
 
+  const laserStyle = (): LaserStyle => {
+    return { size: laserSizeOf(presio.settings.get("laserSize")), trail: presio.settings.get("laserTrail") === true };
+  };
+  const trail = new LaserTrail(trailCanvas, () => ({ w: page.w, h: page.h, resolution: window.devicePixelRatio || 1 }));
   let laser: { x: number; y: number } | null = null;
   let laserSent: { x: number; y: number } | null = null;
+  let laserSize = 16;
+  const sizeDot = (size: number) => {
+    const d = Math.max(6, (size / 960) * page.w);
+    Object.assign(laserDot.style, { width: `${d}px`, height: `${d}px`, margin: `${-d / 2}px 0 0 ${-d / 2}px` });
+  };
   const showLaser = (x: number, y: number) => {
     laserDot.hidden = false;
     laserDot.style.transform = `translate(${x * page.w}px, ${y * page.h}px)`;
@@ -278,13 +352,28 @@ export function runSlide() {
   const sendLaser = () => {
     if (!laser || (laserSent && laserSent.x === laser.x && laserSent.y === laser.y)) return;
     laserSent = laser;
-    presio.send("l", { x: Math.round(laser.x * 1e4) / 1e4, y: Math.round(laser.y * 1e4) / 1e4 }, { volatile: true });
+    const { size, trail: line } = laserStyle();
+    presio.send("l", { x: Math.round(laser.x * 1e4) / 1e4, y: Math.round(laser.y * 1e4) / 1e4, s: size, ...(line && { t: 1 }) }, { volatile: true });
   };
   const hideLaser = () => {
     laserDot.hidden = true;
     if (presenter && (laser || laserSent)) presio.send("l", null);
+    if (laser) trail.push(null);
     laser = null;
     laserSent = null;
+  };
+  // The presenter's laser at (x, y): the dot, or the line.
+  const moveLaser = (x: number, y: number) => {
+    laser = { x, y };
+    const { size, trail: line } = laserStyle();
+    if (line) {
+      laserDot.hidden = true;
+      trail.push({ x, y, size });
+    } else {
+      sizeDot(size);
+      showLaser(x, y);
+    }
+    schedule();
   };
 
   // A viewer's dot glides from where it is to each new position over about
@@ -297,14 +386,26 @@ export function runSlide() {
     showLaser(remoteLaser.fx + (remoteLaser.tx - remoteLaser.fx) * k, remoteLaser.fy + (remoteLaser.ty - remoteLaser.fy) * k);
     return k < 1;
   };
+  let remoteTrail = false;
   const onRemoteLaser = (payload: unknown) => {
     if (laserHideTimer) clearTimeout(laserHideTimer);
-    const p = payload as { x?: unknown; y?: unknown } | null;
+    const p = payload as { x?: unknown; y?: unknown; s?: unknown; t?: unknown } | null;
     if (!p || typeof p.x !== "number" || typeof p.y !== "number") {
       remoteLaser = null;
       laserDot.hidden = true;
+      if (remoteTrail) trail.push(null);
+      remoteTrail = false;
       return;
     }
+    const size = laserSizeOf(p.s);
+    if (p.t === 1) {
+      remoteLaser = null;
+      laserDot.hidden = true;
+      remoteTrail = true;
+      trail.push({ x: p.x, y: p.y, size });
+      return;
+    }
+    if (size !== laserSize) sizeDot((laserSize = size));
     const now = performance.now();
     const prev = remoteLaser;
     const k = prev ? Math.min(1, (now - prev.t0) / prev.dur) : 1;
@@ -319,49 +420,236 @@ export function runSlide() {
     schedule();
   };
 
+  // --- Presenter: the eraser ---
+
+  // One drag erases as one change (one undo).
+  let erasing: { group: string; hit: Set<string> } | null = null;
+  const eraseAt = (e: PointerEvent) => {
+    if (!erasing) return;
+    const [x, y] = toPage(e);
+    const ids = strokesOf(history.state, slide)
+      .filter((st) => !erasing!.hit.has(st.id) && strokeHit(st, x, y, ERASER_RADIUS_PX, page.w, page.h))
+      .map((st) => st.id);
+    if (!ids.length) return;
+    for (const id of ids) erasing.hit.add(id);
+    commitAll(history, eraseOps(slide, ids, erasing.group));
+  };
+  const showRing = (e: PointerEvent | null) => {
+    eraserRing.hidden = !e || tool !== "eraser";
+    if (!e || eraserRing.hidden) return;
+    const d = ERASER_RADIUS_PX * 2;
+    Object.assign(eraserRing.style, {
+      width: `${d}px`,
+      height: `${d}px`,
+      transform: `translate(${e.clientX - page.x - d / 2}px, ${e.clientY - page.y - d / 2}px)`,
+    });
+  };
+
+  // --- Presenter: the lasso ---
+  //
+  // Drawing a loop selects the strokes mostly inside it; the selection's box
+  // then moves them (dragged inside), scales them (by a corner) or deletes
+  // them. A move shows here as it's dragged and is committed once, on release.
+
+  let loop: number[] | null = null;
+  let selected: Set<string> | null = null;
+  let dragging: { corner: string | null; from: [number, number]; box: Bounds } | null = null;
+  const selectedStrokes = () => strokesOf(history.state, slide).filter((st) => selected!.has(st.id));
+  function placeSelection() {
+    if (!selected || tool !== "lasso") {
+      selectionEl.hidden = true;
+      return;
+    }
+    let list = selectedStrokes();
+    if (!list.length) {
+      selected = null;
+      selectionEl.hidden = true;
+      return;
+    }
+    if (preview) list = list.map((st) => transformStroke(st, preview!.m));
+    const b = strokesBounds(list, page.w / page.h)!;
+    selectionEl.hidden = false;
+    Object.assign(selectionEl.style, {
+      left: `${b.minX * 100}%`,
+      top: `${b.minY * 100}%`,
+      width: `${(b.maxX - b.minX) * 100}%`,
+      height: `${(b.maxY - b.minY) * 100}%`,
+    });
+  }
+  const clearSelection = () => {
+    selected = null;
+    dragging = null;
+    preview = null;
+    placeSelection();
+  };
+  const drawLoop = () => {
+    lassoPath.setAttribute("d", loop && loop.length >= 2 ? `M${loop.map((n, i) => (i % 2 ? `${n}` : `${i ? "L" : ""}${n}`)).join(" ")}Z` : "");
+  };
+  const dragTransform = (e: PointerEvent): Transform => {
+    const d = dragging!;
+    const [x, y] = toPage(e);
+    if (!d.corner) return [1, x - d.from[0], y - d.from[1], 0, 0];
+    // Scaled about the opposite corner, as far as the pointer is along the diagonal.
+    const { minX, minY, maxX, maxY } = d.box;
+    const ax = d.corner.includes("w") ? maxX : minX;
+    const ay = d.corner.includes("n") ? maxY : minY;
+    const cx = (d.corner.includes("w") ? minX : maxX) - ax;
+    const cy = (d.corner.includes("n") ? minY : maxY) - ay;
+    const px = (x - ax) * page.w;
+    const py = (y - ay) * page.h;
+    const len2 = (cx * page.w) ** 2 + (cy * page.h) ** 2 || 1;
+    const k = Math.min(20, Math.max(0.1, (px * cx * page.w + py * cy * page.h) / len2));
+    return [k, 0, 0, ax, ay];
+  };
+  deleteBtn.onclick = () => {
+    if (selected) commitAll(history, eraseOps(slide, [...selected]));
+    clearSelection();
+  };
+
+  // --- Presenter: holding still to snap to a line or a box ---
+
+  let hold: { x: number; y: number; timer: ReturnType<typeof setTimeout> } | null = null;
+  let snapped = false;
+  const cancelHold = () => {
+    if (hold) clearTimeout(hold.timer);
+    hold = null;
+  };
+  const armSnap = (e: PointerEvent) => {
+    if (!draft || snapped || !advanced()) return;
+    if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) <= SNAP_HOLD_SLOP_PX) return;
+    cancelHold();
+    hold = {
+      x: e.clientX,
+      y: e.clientY,
+      timer: setTimeout(() => {
+        hold = null;
+        if (!draft) return;
+        const shape = snapShape(draft.stroke.points, page.w, page.h);
+        if (!shape) return;
+        draft.stroke.points.splice(0, draft.stroke.points.length, ...shape);
+        snapped = true;
+        predicted = [];
+        stable.ctx.clearRect(0, 0, W, H);
+        tip.ctx.clearRect(0, 0, W, H);
+        draft.live.reset();
+        schedule();
+      }, SNAP_HOLD_MS),
+    };
+  };
+
   // --- Presenter input ---
 
   const drawingTool = () => tool === "pen" || tool === "highlighter";
-  if (presenter) {
-    const onPalette = (e: Event) => !!palette && palette.el.contains(e.target as Node);
+  // Pencil mode: only a pen draws, and fingers pan, pinch and turn the page.
+  // This device's, for the session: unset until a pen is first seen here,
+  // which turns it on (and reveals the advanced tools).
+  const pencil = (): boolean | null => {
+    const v = presio.storage.get("pencil");
+    return typeof v === "boolean" ? v : null;
+  };
+  const advanced = () => presio.settings.get("advanced") === true;
+  // The pointer the current stroke, drag or line belongs to.
+  let owner: number | null = null;
+  const onPalette = (e: Event) => !!palette && palette.el.contains(e.target as Node);
+  const onSelection = (e: Event) => selectionEl.contains(e.target as Node);
+  // Whether this pointer may start something: in pencil mode a pen or a
+  // mouse, not a finger (except on the selection, which a finger moves).
+  const accepts = (e: PointerEvent) =>
+    pencil() ? e.pointerType !== "touch" || (tool === "lasso" && onSelection(e)) : e.isPrimary && !pinching;
+  let lastDrawTool: "pen" | "highlighter" = "pen";
 
+  if (presenter) {
     window.addEventListener("pointerdown", (e) => {
-      if (e.pointerType === "touch") {
+      if (e.pointerType === "pen" && pencil() === null) {
+        presio.storage.set("pencil", true);
+        if (!advanced()) void presio.settings.set("advanced", true);
+        updateInteractive();
+        palette?.render();
+      }
+      if (e.pointerType === "touch" && !pencil()) {
         touches.add(e.pointerId);
         if (touches.size >= 2) {
           pinching = true;
           abandonStroke();
           hideLaser();
+          erasing = null;
+          loop = null;
+          drawLoop();
+          if (dragging) {
+            dragging = null;
+            preview = null;
+            redrawCommitted();
+          }
+          owner = null;
           return;
         }
       }
-      // The bars around the page are the palette's room, not the slide.
-      if (!e.isPrimary || pinching || onPalette(e) || !onPage(e)) return;
-      if (drawingTool() && e.button === 0) {
+      if (owner !== null || !accepts(e) || onPalette(e)) return;
+      if (tool === "lasso" && selected && onSelection(e)) {
+        if (e.target === deleteBtn) return;
+        owner = e.pointerId;
         document.body.setPointerCapture?.(e.pointerId);
+        const corner = (e.target as HTMLElement).dataset?.corner ?? null;
+        const b = strokesBounds(selectedStrokes(), page.w / page.h)!;
+        dragging = { corner, from: toPage(e) as [number, number], box: b };
+        return;
+      }
+      // The bars around the page are the palette's room, not the slide.
+      if (!onPage(e) || e.button !== 0) return;
+      owner = e.pointerId;
+      document.body.setPointerCapture?.(e.pointerId);
+      if (drawingTool()) {
         const t = tool as "pen" | "highlighter";
         const style = styleOf(t);
+        snapped = false;
         startStroke({ id: newId(), tool: t, color: style.color, width: style.size, points: toPage(e) });
+        armSnap(e);
       } else if (tool === "laser") {
         const [x, y] = toPage(e);
-        laser = { x, y };
-        showLaser(x, y);
-        schedule();
+        moveLaser(x, y);
+      } else if (tool === "eraser") {
+        erasing = { group: newGroup(), hit: new Set() };
+        eraseAt(e);
+      } else if (tool === "lasso") {
+        clearSelection();
+        loop = toPage(e);
+        drawLoop();
       }
     });
 
     window.addEventListener("pointermove", (e) => {
-      if (!e.isPrimary || pinching) return;
+      if (tool === "eraser" && e.pointerType !== "touch") showRing(onPage(e) ? e : null);
+      if (pinching && !pencil()) return;
+      if (owner === null) {
+        // A mouse's dot follows it hovering; a line needs the button down.
+        if (tool === "laser" && e.pointerType === "mouse" && !laserStyle().trail && !onPalette(e) && onPage(e)) {
+          const [x, y] = toPage(e);
+          moveLaser(x, y);
+        } else if (tool === "laser" && laser && e.pointerType === "mouse") hideLaser();
+        return;
+      }
+      if (e.pointerId !== owner) return;
+      const samples = e.getCoalescedEvents?.() ?? [e];
       if (draft) {
-        for (const c of e.getCoalescedEvents?.() ?? [e]) addPoint(c);
-        predicted = predict(e);
+        if (!snapped) for (const c of samples) addPoint(c);
+        predicted = snapped ? [] : predict(e);
+        armSnap(e);
         schedule();
-      } else if (tool === "laser" && !onPalette(e) && onPage(e) && (e.pointerType === "mouse" || e.buttons)) {
-        const [x, y] = toPage(e);
-        laser = { x, y };
-        showLaser(x, y);
-        schedule();
-      } else if (tool === "laser" && laser) hideLaser();
+      } else if (tool === "laser") {
+        if (!onPalette(e) && onPage(e)) {
+          const [x, y] = toPage(e);
+          moveLaser(x, y);
+        } else if (laser) hideLaser();
+      } else if (erasing) {
+        for (const c of samples) eraseAt(c);
+      } else if (loop) {
+        for (const c of samples) loop.push(...toPage(c));
+        drawLoop();
+      } else if (dragging) {
+        preview = { ids: selected!, m: dragTransform(e) };
+        redrawCommitted();
+        placeSelection();
+      }
     });
 
     const end = (e: PointerEvent) => {
@@ -369,17 +657,61 @@ export function runSlide() {
         touches.delete(e.pointerId);
         if (!touches.size) pinching = false;
       }
-      if (!e.isPrimary) return;
+      if (e.pointerId !== owner) return;
+      owner = null;
+      cancelHold();
       if (draft) {
-        if (e.type === "pointerup") addPoint(e);
+        if (e.type === "pointerup" && !snapped) addPoint(e);
         finishStroke();
       }
-      if (tool === "laser" && e.pointerType !== "mouse") hideLaser();
+      if (tool === "laser" && (e.pointerType !== "mouse" || laserStyle().trail)) hideLaser();
+      erasing = null;
+      if (loop) {
+        const poly = loop;
+        loop = null;
+        drawLoop();
+        const hit = strokesOf(history.state, slide).filter((st) => lassoContains(poly, st));
+        selected = hit.length ? new Set(hit.map((st) => st.id)) : null;
+        placeSelection();
+      }
+      if (dragging) {
+        const m = preview?.m;
+        dragging = null;
+        preview = null;
+        const moved = m && (m[0] !== 1 || m[1] !== 0 || m[2] !== 0);
+        if (moved && e.type === "pointerup") commitAll(history, moveOps(slide, [...selected!], m));
+        else redrawCommitted();
+      }
     };
     window.addEventListener("pointerup", end);
     window.addEventListener("pointercancel", end);
     document.documentElement.addEventListener("pointerleave", (e) => {
-      if (e.pointerType === "mouse" && tool === "laser") hideLaser();
+      if (e.pointerType === "mouse" && tool === "laser" && owner === null) hideLaser();
+      if (e.pointerType === "mouse") showRing(null);
+    });
+
+    // Finger taps: in pencil mode a double-tap swaps between the eraser and
+    // the drawing tool, standing in for the Apple Pencil's own; with any tool,
+    // a two-finger double-tap undoes.
+    const flash = document.createElement("div");
+    flash.className = "tool-flash";
+    flash.style.opacity = "0";
+    root.append(flash);
+    let flashTimer: ReturnType<typeof setTimeout> | null = null;
+    watchTaps({
+      oneFinger: () => pencil() === true && (drawingTool() || tool === "eraser"),
+      onDoubleTap: (x, y) => {
+        const next = tool === "eraser" ? lastDrawTool : "eraser";
+        setTool(next);
+        flash.innerHTML = icon(next);
+        flash.style.transform = `translate(${x}px, ${y}px)`;
+        flash.style.opacity = "1";
+        if (flashTimer) clearTimeout(flashTimer);
+        flashTimer = setTimeout(() => (flash.style.opacity = "0"), 600);
+      },
+      twoFinger: () => tool !== "none",
+      onTwoFingerDoubleTap: () => commitAll(history, undoOps(history, slide)),
+      ignore: (target) => !!palette && palette.el.contains(target as Node),
     });
   }
 
@@ -397,7 +729,13 @@ export function runSlide() {
     if (next === tool) return;
     if (draft) finishStroke();
     if (tool === "laser") hideLaser();
+    erasing = null;
+    loop = null;
+    drawLoop();
     tool = next;
+    if (tool === "pen" || tool === "highlighter") lastDrawTool = tool;
+    clearSelection();
+    showRing(null);
     document.body.classList.toggle("drawing", tool !== "none");
     palette?.render();
     updateInteractive();
@@ -406,7 +744,7 @@ export function runSlide() {
   let interactiveKey = "";
   const updateInteractive = () => {
     if (!presenter) return;
-    const value = tool !== "none" ? true : palette ? [palette.region()] : false;
+    const value = tool !== "none" ? (pencil() ? "pen" : true) : palette ? [palette.region()] : false;
     const key = JSON.stringify(value);
     if (key === interactiveKey) return;
     interactiveKey = key;
@@ -425,9 +763,26 @@ export function runSlide() {
           if (style.color && style.color !== current.color) void presio.settings.set(`${t}Color`, style.color);
           if (style.size && style.size !== current.size) void presio.settings.set(`${t}Size`, style.size);
         },
+        laser: laserStyle,
+        setLaser: (style) => {
+          const current = laserStyle();
+          if (style.size !== undefined && style.size !== current.size) void presio.settings.set("laserSize", style.size);
+          if (style.trail !== undefined && style.trail !== current.trail) void presio.settings.set("laserTrail", style.trail);
+        },
+        advanced,
+        pencil,
+        setPencil: (on) => {
+          presio.storage.set("pencil", on);
+          updateInteractive();
+          palette?.render();
+        },
+        hidden: () => presio.settings.get("hidden") === true,
+        setHidden: (hidden) => void presio.settings.set("hidden", hidden),
         canUndo: () => canUndo(history, slide),
+        canRedo: () => canRedo(history, slide),
         canClear: () => strokesOf(history.state, slide).length > 0,
         undo: () => commitAll(history, undoOps(history, slide)),
+        redo: () => commitAll(history, redoOps(history, slide)),
         clear: () => commitAll(history, clearOps(history.state, slide)),
         changed: () => requestAnimationFrame(updateInteractive),
       });
@@ -448,10 +803,10 @@ export function runSlide() {
     presio.onContextChange(theme);
     tool = "none";
     const stored = presio.storage.get("tool");
-    if (stored === "laser" || stored === "pen" || stored === "highlighter") applyTool(stored);
+    if (isTool(stored)) applyTool(stored);
     presio.storage.onChange((all) => {
-      const t = all.tool;
-      applyTool(t === "laser" || t === "pen" || t === "highlighter" ? t : "none");
+      applyTool(isTool(all.tool) ? all.tool : "none");
+      updateInteractive();
     });
     presio.settings.onChange(() => {
       showPalette();
@@ -468,6 +823,11 @@ export function runSlide() {
     // pdf-lib only loads when a download asks for it.
     presio.deck.onExport(async (bytes) => (await import("./bake")).bakeDrawing(bytes, (await history.whenReady()).state));
   }
+
+  // Hidden drawings (the palette's eye): on every screen.
+  const showHidden = () => pageEl.classList.toggle("hidden-drawings", presio.settings.get("hidden") === true);
+  showHidden();
+  presio.settings.onChange(showHidden);
 
   presio.ui.onViewChange((view) => {
     palette?.setView(view);
@@ -509,6 +869,7 @@ export function runSlide() {
     if (current === slide) return;
     // A stroke in progress belongs to the slide it began on.
     if (presenter && draft) finishStroke();
+    if (presenter) clearSelection();
     slide = current;
     drawn = null;
     redrawCommitted();

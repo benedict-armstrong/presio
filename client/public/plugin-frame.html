@@ -448,7 +448,9 @@
          * "slide" surface: whether it takes pointer input. false (the
          * default) lets everything through to the slide; true takes all of
          * it; a list of { x, y, w, h } fractions of the surface (page
-         * fractions, unless it covers the slide area) takes only those areas.
+         * fractions, unless it covers the slide area) takes only those areas;
+         * "pen" takes a pen's and a mouse's, and leaves fingers to Presio
+         * (they pan, pinch and turn the page, and this frame still sees them).
          */
         setInteractive: function (value) { post({ type: "interactive", value: value }); },
         /**

@@ -145,7 +145,7 @@ interface Presio {
   };
   readonly ui: {
     setVisible(visible: boolean): void;
-    setInteractive(value: boolean | { x: number; y: number; w: number; h: number }[]): void;
+    setInteractive(value: boolean | "pen" | { x: number; y: number; w: number; h: number }[]): void;
     setButton(id: string, state: { active?: boolean; label?: string; disabled?: boolean; menu?: PresioMenuEntry[] }): void;
     /** Slide surface: the part of it on screen (fractions of it) and its zoom. */
     readonly view: PresioView;
