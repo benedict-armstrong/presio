@@ -57,6 +57,7 @@ export function ShareDialog({
           <br />
           <br />
           <ShareEmptyState
+            id={id}
             loggedIn={loggedIn}
             syncing={syncing}
             syncError={syncError}

@@ -7,8 +7,9 @@ import multer from "multer";
 import { openPdf, closePdf, readAttachments } from "../lib/pdfDoc.js";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { canonicalBaseUrl } from "../lib/baseUrl.js";
+import { MAX_PDF_BYTES } from "../validation.js";
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_PDF_BYTES } });
 
 // ── Typst AST → plain text (inlined from client/src/lib/typstNotes.ts) ────────
 

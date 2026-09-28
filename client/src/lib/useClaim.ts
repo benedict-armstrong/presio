@@ -6,6 +6,7 @@ import { authEnabled } from "@/lib/authMode";
 import { useAuth } from "@/lib/useAuth";
 import { getSessionAuth, setSessionAuth } from "@/lib/utils";
 import { lsRemove, sessionKey, rekeySessionStorage } from "@/lib/storage";
+import { MAX_PDF_BYTES, MAX_PDF_MB } from "@/lib/limits";
 
 // Shares a deck that until now lived only in this browser: the PDF is uploaded
 // and the session becomes a normal synced one. Two shapes of local deck exist,
@@ -65,6 +66,7 @@ export function useClaim(id: string) {
 
       const rec = await idbGet(id);
       if (!rec) throw new Error("Local copy not found on this device");
+      if (rec.blob.size > MAX_PDF_BYTES) throw new Error(`This PDF is over the ${MAX_PDF_MB} MB upload limit`);
       const form = new FormData();
       form.append("pdf", rec.blob, `${rec.filename}.pdf`);
       if (registering) form.append("filename", rec.filename);
