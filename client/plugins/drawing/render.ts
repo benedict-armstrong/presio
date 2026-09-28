@@ -8,16 +8,31 @@ export function lineWidth(stroke: Pick<Stroke, "width">, pageWidth: number): num
   return Math.max(1, (stroke.width / REFERENCE_WIDTH) * pageWidth);
 }
 
+// A tap is a dot. A zero-length segment with round caps should draw one, but
+// Safari and Firefox draw nothing for it, so a dot is a tiny circle instead:
+// stroked, it's a disc as wide as the line.
+const DOT_RADIUS_PX = 0.25;
+
+/** Whether all of these points are the same one. */
+function isDot(p: ArrayLike<number>): boolean {
+  for (let i = 2; i < p.length; i += 2) if (p[i] !== p[0] || p[i + 1] !== p[1]) return false;
+  return p.length >= 2;
+}
+
+function traceDot(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  ctx.moveTo(x + DOT_RADIUS_PX, y);
+  ctx.arc(x, y, DOT_RADIUS_PX, 0, 2 * Math.PI);
+}
+
 /** Trace a stroke's whole path; the caller strokes it. */
 export function tracePath(ctx: CanvasRenderingContext2D, p: ArrayLike<number>, w: number, h: number) {
   const n = p.length >> 1;
   if (!n) return;
-  ctx.moveTo(p[0] * w, p[1] * h);
-  // A tap is a dot: a zero-length segment with round caps.
-  if (n === 1) {
-    ctx.lineTo(p[0] * w, p[1] * h);
+  if (isDot(p)) {
+    traceDot(ctx, p[0] * w, p[1] * h);
     return;
   }
+  ctx.moveTo(p[0] * w, p[1] * h);
   for (let i = 1; i < n - 1; i++) {
     const x = p[2 * i] * w;
     const y = p[2 * i + 1] * h;
@@ -99,10 +114,11 @@ export class LiveStroke {
     pts.push(...predicted);
     t.beginPath();
     style(t, this.stroke, w);
-    t.moveTo(pts[0] * w, pts[1] * h);
-    if (pts.length === 2) t.lineTo(pts[0] * w, pts[1] * h);
+    const dot = isDot(pts);
+    if (dot) traceDot(t, pts[0] * w, pts[1] * h);
+    else t.moveTo(pts[0] * w, pts[1] * h);
     let [x0, y0, x1, y1] = [pts[0], pts[1], pts[0], pts[1]];
-    for (let i = 2; i < pts.length; i += 2) {
+    for (let i = 2; !dot && i < pts.length; i += 2) {
       t.lineTo(pts[i] * w, pts[i + 1] * h);
       x0 = Math.min(x0, pts[i]);
       x1 = Math.max(x1, pts[i]);
