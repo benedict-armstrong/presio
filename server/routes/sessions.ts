@@ -4,7 +4,7 @@ import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { nanoid } from "nanoid";
 import { openPdf, closePdf } from "../lib/pdfDoc.js";
-import { isValidHttpsUrl, isValidTotalSlides, MAX_TOTAL_SLIDES } from "../validation.js";
+import { isValidHttpsUrl, isValidTotalSlides, MAX_PDF_BYTES, MAX_TOTAL_SLIDES } from "../validation.js";
 import { getBearerToken, requireUser, resolveOptionalUserId, safeEqual } from "../auth.js";
 import { isLocalMode } from "../local/mode.js";
 import { clearSessionState, forgetDeckRetained, type SocketState } from "../socket.js";
@@ -38,7 +38,7 @@ function singleField(value: unknown): string | null {
 }
 
 export function registerSessionRoutes(app: express.Express, { supabase, io, socketState }: RouteDeps) {
-  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_PDF_BYTES } });
 
   // Multer/busboy failures are otherwise unhandled: they carry no `status`, so
   // they fall past the body-parser handler in app.ts to Express's default one,
@@ -54,7 +54,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         if (!err) return next();
         const code = (err as { code?: string }).code;
         if (code === "LIMIT_FILE_SIZE") {
-          res.status(413).json({ error: "PDF exceeds the 50MB limit" });
+          res.status(413).json({ error: `PDF exceeds the ${MAX_PDF_BYTES / 1024 / 1024}MB limit` });
           return;
         }
         console.error(`Upload failed for ${req.method} ${req.path}:`, err);

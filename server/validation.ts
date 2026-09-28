@@ -34,6 +34,10 @@ export function isValidEmail(value: unknown): value is string {
 // presentation comes close.
 export const MAX_TOTAL_SLIDES = 3000;
 
+// Largest PDF the server accepts on an upload. The client mirrors this in
+// client/src/lib/limits.ts to disable Sync before an upload that would fail.
+export const MAX_PDF_BYTES = 50 * 1024 * 1024;
+
 export function isValidTotalSlides(value: unknown): value is number {
   return Number.isInteger(value) && (value as number) >= 1 && (value as number) <= MAX_TOTAL_SLIDES;
 }
