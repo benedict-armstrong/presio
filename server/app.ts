@@ -183,6 +183,10 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   // Built-in plugins (client/plugins/build.ts): their chunks are named by
   // content hash, so viewers and the edge may keep them for good; the index
   // and manifest are what changes, so those are always revalidated.
+  // no-transform keeps the edge from rewriting them: Cloudflare's JavaScript
+  // Detections injects a per-request script into HTML, so a plugin's index
+  // would hash differently on every load and viewers would reject the
+  // presenter's copy as "changed since".
   const pluginDir = path.join(clientDist, "plugins") + path.sep;
   app.use(
     express.static(clientDist, {
@@ -191,7 +195,9 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
         if (!filePath.startsWith(pluginDir)) return;
         res.setHeader(
           "Cache-Control",
-          /-[A-Za-z0-9_-]{8,}\.(js|css)$/.test(filePath) ? "public, max-age=31536000, immutable" : "no-cache"
+          /-[A-Za-z0-9_-]{8,}\.(js|css)$/.test(filePath)
+            ? "public, max-age=31536000, immutable, no-transform"
+            : "no-cache, no-transform"
         );
       },
     })
