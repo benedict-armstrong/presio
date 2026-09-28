@@ -23,6 +23,19 @@ export function runBackground() {
 
   // --- Previews (presio.layers) ---
 
+  // Hidden drawings (the palette's eye) are hidden here too.
+  const isHidden = () => presio.settings.get("hidden") === true;
+  const showPreview = (slide: number) => {
+    const url = previews.get(slide);
+    presio.layers.set(slide, url && !isHidden() ? [{ x: 0, y: 0, w: 1, h: 1, image: url, fit: "cover" }] : []);
+  };
+  let hidden = isHidden();
+  presio.settings.onChange(() => {
+    if (isHidden() === hidden) return;
+    hidden = isHidden();
+    for (const slide of previews.keys()) showPreview(slide);
+  });
+
   const preview = async (slide: number) => {
     pending.delete(slide);
     const list = strokes(history.state, slide);
@@ -40,7 +53,7 @@ export function runBackground() {
       if (!blob || strokes(history.state, slide) !== list) return;
       const url = URL.createObjectURL(blob);
       previews.set(slide, url);
-      presio.layers.set(slide, [{ x: 0, y: 0, w: 1, h: 1, image: url, fit: "cover" }]);
+      showPreview(slide);
     }
     if (old) setTimeout(() => URL.revokeObjectURL(old), 1000);
   };

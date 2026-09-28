@@ -24,6 +24,12 @@ export const LASER_SIZES = [8, 16, 24, 32];
 // How long the pointer may be away before the palette collapses.
 const COLLAPSE_DELAY_MS = 700;
 
+// A tooltip with the presenter's key for the command, if they have one.
+const withKey = (label: string, command: string) => {
+  const key = presio.shortcut(command);
+  return key ? `${label} (${key})` : label;
+};
+
 const TOOLS: { key: Tool; icon: string; label: string; advanced?: boolean }[] = [
   { key: "none", icon: "pointer", label: "Pointer (no tool)" },
   { key: "laser", icon: "laser", label: "Laser pointer" },
@@ -52,6 +58,9 @@ export interface PaletteActions {
   setStyle(tool: "pen" | "highlighter", style: Partial<PenStyle>): void;
   laser(): LaserStyle;
   setLaser(style: Partial<LaserStyle>): void;
+  /** Whether the dot-or-line choice shows: a mouse always has both (the dot
+   *  while hovering, the line while pressed), so only touch screens need it. */
+  laserModes(): boolean;
   /** Whether the eraser and lasso show. */
   advanced(): boolean;
   /** Pencil mode (only a pen draws), or null while no pen has been seen. */
@@ -211,7 +220,7 @@ export class Palette {
     const buttons = expanded
       ? [
           ...TOOLS.filter((t) => !t.advanced || advanced || t.key === tool).map((t) =>
-            this.button(t.icon, t.label, `tool-${t.key}`, () => this.select(t.key), tool === t.key)
+            this.button(t.icon, withKey(t.label, t.key === "none" ? "pointer" : t.key), `tool-${t.key}`, () => this.select(t.key), tool === t.key)
           ),
           ...(pencil === null
             ? []
@@ -226,7 +235,7 @@ export class Palette {
               ]),
           this.button(
             hidden ? "eyeOff" : "eye",
-            hidden ? "Drawings hidden on every screen: tap to show them" : "Hide the drawings on every screen",
+            withKey(hidden ? "Drawings hidden on every screen: tap to show them" : "Hide the drawings on every screen", "toggleDrawings"),
             "toggle-drawings",
             () => this.actions.setHidden(!hidden),
             hidden
@@ -300,9 +309,9 @@ export class Palette {
     const actions = document.createElement("div");
     actions.className = tool === "pen" || tool === "highlighter" ? "actions" : "actions bare";
     actions.append(
-      this.button("undo", "Undo (or double-tap with two fingers)", "pen-undo", () => this.actions.undo(), false, !this.actions.canUndo()),
-      this.button("redo", "Redo", "pen-redo", () => this.actions.redo(), false, !this.actions.canRedo()),
-      this.button("trash", "Clear drawings on this slide", "pen-clear", () => this.actions.clear(), false, !this.actions.canClear())
+      this.button("undo", withKey("Undo (or double-tap with two fingers)", "undo"), "pen-undo", () => this.actions.undo(), false, !this.actions.canUndo()),
+      this.button("redo", withKey("Redo", "redo"), "pen-redo", () => this.actions.redo(), false, !this.actions.canRedo()),
+      this.button("trash", withKey("Clear drawings on this slide", "clear"), "pen-clear", () => this.actions.clear(), false, !this.actions.canClear())
     );
     panel.append(actions);
     return panel;
@@ -335,18 +344,21 @@ export class Palette {
     const style = this.actions.laser();
     const wrap = document.createElement("div");
     wrap.className = "laser-options";
-    const modes = document.createElement("div");
-    modes.className = "sizes";
-    modes.append(
-      this.button("dot", "Point", "laser-mode-dot", () => this.actions.setLaser({ trail: false }), !style.trail),
-      this.button("trail", "Fading line, while pressed", "laser-mode-trail", () => this.actions.setLaser({ trail: true }), style.trail)
-    );
+    if (this.actions.laserModes()) {
+      const modes = document.createElement("div");
+      modes.className = "sizes";
+      modes.append(
+        this.button("dot", "Point", "laser-mode-dot", () => this.actions.setLaser({ trail: false }), !style.trail),
+        this.button("trail", "Fading line", "laser-mode-trail", () => this.actions.setLaser({ trail: true }), style.trail)
+      );
+      wrap.append(modes);
+    }
     const sizes = document.createElement("div");
     sizes.className = "sizes";
     for (const px of LASER_SIZES) {
       sizes.append(this.sizeButton(px, style.size === px, `laser-size-${px}`, `${px}px`, "#ef4444", () => this.actions.setLaser({ size: px })));
     }
-    wrap.append(modes, sizes);
+    wrap.append(sizes);
     return wrap;
   }
 

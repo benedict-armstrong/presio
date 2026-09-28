@@ -317,6 +317,8 @@ export function ControllerView({
   useEffect(() => cancelJump, [cancelJump]);
 
   const { host: pluginHost, plugins: runningPlugins } = plugins;
+  // Plugins show the presenter's keys in their tooltips (presio.shortcut).
+  useEffect(() => pluginHost.setKeymap(keymap), [pluginHost, keymap]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

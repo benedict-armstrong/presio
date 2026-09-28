@@ -94,6 +94,9 @@
       } else if (m.type === "storage") {
         ctx.storage = m.storage;
         each(storageListeners, Object.assign({}, ctx.storage));
+      } else if (m.type === "shortcuts") {
+        ctx.shortcuts = m.shortcuts;
+        each(contextListeners, api);
       } else if (m.type === "clock") {
         ctx.clockOffset = m.offset;
       } else if (m.type === "deck") {
@@ -304,8 +307,12 @@
         get total() { return ctx.slide.total; },
         onChange: function (cb) { return subscribe(slideListeners, cb); },
       },
-      /** Called with the whole API whenever session or role info changes. */
+      /** Called with the whole API whenever session or role info changes, or
+       *  the presenter's shortcuts do. */
       onContextChange: function (cb) { return subscribe(contextListeners, cb); },
+      /** The key the presenter has for one of this plugin's keybindings'
+       *  commands ("E", "⌘Z"), or null when it has none. */
+      shortcut: function (command) { return (ctx.shortcuts && ctx.shortcuts[command]) || null; },
       /**
        * Message this plugin's other instances. From the presenter it reaches
        * every device; from the audience, only the presenter. `retain: true`

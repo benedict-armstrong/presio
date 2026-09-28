@@ -72,7 +72,7 @@
       "laserTrail": {
         "type": "boolean",
         "default": false,
-        "description": "The laser leaves a fading line while pressed, rather than showing a dot."
+        "description": "On a touch screen, the laser leaves a fading line rather than showing a dot. A mouse always shows the dot, and the line while pressed."
       },
       "penColor": {
         "type": "enum",

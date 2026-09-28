@@ -104,7 +104,9 @@ index.html
   else tile). They never fire while the presenter types in a field, and
   Presio's own shortcuts win where keys overlap (arrows, Space, PgUp/PgDn,
   `b`, `c`, `j` then digits) — Settings marks such a key as taken. The
-  built-ins use `k` and `r` (media) and `p`, `h`, `l`, Esc and ⌘Z (drawing).
+  built-ins use `k` and `r` (media) and `p`, `h`, `l`, `e`, Esc, ⌘Z and ⌘Y
+  (drawing). `presio.shortcut(command)` gives the key the presenter has for
+  one ("E", "⌘Z", or null), to show in a tooltip.
 - `contributes.settings` — settings Presio shows under the plugin in
   **Settings → Plugins** and stores in the presenter's settings file as
   `<id>.<name>` (e.g. `hello.greeting`). Types: `boolean`, `number`
@@ -156,7 +158,8 @@ presio.session          // { id, local, joinUrl } — joinUrl is null for a loca
 presio.slide.current    // 1-based slide on this device
 presio.slide.total
 presio.slide.onChange(slide => {})         // → unsubscribe()
-presio.onContextChange(presio => {})       // session/role/theme changed
+presio.onContextChange(presio => {})       // session/role/theme or shortcuts changed
+presio.shortcut(command)                   // the presenter's key for a keybinding: "E", "⌘Z" or null
 
 presio.send(type, payload, { retain, volatile })  // message the plugin's other instances
 presio.onMessage(({ type, payload, from, sender }) => {})

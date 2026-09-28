@@ -341,6 +341,8 @@ export function runSlide() {
   let laser: { x: number; y: number } | null = null;
   let laserSent: { x: number; y: number } | null = null;
   let laserSize = 16;
+  // Whether the presenter's laser is drawing a line now, rather than the dot.
+  let laserLine = false;
   const sizeDot = (size: number) => {
     const d = Math.max(6, (size / 960) * page.w);
     Object.assign(laserDot.style, { width: `${d}px`, height: `${d}px`, margin: `${-d / 2}px 0 0 ${-d / 2}px` });
@@ -352,8 +354,8 @@ export function runSlide() {
   const sendLaser = () => {
     if (!laser || (laserSent && laserSent.x === laser.x && laserSent.y === laser.y)) return;
     laserSent = laser;
-    const { size, trail: line } = laserStyle();
-    presio.send("l", { x: Math.round(laser.x * 1e4) / 1e4, y: Math.round(laser.y * 1e4) / 1e4, s: size, ...(line && { t: 1 }) }, { volatile: true });
+    const { size } = laserStyle();
+    presio.send("l", { x: Math.round(laser.x * 1e4) / 1e4, y: Math.round(laser.y * 1e4) / 1e4, s: size, ...(laserLine && { t: 1 }) }, { volatile: true });
   };
   const hideLaser = () => {
     laserDot.hidden = true;
@@ -363,9 +365,14 @@ export function runSlide() {
     laserSent = null;
   };
   // The presenter's laser at (x, y): the dot, or the line.
-  const moveLaser = (x: number, y: number) => {
+  const moveLaser = (x: number, y: number, line: boolean) => {
+    if (laserLine !== line && laser) {
+      if (laserLine) trail.push(null);
+      laserSent = null;
+    }
+    laserLine = line;
     laser = { x, y };
-    const { size, trail: line } = laserStyle();
+    const { size } = laserStyle();
     if (line) {
       laserDot.hidden = true;
       trail.push({ x, y, size });
@@ -405,6 +412,8 @@ export function runSlide() {
       trail.push({ x: p.x, y: p.y, size });
       return;
     }
+    if (remoteTrail) trail.push(null);
+    remoteTrail = false;
     if (size !== laserSize) sizeDot((laserSize = size));
     const now = performance.now();
     const prev = remoteLaser;
@@ -554,6 +563,9 @@ export function runSlide() {
   const onSelection = (e: Event) => selectionEl.contains(e.target as Node);
   // Whether this pointer may start something: in pencil mode a pen or a
   // mouse, not a finger (except on the selection, which a finger moves).
+  // Pressed, a mouse draws the laser's line; a finger or a pen, the dot or
+  // the line as the palette says (they have no hover to show the dot).
+  const pressedLine = (e: PointerEvent) => e.pointerType === "mouse" || laserStyle().trail;
   const accepts = (e: PointerEvent) =>
     pencil() ? e.pointerType !== "touch" || (tool === "lasso" && onSelection(e)) : e.isPrimary && !pinching;
   let lastDrawTool: "pen" | "highlighter" = "pen";
@@ -598,6 +610,8 @@ export function runSlide() {
       if (!onPage(e) || e.button !== 0) return;
       owner = e.pointerId;
       document.body.setPointerCapture?.(e.pointerId);
+      // Drawing (or erasing, or selecting) on hidden drawings shows them again.
+      if (tool !== "laser" && presio.settings.get("hidden") === true) void presio.settings.set("hidden", false);
       if (drawingTool()) {
         const t = tool as "pen" | "highlighter";
         const style = styleOf(t);
@@ -606,7 +620,7 @@ export function runSlide() {
         armSnap(e);
       } else if (tool === "laser") {
         const [x, y] = toPage(e);
-        moveLaser(x, y);
+        moveLaser(x, y, pressedLine(e));
       } else if (tool === "eraser") {
         erasing = { group: newGroup(), hit: new Set() };
         eraseAt(e);
@@ -621,10 +635,10 @@ export function runSlide() {
       if (tool === "eraser" && e.pointerType !== "touch") showRing(onPage(e) ? e : null);
       if (pinching && !pencil()) return;
       if (owner === null) {
-        // A mouse's dot follows it hovering; a line needs the button down.
-        if (tool === "laser" && e.pointerType === "mouse" && !laserStyle().trail && !onPalette(e) && onPage(e)) {
+        // A mouse's dot follows it hovering; the line needs the button down.
+        if (tool === "laser" && e.pointerType === "mouse" && !onPalette(e) && onPage(e)) {
           const [x, y] = toPage(e);
-          moveLaser(x, y);
+          moveLaser(x, y, false);
         } else if (tool === "laser" && laser && e.pointerType === "mouse") hideLaser();
         return;
       }
@@ -638,7 +652,7 @@ export function runSlide() {
       } else if (tool === "laser") {
         if (!onPalette(e) && onPage(e)) {
           const [x, y] = toPage(e);
-          moveLaser(x, y);
+          moveLaser(x, y, pressedLine(e));
         } else if (laser) hideLaser();
       } else if (erasing) {
         for (const c of samples) eraseAt(c);
@@ -664,7 +678,14 @@ export function runSlide() {
         if (e.type === "pointerup" && !snapped) addPoint(e);
         finishStroke();
       }
-      if (tool === "laser" && (e.pointerType !== "mouse" || laserStyle().trail)) hideLaser();
+      if (tool === "laser") {
+        if (e.pointerType !== "mouse" || !onPage(e)) hideLaser();
+        else {
+          // Back to the dot where the button came up.
+          const [x, y] = toPage(e);
+          moveLaser(x, y, false);
+        }
+      }
       erasing = null;
       if (loop) {
         const poly = loop;
@@ -764,6 +785,7 @@ export function runSlide() {
           if (style.size && style.size !== current.size) void presio.settings.set(`${t}Size`, style.size);
         },
         laser: laserStyle,
+        laserModes: () => touchFirst || pencil() === true,
         setLaser: (style) => {
           const current = laserStyle();
           if (style.size !== undefined && style.size !== current.size) void presio.settings.set("laserSize", style.size);
@@ -800,7 +822,11 @@ export function runSlide() {
     // The palette is drawn in Presio's colors.
     const theme = () => (document.documentElement.className = presio.theme);
     theme();
-    presio.onContextChange(theme);
+    presio.onContextChange(() => {
+      theme();
+      // The tooltips name the presenter's keys, which may have changed.
+      palette?.render();
+    });
     tool = "none";
     const stored = presio.storage.get("tool");
     if (isTool(stored)) applyTool(stored);

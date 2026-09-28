@@ -8,6 +8,7 @@ import type { PdfAttachment } from "@/lib/pdf";
 import { lsGet, lsRemove, lsSet, pluginRetainedKey, pluginStateKey } from "@/lib/storage";
 import { sanitizeSettingValue, setPluginSetting } from "@/lib/settings";
 import { clockOffset } from "@/lib/clock";
+import { DEFAULT_KEYMAP, formatBinding, pluginBindings, type Keymap } from "@/lib/keymap";
 import { asRecord, type LoadedPlugin, type PluginSurface } from "./manifest";
 import { HistoryHub, MAX_BLOB_BYTES, type HistoryFrameMessage } from "./history";
 
@@ -199,6 +200,7 @@ export class PluginHost {
   private layerCache = new Map<number, PluginLayer[]>();
   private layerListeners = new Set<() => void>();
   private clock = clockOffset();
+  private keymap: Keymap = DEFAULT_KEYMAP;
   // Running plugins in the presenter's order: the order exports apply in.
   private running: readonly string[] = [];
   private exports = new Map<number, (result: { bytes?: unknown; error?: unknown }) => void>();
@@ -314,11 +316,29 @@ export class PluginHost {
       settings: this.settings.get(pluginId) ?? {},
       storage: this.readStorage(pluginId),
       clockOffset: this.clock,
+      shortcuts: this.shortcuts(plugin),
       baseUrl: plugin.baseUrl,
       view: FULL_VIEW,
       page: FULL_PAGE,
       hovered: false,
     };
+  }
+
+  /** Each of a plugin's commands' key, as the presenter sees it ("E", "⌘Z"). */
+  private shortcuts(plugin: LoadedPlugin): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const kb of plugin.manifest.contributes.keybindings) {
+      const first = pluginBindings(this.keymap, plugin.manifest.id, kb)[0];
+      if (first) out[kb.command] = formatBinding(first);
+    }
+    return out;
+  }
+
+  /** The presenter's keyboard shortcuts changed (presio.shortcut). */
+  setKeymap(keymap: Keymap) {
+    if (keymap === this.keymap) return;
+    this.keymap = keymap;
+    for (const conn of this.conns) conn.port.postMessage({ type: "shortcuts", shortcuts: this.shortcuts(conn.plugin) });
   }
 
   /** The server clock moved (lib/clock.ts); frames keep their own copy. */
