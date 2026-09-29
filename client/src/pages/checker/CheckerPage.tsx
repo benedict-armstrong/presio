@@ -5,8 +5,7 @@ import { loadPdfData, renderPage, destroyPdf } from "@/lib/pdf";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { removeAttachments } from "@/lib/removeAttachments";
 import { inspectAttachments, type DeckReport } from "@/lib/inspectAttachments";
-import { idbPut } from "@/lib/localStore";
-import { newLocalDeckId } from "@/lib/localId";
+import { createLocalDeck, ingestPdfBytes } from "@/lib/deckImport";
 import { PresioLogo } from "@/components/PresioLogo";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ValidityBadge, ValidityDot } from "./ValidityBadge";
@@ -162,18 +161,25 @@ export default function CheckerPage() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasEdits]);
 
+  // The loaded PDF with the pending notes edits and attachment deletions
+  // written into it.
+  async function editedBytes(original: Uint8Array, deck: DeckReport): Promise<Uint8Array> {
+    let bytes = original;
+    for (const pr of deck.pages) {
+      if (!isPageEdited(pr.page, pr.notes?.notes)) continue;
+      bytes = await setSlideNotes(bytes, pr.page, editedNotes.get(pr.page) ?? "");
+    }
+    if (deletedMedia.size > 0) {
+      bytes = await removeAttachments(bytes, [...deletedMedia]);
+    }
+    return bytes;
+  }
+
   async function downloadWithEdits() {
     if (!pdfBytesRef.current || !report) return;
     setDownloading(true);
     try {
-      let bytes = pdfBytesRef.current;
-      for (const pr of report.pages) {
-        if (!isPageEdited(pr.page, pr.notes?.notes)) continue;
-        bytes = await setSlideNotes(bytes, pr.page, editedNotes.get(pr.page) ?? "");
-      }
-      if (deletedMedia.size > 0) {
-        bytes = await removeAttachments(bytes, [...deletedMedia]);
-      }
+      const bytes = await editedBytes(pdfBytesRef.current, report);
       saveFile(new Blob([bytes.slice()], { type: "application/pdf" }), filename ?? "presentation.pdf");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Download failed");
@@ -201,23 +207,11 @@ export default function CheckerPage() {
     if (!pdfBytesRef.current || !report || !filename) return;
     setPresenting(true);
     try {
-      // Apply pending edits/deletions to get the final bytes.
-      let bytes = pdfBytesRef.current;
-      for (const pr of report.pages) {
-        if (!isPageEdited(pr.page, pr.notes?.notes)) continue;
-        bytes = await setSlideNotes(bytes, pr.page, editedNotes.get(pr.page) ?? "");
-      }
-      if (deletedMedia.size > 0) {
-        bytes = await removeAttachments(bytes, [...deletedMedia]);
-      }
-
-      const name = filename.replace(/\.pdf$/i, "");
+      const bytes = await editedBytes(pdfBytesRef.current, report);
       // Same as the home screen's import: the deck is stored under an id minted
       // here and never leaves the browser, so this works with no connection.
       // Its join code is created only if the presenter later shares it.
-      const id = newLocalDeckId();
-
-      await idbPut({ id, filename: name, totalSlides: report.pageCount, blob: new Blob([bytes.slice()], { type: "application/pdf" }), createdAt: Date.now() });
+      const id = await createLocalDeck(await ingestPdfBytes(bytes.slice().buffer, filename));
       navigate(`/s/${id}/share`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to open presentation");

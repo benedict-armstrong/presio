@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useSearchParams, useNavigate, useLocation, Link } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { loadPdf, loadPdfData, freshPdfUrl, loadLatestPdf, renderPage, clearCache, openPdf, destroyPdf } from "@/lib/pdf";
+import { loadPdf, loadPdfData, freshPdfUrl, loadLatestPdf, renderPage, clearCache, destroyPdf } from "@/lib/pdf";
 import { loadDeck, type Deck } from "@/lib/deck";
 import { useRenderTargetWidth } from "@/hooks/useRenderTargetWidth";
 import { lsGetString, lsSetString, deckWatchKey } from "@/lib/storage";
@@ -21,7 +21,8 @@ import {
   type DeckWatchStatus,
 } from "@/lib/deckWatcher";
 import { ConfirmDeckReloadDialog } from "@/components/controller/ConfirmDeckReloadDialog";
-import { track, sha256Hex } from "@/lib/analytics";
+import { track } from "@/lib/analytics";
+import { ingestPdfFile } from "@/lib/deckImport";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { usePluginHost } from "@/lib/plugins/usePluginHost";
@@ -914,19 +915,7 @@ export default function Presentation() {
   const replacePdf = useCallback(
     async (file: File, handle?: FileSystemFileHandle) => {
       if (local === null) return;
-      const buf = await file.arrayBuffer();
-      // Snapshot before pdf.js transfers the buffer away (see Home.upload).
-      const blob = new Blob([buf], { type: "application/pdf" });
-      let sha256: string | undefined;
-      try {
-        sha256 = await sha256Hex(buf);
-      } catch {
-        // No crypto.subtle (plain-http origins): track without a fingerprint.
-      }
-      const doc = await openPdf({ data: new Uint8Array(buf) });
-      const totalSlides = doc.numPages;
-      destroyPdf(doc);
-      const filename = file.name.replace(/\.pdf$/i, "");
+      const { blob, sha256, totalSlides, filename, size } = await ingestPdfFile(file);
 
       if (local) {
         const rec = await idbGet(id!);
@@ -974,7 +963,7 @@ export default function Presentation() {
       track("deck-replace", {
         filename,
         sha256,
-        size: file.size,
+        size,
         slides: totalSlides,
         mode: local ? "local" : "server",
       });

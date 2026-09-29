@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { openPdf, destroyPdf } from "@/lib/pdf";
 import { ExternalLink, RefreshCw, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -13,14 +12,14 @@ import { ConfirmReplaceDialog } from "@/components/controller/ConfirmReplaceDial
 import { ConfirmReuploadDialog } from "@/components/controller/ConfirmReuploadDialog";
 import { ConfirmEndDialog } from "@/components/controller/ConfirmEndDialog";
 import { idbPut, idbGet, idbList, idbDelete } from "@/lib/localStore";
-import { newLocalDeckId } from "@/lib/localId";
 import { isDeckWatchSupported, PDF_PICKER_OPTIONS } from "@/lib/deckWatcher";
 import { getSessionAuth, setSessionAuth, endSession } from "@/lib/utils";
-import { lsRemove, lsSetString, sessionKey, sessionIdFromKey, deckWatchKey } from "@/lib/storage";
+import { lsRemove, sessionKey, sessionIdFromKey } from "@/lib/storage";
 import { SESSION_CODE_LENGTH } from "@shared/session";
 import { forgetDeckRetained } from "@/lib/plugins/host";
 import { useSetting } from "@/lib/settings";
-import { track, sha256Hex } from "@/lib/analytics";
+import { track } from "@/lib/analytics";
+import { createLocalDeck, ingestPdfFile, type IngestedPdf } from "@/lib/deckImport";
 import { matchReupload } from "@/lib/reupload";
 import { TYPST_PACKAGE_VERSION } from "@/lib/packageVersions";
 import { loadExternalPdfMeta, createExternalSession } from "@/lib/externalSession";
@@ -423,13 +422,9 @@ interface RecentDeck {
 // doesn't re-read or re-parse the file. (The ArrayBuffer it came from is not:
 // getDocument() has already transferred it to the pdf.js worker by this point,
 // leaving it detached.)
-interface ReuploadPrompt {
+interface ReuploadPrompt extends IngestedPdf {
   target: RecentDeck;
   file: File;
-  blob: Blob;
-  sha256?: string;
-  filename: string;
-  totalSlides: number;
   /** Whether the file's bytes were actually compared (local decks only). */
   compared: boolean;
   /** File System Access handle for the drop, when the browser provided one —
@@ -681,21 +676,7 @@ export default function Home() {
   // recents list' Replace button and the re-upload prompt's Update action.
   const replaceDeck = useCallback(
     async (target: RecentDeck, file: File, handle?: FileSystemFileHandle) => {
-      const buf = await file.arrayBuffer();
-      // Snapshot the bytes before getDocument() transfers the buffer to the
-      // pdf.js worker and detaches it (same ordering as upload()).
-      const blob = new Blob([buf], { type: "application/pdf" });
-      // Fingerprint the bytes while they're still readable (see upload()).
-      let sha256: string | undefined;
-      try {
-        sha256 = await sha256Hex(buf);
-      } catch {
-        // No crypto.subtle (plain-http origins): track without a fingerprint.
-      }
-      const doc = await openPdf({ data: new Uint8Array(buf) });
-      const totalSlides = doc.numPages;
-      destroyPdf(doc);
-      const filename = file.name.replace(/\.pdf$/i, "");
+      const { blob, sha256, totalSlides, filename } = await ingestPdfFile(file);
       if (target.kind === "local") {
         try {
           // Read the record to carry over what the fresh object doesn't know:
@@ -795,45 +776,11 @@ export default function Home() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  // The plain create path: store the deck locally under an id minted here, and
-  // open share. Nothing on this path touches the network — the deck's bytes,
-  // its id and everything keyed by it are local to this browser, so a PDF can
-  // be imported and presented with no connection at all. The join code (and the
-  // `sessions` row behind it) is created later, server-side, if and when the
-  // presenter shares the deck.
+  // The plain create path: store the deck locally (createLocalDeck, which
+  // needs no network) and open share.
   const createDeck = useCallback(
-    async (p: {
-      file: File;
-      blob: Blob;
-      sha256?: string;
-      filename: string;
-      totalSlides: number;
-      handle?: FileSystemFileHandle;
-    }) => {
-      const id = newLocalDeckId();
-      try {
-        await idbPut({
-          id,
-          filename: p.filename,
-          totalSlides: p.totalSlides,
-          blob: p.blob,
-          sha256: p.sha256,
-          ...(p.handle ? { handle: p.handle } : {}),
-          createdAt: Date.now(),
-        });
-      } catch {
-        throw new Error(
-          "Couldn't store the presentation in this browser. Private/incognito mode isn't supported — please use a normal window."
-        );
-      }
-      // Remember how this deck should treat recompiles. The handle is stored
-      // either way, so the controller's live-reload control can turn watching
-      // on later without asking for the file again.
-      lsSetString(deckWatchKey(id), p.handle && hotReload ? "prompt" : "off");
-      // Counted only once the deck is durably stored; the analytics sink
-      // timestamps each event, so two uploads of the same filename can be
-      // compared by hash to spot recompiled vs. re-uploaded decks.
-      track("upload", { filename: p.filename, sha256: p.sha256, size: p.file.size, slides: p.totalSlides });
+    async (p: IngestedPdf & { handle?: FileSystemFileHandle }) => {
+      const id = await createLocalDeck(p, { handle: p.handle, hotReload });
       navigate(`/s/${id}/share`);
     },
     [navigate, hotReload]
@@ -845,32 +792,9 @@ export default function Home() {
       setUploading(true);
       setProgress(0);
       try {
-        const buf = await file.arrayBuffer();
-        // Store an in-memory copy rather than the File itself. A File from the
-        // picker is only a reference to the file on disk, and IndexedDB
-        // persists that reference — not the bytes. If the file is moved,
-        // edited, or removed before the deck is synced (the login round-trip
-        // alone is enough on some browsers), reading it back fails partway
-        // through the upload and the server sees a truncated multipart body.
-        // Snapshot before getDocument(), which transfers the buffer to the
-        // pdf.js worker and leaves it detached.
-        const blob = new Blob([buf], { type: "application/pdf" });
-        // Fingerprint the bytes while they're still readable — getDocument()
-        // below transfers the buffer to the pdf.js worker and detaches it.
-        // Hashing reads memory already in hand, so it adds no file I/O, and
-        // only the digest ever leaves the browser.
-        let sha256: string | undefined;
-        try {
-          sha256 = await sha256Hex(buf);
-        } catch {
-          // No crypto.subtle (e.g. plain-http origins): report the upload
-          // without a fingerprint rather than blocking it.
-        }
+        const pdf = await ingestPdfFile(file);
         setProgress(100);
-        const doc = await openPdf({ data: new Uint8Array(buf) });
-        const totalSlides = doc.numPages;
-        destroyPdf(doc);
-        const filename = file.name.replace(/\.pdf$/i, "");
+        const { sha256, filename } = pdf;
 
         // Fork on a re-upload before anything is created: the recents list is
         // already in memory, so the comparison costs no network round-trip and
@@ -887,19 +811,10 @@ export default function Home() {
           // Same name, different (or unverifiable) bytes: offer update vs.
           // create, defaulting to update, before anything exists server-side
           // or in IndexedDB.
-          setReuploadPrompt({
-            target: match.target,
-            file,
-            blob,
-            sha256,
-            filename,
-            totalSlides,
-            compared: match.compared,
-            handle,
-          });
+          setReuploadPrompt({ ...pdf, target: match.target, file, compared: match.compared, handle });
           return;
         }
-        await createDeck({ file, blob, sha256, filename, totalSlides, handle });
+        await createDeck({ ...pdf, handle });
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Upload failed");
       } finally {
