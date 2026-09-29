@@ -233,14 +233,26 @@ export class PluginHost {
       if (this.persistTimer) clearTimeout(this.persistTimer);
       this.persistTimer = null;
     }
-    // Changes not yet saved when the page goes: save them now. Only this
-    // host's own changes — a host that never changed anything (React may
-    // build one it then discards) mustn't overwrite what another saved.
-    if (typeof window !== "undefined") {
-      window.addEventListener("pagehide", () => {
-        if (this.persistTimer) this.persistRetained();
-      });
-    }
+  }
+
+  // Changes not yet saved when the page goes: save them now. Only this host's
+  // own changes — a host that never changed anything (React may build one it
+  // then discards) mustn't overwrite what another saved.
+  private readonly onPageHide = () => {
+    if (this.persistTimer) this.persistRetained();
+  };
+
+  /** Start listening to the page. Pair with dispose() (an effect's mount and cleanup). */
+  attach() {
+    window.addEventListener("pagehide", this.onPageHide);
+    this.history.attach();
+  }
+
+  /** Stop listening, saving what's pending first. attach() may follow (StrictMode). */
+  dispose() {
+    window.removeEventListener("pagehide", this.onPageHide);
+    this.onPageHide();
+    this.history.dispose();
   }
 
   /** Where this device's outgoing messages go (the transport). */

@@ -171,11 +171,22 @@ export class HistoryHub {
 
   constructor(opts: HistoryHubOptions) {
     this.opts = opts;
-    if (typeof window !== "undefined") {
-      window.addEventListener("pagehide", () => {
-        for (const plugin of [...this.saveTimers.keys()]) this.save(plugin);
-      });
-    }
+  }
+
+  // Saves still waiting on their timer: make them now.
+  private readonly flush = () => {
+    for (const plugin of [...this.saveTimers.keys()]) this.save(plugin);
+  };
+
+  /** Save pending histories when the page goes. Pair with dispose(). */
+  attach() {
+    window.addEventListener("pagehide", this.flush);
+  }
+
+  /** Stop listening, saving what's pending first. attach() may follow. */
+  dispose() {
+    window.removeEventListener("pagehide", this.flush);
+    this.flush();
   }
 
   /** The deck's id changed (it was shared); its saved histories moved with it. */
