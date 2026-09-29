@@ -8,9 +8,7 @@ import { lsGetString, lsSetString, deckWatchKey } from "@/lib/storage";
 import { socket } from "@/lib/socket";
 import { useLatestRef } from "@/hooks/useLatestRef";
 import { startClockSync } from "@/lib/clock";
-import { supabase } from "@/lib/supabaseClient";
-import { authEnabled } from "@/lib/authMode";
-import { getSessionAuth, endSession } from "@/lib/utils";
+import { getSessionAuth, endSession, controllerHeaders } from "@/lib/sessionAuth";
 import { idbGet, idbPut, idbDelete } from "@/lib/localStore";
 import { isLocalDeckId } from "@/lib/localId";
 import {
@@ -649,23 +647,9 @@ export default function Presentation() {
     navigate("/", { replace: true });
   }, [local, id, navigate]);
 
-  // Authorization for rewriting a synced deck's stored PDF. The server accepts
-  // either the presentation's controller token or the logged-in owner's bearer
-  // token, so send whichever this browser has — and both when it has both.
-  //
-  // Sending only the bearer token used to be enough for the common case and
-  // wrong for one that matters: a signed-in presenter who took control by
-  // passphrase isn't the owner, so their token doesn't authorize the write and
-  // the controller token that would was never sent.
+  // Authorization for rewriting a synced deck's stored PDF.
   const pdfWriteAuth = useCallback(async (): Promise<Record<string, string>> => {
-    const headers: Record<string, string> = {};
-    const { controllerToken } = getSessionAuth(id!);
-    if (controllerToken) headers["x-controller-token"] = controllerToken;
-    if (authEnabled) {
-      const { data } = await supabase.auth.getSession();
-      const accessToken = data.session?.access_token;
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-    }
+    const headers = await controllerHeaders(id!);
     if (!Object.keys(headers).length) {
       throw new Error("This browser isn't the controller for this presentation");
     }

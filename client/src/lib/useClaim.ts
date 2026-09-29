@@ -4,7 +4,7 @@ import { isLocalDeckId } from "@/lib/localId";
 import { supabase } from "@/lib/supabaseClient";
 import { authEnabled } from "@/lib/authMode";
 import { useAuth } from "@/lib/useAuth";
-import { getSessionAuth, setSessionAuth } from "@/lib/utils";
+import { getSessionAuth, setSessionAuth } from "@/lib/sessionAuth";
 import { lsRemove, sessionKey, rekeySessionStorage } from "@/lib/storage";
 import { rekeyHistories } from "@/lib/plugins/historyDb";
 import { MAX_PDF_BYTES, MAX_PDF_MB } from "@shared/limits";

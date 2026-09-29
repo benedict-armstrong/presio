@@ -18,7 +18,7 @@ import { isActivatedBy, type LoadedPlugin, type PluginManifest } from "./manifes
 import { loadPlugin, usePluginEntries } from "./registry";
 import { clockOffset, onClockSample } from "@/lib/clock";
 import { resolvePluginSettings, useSettingsDocument } from "@/lib/settings";
-import { getSessionAuth } from "@/lib/utils";
+import { getSessionAuth } from "@/lib/sessionAuth";
 import { blobSha, type HistoryEntry, type HistoryLink, type SyncReply } from "./history";
 
 interface PluginsState {

@@ -10,7 +10,7 @@
 // So the viewer origin must never hold those: taking control from a viewer
 // hands over to the app origin (see ViewerView).
 
-import { getSessionAuth } from "@/lib/utils";
+import { getSessionAuth } from "@/lib/sessionAuth";
 import { isLocalDeckId } from "@/lib/localId";
 
 function meta(name: string): string | null {

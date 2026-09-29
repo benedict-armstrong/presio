@@ -13,7 +13,7 @@ import { ConfirmReuploadDialog } from "@/components/controller/ConfirmReuploadDi
 import { ConfirmEndDialog } from "@/components/controller/ConfirmEndDialog";
 import { idbPut, idbGet, idbList, idbDelete } from "@/lib/localStore";
 import { isDeckWatchSupported, PDF_PICKER_OPTIONS } from "@/lib/deckWatcher";
-import { getSessionAuth, setSessionAuth, endSession } from "@/lib/utils";
+import { getSessionAuth, setSessionAuth, endSession, controllerHeaders } from "@/lib/sessionAuth";
 import { lsRemove, sessionKey, sessionIdFromKey } from "@/lib/storage";
 import { SESSION_CODE_LENGTH } from "@shared/session";
 import { forgetDeckRetained } from "@/lib/plugins/host";
@@ -701,9 +701,8 @@ export default function Home() {
       } else {
         // Synced deck: overwrite its server copy. The controller token this
         // browser holds authorizes the write — for an account deck this device
-        // never controlled, fall back to the token /api/sessions/mine returned.
-        // A logged-in owner token is attached too when present (the server
-        // accepts either).
+        // never controlled, fall back to the token /api/sessions/mine returned
+        // (and keep it for next time).
         const stored = getSessionAuth(target.id);
         const controllerToken = stored.controllerToken ?? target.controllerToken;
         if (!controllerToken) {
@@ -712,11 +711,7 @@ export default function Home() {
         if (!stored.controllerToken) {
           setSessionAuth(target.id, { ...stored, controllerToken });
         }
-        const headers: Record<string, string> = { "x-controller-token": controllerToken };
-        const { data: sessionData } = await supabase.auth.getSession();
-        if (sessionData.session) {
-          headers.Authorization = `Bearer ${sessionData.session.access_token}`;
-        }
+        const headers = { ...(await controllerHeaders(target.id)), "x-controller-token": controllerToken };
         const form = new FormData();
         form.append("pdf", blob, `${filename}.pdf`);
         form.append("filename", filename);

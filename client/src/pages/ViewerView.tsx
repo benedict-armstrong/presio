@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { RotateCw, EllipsisVertical } from "lucide-react";
-import { getSessionAuth, setSessionAuth } from "@/lib/utils";
+import { getSessionAuth, setSessionAuth } from "@/lib/sessionAuth";
 import { appOrigin, onViewerOrigin, TAKEOVER_PARAM } from "@/lib/origins";
 import { isEditableTarget } from "@/lib/keymap";
 import { Button } from "@/components/ui/button";

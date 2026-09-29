@@ -3,7 +3,7 @@ import { useParams, useSearchParams, useNavigate, Link } from "react-router-dom"
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { idbPut } from "@/lib/localStore";
-import { setSessionAuth } from "@/lib/utils";
+import { setSessionAuth } from "@/lib/sessionAuth";
 
 function safeDecode(value: string): string {
   try {

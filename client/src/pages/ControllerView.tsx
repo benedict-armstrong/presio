@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { cn, getSessionAuth, setSessionAuth } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { getSessionAuth, setSessionAuth, controllerHeaders } from "@/lib/sessionAuth";
 import { Settings, TriangleAlert, Check, Option, Plus, Share2, ExternalLink, User, LayoutGrid, Puzzle, KeyRound, Keyboard, FileJson } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -18,7 +19,6 @@ import { DownloadButton } from "@/components/DownloadButton";
 import { hasCompletedControllerOnboarding } from "@/lib/onboarding";
 import { useAuth } from "@/lib/useAuth";
 import { authEnabled } from "@/lib/authMode";
-import { supabase } from "@/lib/supabaseClient";
 import { useClaim } from "@/lib/useClaim";
 import { CurrentSlideCard } from "@/components/controller/CurrentSlideCard";
 import { NextSlideCard } from "@/components/controller/NextSlideCard";
@@ -445,20 +445,13 @@ export function ControllerView({
     setPassphraseBusy(true);
     setPassphraseError("");
     try {
-      const stored = getSessionAuth(id);
-      const headers: Record<string, string> = {};
-      if (stored.controllerToken) headers["x-controller-token"] = stored.controllerToken;
-      if (authEnabled) {
-        const { data } = await supabase.auth.getSession();
-        if (data.session) headers.Authorization = `Bearer ${data.session.access_token}`;
-      }
-      const res = await fetch(`/api/sessions/${id}/passphrase`, { method: "POST", headers });
+      const res = await fetch(`/api/sessions/${id}/passphrase`, { method: "POST", headers: await controllerHeaders(id) });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || "Couldn't create a passphrase");
       }
       const data = await res.json();
-      setSessionAuth(id, { ...stored, passphrase: data.passphrase });
+      setSessionAuth(id, { ...getSessionAuth(id), passphrase: data.passphrase });
       setCached({ id, value: data.passphrase });
     } catch (e: unknown) {
       setPassphraseError(e instanceof Error ? e.message : "Couldn't create a passphrase");
