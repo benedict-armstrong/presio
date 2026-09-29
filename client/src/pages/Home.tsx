@@ -21,7 +21,7 @@ import { createLocalDeck, ingestPdfFile, type IngestedPdf } from "@/lib/deckImpo
 import { matchReupload } from "@/lib/reupload";
 import { loadExternalPdfMeta, createExternalSession } from "@/lib/externalSession";
 import { supabase } from "@/lib/supabaseClient";
-import { useAuth } from "@/lib/useAuth";
+import { useAuth } from "@/hooks/useAuth";
 import { useRecentDecks } from "@/hooks/useRecentDecks";
 import { formatRecentDate, type RecentDeck } from "@/lib/recentDecks";
 import { DemoReel } from "@/components/home/DemoReel";

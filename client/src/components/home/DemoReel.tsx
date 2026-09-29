@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { REDUCED_MOTION_QUERY, useMediaQuery } from "@/hooks/useMediaQuery";
+import { useResolvedTheme } from "@/hooks/useResolvedTheme";
 
 // Mac-style chrome for the demo frames, so each recording reads as its own
 // window instead of a bare video. Decorative: the dots are not controls.
@@ -35,23 +36,6 @@ function WindowFrame({
       {children}
     </div>
   );
-}
-
-// ThemeProvider toggles `dark` on <html>, so the demo follows it by watching
-// that class rather than prefers-color-scheme — the in-app toggle has to win.
-function useIsDark() {
-  const [dark, setDark] = useState(
-    () => typeof document !== "undefined" && document.documentElement.classList.contains("dark")
-  );
-  useEffect(() => {
-    const root = document.documentElement;
-    const read = () => setDark(root.classList.contains("dark"));
-    read();
-    const obs = new MutationObserver(read);
-    obs.observe(root, { attributes: true, attributeFilter: ["class"] });
-    return () => obs.disconnect();
-  }, []);
-  return dark;
 }
 
 // Tailwind's md breakpoint, read from JS: the parallax has to know whether the
@@ -101,8 +85,7 @@ export function DemoReel() {
 
   // Each theme has its own pair of recordings. Swapping src reloads the video
   // from zero, so the position is carried across the switch.
-  const dark = useIsDark();
-  const theme = dark ? "dark" : "light";
+  const theme = useResolvedTheme();
   const overlapping = useMediaQuery(OVERLAP_QUERY);
   const parallax = useParallax(!reducedMotion && overlapping);
   const resumeAt = useRef(0);

@@ -1,13 +1,13 @@
 import { useEffect } from "react";
-import { ThemeContext, type Theme } from "./useTheme";
-import { useSetting } from "./settings";
+import { ThemeContext } from "@/hooks/useTheme";
+import { useSetting, type ThemeSetting } from "./settings";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useSetting("theme");
 
   useEffect(() => {
     const root = document.documentElement;
-    const apply = (t: Theme) => {
+    const apply = (t: ThemeSetting) => {
       const dark =
         t === "dark" || (t === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
       root.classList.toggle("dark", dark);

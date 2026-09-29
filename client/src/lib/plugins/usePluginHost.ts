@@ -20,6 +20,7 @@ import { clockOffset, onClockSample } from "@/lib/clock";
 import { resolvePluginSettings, useSettingsDocument } from "@/lib/settings";
 import { getSessionAuth } from "@/lib/sessionAuth";
 import { blobSha, type HistoryEntry, type HistoryLink, type SyncReply } from "./history";
+import { useResolvedTheme } from "@/hooks/useResolvedTheme";
 
 interface PluginsState {
   plugins: PublishedPlugin[];
@@ -60,17 +61,6 @@ function loadFailureReason(e: unknown, url: string): string {
 /** Plugins that run on audience devices, which the presenter publishes. */
 function runsOnViewers(manifest: Pick<PluginManifest, "surfaces">): boolean {
   return manifest.surfaces.includes("viewer") || manifest.surfaces.includes("slide");
-}
-
-function useTheme(): "light" | "dark" {
-  const read = () => (document.documentElement.classList.contains("dark") ? "dark" : "light");
-  const [theme, setTheme] = useState<"light" | "dark">(read);
-  useEffect(() => {
-    const observer = new MutationObserver(() => setTheme(read()));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, []);
-  return theme;
 }
 
 /** The deck's attachments, read once per document. */
@@ -269,7 +259,7 @@ export function usePluginHost({
   currentSlide: number;
   totalSlides: number;
 }): PluginHostState {
-  const theme = useTheme();
+  const theme = useResolvedTheme();
   const join = useJoinUrl(id, "viewer");
   const ctx: PluginContext = {
     role: isPresenter ? "presenter" : "audience",
