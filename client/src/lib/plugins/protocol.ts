@@ -2,6 +2,8 @@
 // about its context and view, and what plugins send between devices.
 
 import type { Retain } from "@shared/pluginProtocol";
+import type { HistoryFrameMessage } from "./history";
+import type { PluginSurface } from "./manifest";
 
 export type PluginRole = "presenter" | "audience";
 
@@ -125,3 +127,55 @@ export interface FrameLink {
   setPage(page: SlidePage): void;
   setHovered(hovered: boolean): void;
 }
+
+/** What a frame is told about itself at boot and on a "context" message. */
+export interface FrameContext extends PluginContext {
+  pluginId: string;
+  surface: PluginSurface;
+  settings: Record<string, unknown>;
+  storage: Record<string, unknown>;
+  clockOffset: number;
+  /** Each command's key, as the presenter sees it ("E", "⌘Z"). */
+  shortcuts: Record<string, string>;
+  baseUrl: string;
+  view: SlideView;
+  page: SlidePage;
+  hovered: boolean;
+}
+
+/** Everything the app sends a frame over its port (plugin-frame.html reads these). */
+export type HostToFrame =
+  | { type: "context"; context: FrameContext }
+  | { type: "slide"; slide: PluginContext["slide"] }
+  | { type: "deck"; kind: DeckChange }
+  | { type: "shortcuts"; shortcuts: Record<string, string> }
+  | { type: "clock"; offset: number }
+  | { type: "storage"; storage: Record<string, unknown> }
+  | { type: "settings"; settings: Record<string, unknown> }
+  | { type: "view"; view: SlideView }
+  | { type: "page"; page: SlidePage }
+  | { type: "hover"; hovered: boolean }
+  | { type: "button"; id: string; file?: ButtonFile }
+  | { type: "menu"; id: string; item: string }
+  | { type: "command"; id: string }
+  | { type: "export"; id: number; mode: ExportMode; bytes: Uint8Array }
+  | ({ type: "history" } & (HistoryFrameMessage | { kind: "snapshot"; id: number }))
+  | { type: "message"; message: { type: string; payload: unknown; from: PluginRole; sender?: string } }
+  | { type: "reply"; id: unknown; result: unknown; error?: string };
+
+/**
+ * Everything a frame sends the app. Frames are plugin code, so every field is
+ * unknown until the handler for its type has checked it.
+ */
+export type FrameToHost =
+  | { type: "send"; msgType?: unknown; payload?: unknown; retain?: unknown; volatile?: unknown }
+  | { type: "storage"; key?: unknown; value?: unknown }
+  | { type: "visible"; visible?: unknown }
+  | { type: "interactive"; value?: unknown }
+  | { type: "layers"; slide?: unknown; items?: unknown; clear?: unknown }
+  | { type: "ready" }
+  | { type: "button"; id?: unknown; state?: unknown }
+  | { type: "exporter"; on?: unknown }
+  | { type: "exported"; id?: unknown; bytes?: unknown; error?: unknown }
+  | { type: "history"; kind?: unknown; id?: unknown; op?: unknown; snapshots?: unknown; seq?: unknown; data?: unknown }
+  | { type: "request"; id?: unknown; kind?: unknown; args?: unknown };

@@ -41,7 +41,7 @@
     var history = null;
     // Messages that arrive before the plugin subscribes (retained state is
     // replayed right after boot) wait here instead of being dropped.
-    var pending = [];
+    var unheard = [];
     var requests = {};
     var nextRequest = 1;
 
@@ -80,56 +80,63 @@
       return subscribe(map[id], cb);
     }
 
-    port.onmessage = function (e) {
-      var m = e.data;
-      if (m.type === "slide") {
+    // What each message from the app does, by type (HostToFrame in
+    // src/lib/plugins/protocol.ts lists them).
+    var handlers = {
+      slide: function (m) {
         ctx.slide = m.slide;
         each(slideListeners, ctx.slide);
-      } else if (m.type === "context") {
+      },
+      context: function (m) {
         ctx = m.context;
         each(contextListeners, api);
-      } else if (m.type === "settings") {
+      },
+      settings: function (m) {
         ctx.settings = m.settings;
         each(settingsListeners, ctx.settings);
-      } else if (m.type === "storage") {
+      },
+      storage: function (m) {
         ctx.storage = m.storage;
         each(storageListeners, Object.assign({}, ctx.storage));
-      } else if (m.type === "shortcuts") {
+      },
+      shortcuts: function (m) {
         ctx.shortcuts = m.shortcuts;
         each(contextListeners, api);
-      } else if (m.type === "clock") {
-        ctx.clockOffset = m.offset;
-      } else if (m.type === "deck") {
-        each(deckListeners, m.kind || "replace");
-      } else if (m.type === "view") {
+      },
+      clock: function (m) { ctx.clockOffset = m.offset; },
+      deck: function (m) { each(deckListeners, m.kind || "replace"); },
+      view: function (m) {
         ctx.view = m.view;
         each(viewListeners, ctx.view);
-      } else if (m.type === "page") {
+      },
+      page: function (m) {
         ctx.page = m.page;
         each(pageListeners, ctx.page);
-      } else if (m.type === "hover") {
+      },
+      hover: function (m) {
         ctx.hovered = m.hovered;
         each(hoverListeners, ctx.hovered);
-      } else if (m.type === "button") {
-        each(buttonListeners[m.id] || [], m.id, m.file);
-      } else if (m.type === "menu") {
-        each(menuListeners[m.id] || [], m.item, m.id);
-      } else if (m.type === "command") {
-        each(commandListeners[m.id] || [], m.id);
-      } else if (m.type === "export") {
-        runExport(m);
-      } else if (m.type === "history") {
-        if (history) history.receive(m);
-      } else if (m.type === "message") {
+      },
+      button: function (m) { each(buttonListeners[m.id] || [], m.id, m.file); },
+      menu: function (m) { each(menuListeners[m.id] || [], m.item, m.id); },
+      command: function (m) { each(commandListeners[m.id] || [], m.id); },
+      export: function (m) { runExport(m); },
+      history: function (m) { if (history) history.receive(m); },
+      message: function (m) {
         if (messageListeners.length) each(messageListeners, m.message);
-        else pending.push(m.message);
-      } else if (m.type === "reply") {
+        else unheard.push(m.message);
+      },
+      reply: function (m) {
         var r = requests[m.id];
         delete requests[m.id];
         if (!r) return;
         if (m.error) r.reject(new Error(m.error));
         else r.resolve(m.result);
-      }
+      },
+    };
+    port.onmessage = function (e) {
+      var m = e.data;
+      if (m && Object.prototype.hasOwnProperty.call(handlers, m.type)) handlers[m.type](m);
     };
 
     // The presenter is downloading the deck: pass it through this plugin's
@@ -336,8 +343,8 @@
       /** cb({ type, payload, from: "presenter" | "audience", sender? }) */
       onMessage: function (cb) {
         var off = subscribe(messageListeners, cb);
-        var queued = pending;
-        pending = [];
+        var queued = unheard;
+        unheard = [];
         queued.forEach(function (m) { each([cb], m); });
         return off;
       },

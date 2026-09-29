@@ -6,7 +6,7 @@ import { sanitizeSettingValue, setPluginSetting } from "@/lib/settings";
 import { MAX_BLOB_BYTES } from "@shared/limits";
 import { SHA256_RE } from "@shared/pluginProtocol";
 import type { HistoryHub } from "./history";
-import type { PluginManifest } from "./manifest";
+import type { PluginManifest, PluginPermission } from "./manifest";
 import type { PageSize, PluginRole } from "./protocol";
 import { asRecord } from "./sanitize";
 
@@ -28,18 +28,22 @@ export interface Reply {
 
 const reply = (result: unknown, error?: string): Reply => ({ result, error });
 
-/** Answer one request from a plugin's frame. */
-export async function answerRequest(env: RequestEnv, manifest: PluginManifest, kind: unknown, args: unknown): Promise<Reply> {
-  const a = asRecord(args);
-  const readsDeck = kind === "attachments" || kind === "deckBytes" || kind === "pages";
-  if (readsDeck && !manifest.permissions.includes("deck")) {
-    return reply(null, 'Reading the deck needs the "deck" permission in presio-plugin.json');
-  }
-  if ((kind === "blobPut" || kind === "blobGet") && !manifest.permissions.includes("history")) {
-    return reply(null, 'Blobs need the "history" permission in presio-plugin.json');
-  }
-  switch (kind) {
-    case "attachments": {
+interface RequestSpec {
+  /** The manifest permission it needs, and what to say without it. */
+  permission?: { name: PluginPermission; missing: string };
+  /** Only the presenter's frames may ask; what to say to anyone else. */
+  presenterOnly?: string;
+  run: (env: RequestEnv, a: Record<string, unknown>, manifest: PluginManifest) => Promise<Reply> | Reply;
+}
+
+const READS_DECK = { name: "deck", missing: 'Reading the deck needs the "deck" permission in presio-plugin.json' } as const;
+const USES_BLOBS = { name: "history", missing: 'Blobs need the "history" permission in presio-plugin.json' } as const;
+
+/** Every request a frame can make, by kind. */
+const REQUESTS: Record<string, RequestSpec> = {
+  attachments: {
+    permission: READS_DECK,
+    run: async (env) => {
       try {
         // Copies, so a plugin can't mutate the bytes the app itself renders from.
         const list = await env.attachments();
@@ -47,8 +51,11 @@ export async function answerRequest(env: RequestEnv, manifest: PluginManifest, k
       } catch {
         return reply(null, "Couldn't read the deck's attachments");
       }
-    }
-    case "deckBytes": {
+    },
+  },
+  deckBytes: {
+    permission: READS_DECK,
+    run: async (env) => {
       try {
         const bytes = await env.deckBytes();
         if (!bytes) return reply(null, "The deck hasn't loaded yet");
@@ -56,19 +63,23 @@ export async function answerRequest(env: RequestEnv, manifest: PluginManifest, k
       } catch {
         return reply(null, "Couldn't read the deck");
       }
-    }
-    case "pages": {
+    },
+  },
+  pages: {
+    permission: READS_DECK,
+    run: async (env) => {
       try {
         return reply(await env.pageSizes());
       } catch {
         return reply(null, "Couldn't read the deck's pages");
       }
-    }
-    case "saveDeck": {
-      if (!manifest.permissions.includes("editDeck")) {
-        return reply(null, 'Saving the deck needs the "editDeck" permission in presio-plugin.json');
-      }
-      if (env.role !== "presenter" || !env.saveDeck) return reply(null, "The deck can't be edited from here");
+    },
+  },
+  saveDeck: {
+    permission: { name: "editDeck", missing: 'Saving the deck needs the "editDeck" permission in presio-plugin.json' },
+    presenterOnly: "The deck can't be edited from here",
+    run: async (env, a) => {
+      if (!env.saveDeck) return reply(null, "The deck can't be edited from here");
       if (!(a.bytes instanceof Uint8Array)) return reply(null, "save() takes the PDF as a Uint8Array");
       try {
         await env.saveDeck(a.bytes);
@@ -76,16 +87,21 @@ export async function answerRequest(env: RequestEnv, manifest: PluginManifest, k
       } catch (e) {
         return reply(null, e instanceof Error ? e.message : "Couldn't save the deck");
       }
-    }
-    case "setSetting": {
+    },
+  },
+  setSetting: {
+    presenterOnly: "Only the presenter can change settings",
+    run: (_env, a, manifest) => {
       const spec = typeof a.name === "string" ? manifest.contributes.settings[a.name] : undefined;
-      if (env.role !== "presenter") return reply(null, "Only the presenter can change settings");
       if (!spec) return reply(null, `No setting "${String(a.name)}" in presio-plugin.json`);
       if (sanitizeSettingValue(spec, a.value) === undefined) return reply(null, `Invalid value for "${a.name as string}"`);
       setPluginSetting(manifest.id, a.name as string, spec, a.value);
       return reply(null);
-    }
-    case "blobPut": {
+    },
+  },
+  blobPut: {
+    permission: USES_BLOBS,
+    run: async (env, a) => {
       const data = a.data;
       const blob =
         data instanceof Blob ? data
@@ -98,12 +114,22 @@ export async function answerRequest(env: RequestEnv, manifest: PluginManifest, k
       } catch (e) {
         return reply(null, e instanceof Error ? e.message : "Couldn't keep the blob");
       }
-    }
-    case "blobGet": {
+    },
+  },
+  blobGet: {
+    permission: USES_BLOBS,
+    run: async (env, a) => {
       if (typeof a.sha !== "string" || !SHA256_RE.test(a.sha)) return reply(null, "blobs.get() takes a blob's hash");
       return reply(await env.history.getBlob(a.sha));
-    }
-    default:
-      return reply(null, `Unknown request "${String(kind)}"`);
-  }
+    },
+  },
+};
+
+/** Answer one request from a plugin's frame. */
+export async function answerRequest(env: RequestEnv, manifest: PluginManifest, kind: unknown, args: unknown): Promise<Reply> {
+  const spec = typeof kind === "string" && Object.hasOwn(REQUESTS, kind) ? REQUESTS[kind] : undefined;
+  if (!spec) return reply(null, `Unknown request "${String(kind)}"`);
+  if (spec.permission && !manifest.permissions.includes(spec.permission.name)) return reply(null, spec.permission.missing);
+  if (spec.presenterOnly && env.role !== "presenter") return reply(null, spec.presenterOnly);
+  return spec.run(env, asRecord(args), manifest);
 }

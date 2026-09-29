@@ -18,7 +18,10 @@ import {
   type ButtonState,
   type DeckChange,
   type ExportMode,
+  type FrameContext,
   type FrameHooks,
+  type FrameToHost,
+  type HostToFrame,
   type FrameLink,
   type LayerItem,
   type PageSize,
@@ -128,7 +131,7 @@ export class PluginHost {
     if (!changed) return;
     const kind = this.nextDeckChange;
     this.nextDeckChange = "replace";
-    for (const conn of this.conns) conn.port.postMessage({ type: "deck", kind });
+    for (const conn of this.conns) post(conn.port, { type: "deck", kind });
     // Histories are the deck's: one with a different page count is a
     // different document (see HistoryHub.setPages).
     void pages().then(
@@ -165,12 +168,12 @@ export class PluginHost {
       prev.session.local !== next.session.local ||
       prev.session.joinUrl !== next.session.joinUrl;
     for (const conn of this.conns) {
-      if (otherChanged) conn.port.postMessage({ type: "context", context: this.frameContext(conn.plugin, conn.surface) });
-      else if (slideChanged) conn.port.postMessage({ type: "slide", slide: next.slide });
+      if (otherChanged) post(conn.port, { type: "context", context: this.frameContext(conn.plugin, conn.surface) });
+      else if (slideChanged) post(conn.port, { type: "slide", slide: next.slide });
     }
   }
 
-  frameContext(plugin: LoadedPlugin, surface: PluginSurface) {
+  frameContext(plugin: LoadedPlugin, surface: PluginSurface): FrameContext {
     const pluginId = plugin.manifest.id;
     return {
       pluginId,
@@ -201,14 +204,14 @@ export class PluginHost {
   setKeymap(keymap: Keymap) {
     if (keymap === this.keymap) return;
     this.keymap = keymap;
-    for (const conn of this.conns) conn.port.postMessage({ type: "shortcuts", shortcuts: this.shortcuts(conn.plugin) });
+    for (const conn of this.conns) post(conn.port, { type: "shortcuts", shortcuts: this.shortcuts(conn.plugin) });
   }
 
   /** The server clock moved (lib/clock.ts); frames keep their own copy. */
   setClockOffset(offset: number) {
     if (Math.abs(offset - this.clock) < 1) return;
     this.clock = offset;
-    for (const conn of this.conns) conn.port.postMessage({ type: "clock", offset });
+    for (const conn of this.conns) post(conn.port, { type: "clock", offset });
   }
 
   // --- Static layers (presio.layers) ---
@@ -251,7 +254,7 @@ export class PluginHost {
     this.layerListeners.forEach((l) => l());
   }
 
-  private onLayers(conn: Conn, m: { slide?: unknown; items?: unknown; clear?: unknown }) {
+  private onLayers(conn: Conn, m: Extract<FrameToHost, { type: "layers" }>) {
     const pluginId = conn.plugin.manifest.id;
     if (m.clear === true) {
       if (this.layers.delete(pluginId)) this.layersChanged();
@@ -280,7 +283,7 @@ export class PluginHost {
     const pluginId = conn.plugin.manifest.id;
     // The frame already applied the write to its own copy; when it's refused,
     // hand back what is actually stored so the two don't disagree.
-    const refuse = () => conn.port.postMessage({ type: "storage", storage: this.readStorage(pluginId) });
+    const refuse = () => post(conn.port, { type: "storage", storage: this.readStorage(pluginId) });
     // A local deck's viewer window shares this browser's storage; only the
     // presenter's frames write it.
     if (this.ctx.role !== "presenter" || typeof key !== "string" || !PLUGIN_TYPE_RE.test(key)) return refuse();
@@ -295,7 +298,7 @@ export class PluginHost {
     const all = lsGet<Record<string, unknown>>(storeKey, {});
     lsSet(storeKey, { ...all, [pluginId]: next });
     for (const other of this.conns) {
-      if (other !== conn && other.plugin.manifest.id === pluginId) other.port.postMessage({ type: "storage", storage: next });
+      if (other !== conn && other.plugin.manifest.id === pluginId) post(other.port, { type: "storage", storage: next });
     }
   }
 
@@ -305,7 +308,7 @@ export class PluginHost {
     if (prev && JSON.stringify(prev) === JSON.stringify(values)) return;
     this.settings.set(pluginId, values);
     for (const conn of this.conns) {
-      if (conn.plugin.manifest.id === pluginId) conn.port.postMessage({ type: "settings", settings: values });
+      if (conn.plugin.manifest.id === pluginId) post(conn.port, { type: "settings", settings: values });
     }
   }
 
@@ -328,17 +331,17 @@ export class PluginHost {
    * (`accept`) arrives with the one picked.
    */
   pressButton(pluginId: string, buttonId: string, file?: ButtonFile) {
-    for (const conn of this.handlerFrames(pluginId)) conn.port.postMessage({ type: "button", id: buttonId, file });
+    for (const conn of this.handlerFrames(pluginId)) post(conn.port, { type: "button", id: buttonId, file });
   }
 
   /** The presenter picked an item from a button's menu; delivered like a press. */
   pickMenuItem(pluginId: string, buttonId: string, itemId: string) {
-    for (const conn of this.handlerFrames(pluginId)) conn.port.postMessage({ type: "menu", id: buttonId, item: itemId });
+    for (const conn of this.handlerFrames(pluginId)) post(conn.port, { type: "menu", id: buttonId, item: itemId });
   }
 
   /** The presenter pressed one of a plugin's keybindings; delivered like a button. */
   runCommand(pluginId: string, command: string) {
-    for (const conn of this.handlerFrames(pluginId)) conn.port.postMessage({ type: "command", id: command });
+    for (const conn of this.handlerFrames(pluginId)) post(conn.port, { type: "command", id: command });
   }
 
   private handlerFrames(pluginId: string): Conn[] {
@@ -351,7 +354,7 @@ export class PluginHost {
 
   private deliverHistory(plugin: string, message: HistoryFrameMessage) {
     for (const conn of this.conns) {
-      if (conn.history && conn.plugin.manifest.id === plugin) conn.port.postMessage({ type: "history", ...message });
+      if (conn.history && conn.plugin.manifest.id === plugin) post(conn.port, { type: "history", ...message });
     }
   }
 
@@ -371,11 +374,11 @@ export class PluginHost {
         this.snapshots.delete(id);
         resolve(typeof seq === "number" && Number.isInteger(seq) && data !== undefined ? { seq, data } : null);
       });
-      conn.port.postMessage({ type: "history", kind: "snapshot", id });
+      post(conn.port, { type: "history", kind: "snapshot", id });
     });
   }
 
-  private onHistoryMessage(conn: Conn, m: Record<string, unknown>) {
+  private onHistoryMessage(conn: Conn, m: Extract<FrameToHost, { type: "history" }>) {
     const plugin = conn.plugin.manifest.id;
     if (!conn.plugin.manifest.permissions.includes("history")) {
       console.warn(`Plugin "${plugin}" needs the "history" permission for presio.history`);
@@ -388,7 +391,7 @@ export class PluginHost {
     } else if (m.kind === "commit") {
       if (typeof m.id !== "string" || !OP_ID_RE.test(m.id)) return;
       const result = this.history.commit(plugin, m.id, m.op);
-      if (result) conn.port.postMessage({ type: "history", kind: "error", id: m.id, error: result });
+      if (result) post(conn.port, { type: "history", kind: "error", id: m.id, error: result });
     } else if (m.kind === "snapshot") {
       if (typeof m.id === "number") this.snapshots.get(m.id)?.({ seq: m.seq, data: m.data });
     }
@@ -430,7 +433,7 @@ export class PluginHost {
         else reject(new Error(typeof result.error === "string" ? result.error : "no PDF returned"));
       });
       // A copy: the caller's bytes stay intact whatever the plugin does.
-      conn.port.postMessage({ type: "export", id, mode, bytes: bytes.slice() });
+      post(conn.port, { type: "export", id, mode, bytes: bytes.slice() });
     });
   }
 
@@ -457,17 +460,17 @@ export class PluginHost {
       setView: (next) => {
         if (next.x === view.x && next.y === view.y && next.w === view.w && next.h === view.h && next.scale === view.scale) return;
         view = next;
-        port.postMessage({ type: "view", view });
+        post(port, { type: "view", view });
       },
       setPage: (next) => {
         if (next.x === page.x && next.y === page.y && next.w === page.w && next.h === page.h) return;
         page = next;
-        port.postMessage({ type: "page", page });
+        post(port, { type: "page", page });
       },
       setHovered: (next) => {
         if (next === hovered) return;
         hovered = next;
-        port.postMessage({ type: "hover", hovered });
+        post(port, { type: "hover", hovered });
       },
     };
   }
@@ -496,56 +499,56 @@ export class PluginHost {
   }
 
   private deliver(conn: Conn, event: WireEvent) {
-    conn.port.postMessage({
+    post(conn.port, {
       type: "message",
       message: { type: event.type, payload: event.payload, from: event.from ?? "presenter", sender: event.sender },
     });
   }
 
-  private onFrameMessage(conn: Conn, m: { type?: string; [key: string]: unknown }) {
-    if (m?.type === "send") {
-      if (typeof m.msgType !== "string" || !PLUGIN_TYPE_RE.test(m.msgType)) return;
-      // The server drops what's over the cap, so this device's other frames
-      // mustn't see it either (nor keep it, to be re-sent on every join).
-      if (jsonBytes(m.payload ?? null) > MAX_PLUGIN_MESSAGE_BYTES) {
-        console.warn(`Plugin "${conn.plugin.manifest.id}": "${m.msgType}" is over ${MAX_PLUGIN_MESSAGE_BYTES / 1024} KB of JSON and wasn't sent`);
-        return;
-      }
-      const event: WireEvent = {
-        plugin: conn.plugin.manifest.id,
-        type: m.msgType,
-        payload: m.payload ?? null,
-        retain: this.ctx.role === "presenter" && (m.retain === true || m.retain === "deck") ? m.retain : false,
-        volatile: m.volatile === true,
-        from: this.ctx.role,
-      };
-      if (event.retain) this.retained.keep(event);
-      // The plugin's other frames on this page, then everyone else.
-      for (const other of this.conns) {
-        if (other !== conn && other.plugin.manifest.id === event.plugin) this.deliver(other, event);
-      }
-      this.outbound(event);
-    } else if (m?.type === "storage") {
-      this.onStorageSet(conn, m.key, m.value);
-    } else if (m?.type === "visible") {
-      conn.onVisible?.(m.visible === true);
-    } else if (m?.type === "interactive") {
-      conn.onInteractive?.(sanitizeInteractive(m.value));
-    } else if (m?.type === "layers") {
-      this.onLayers(conn, m as { slide?: unknown; items?: unknown; clear?: unknown });
-    } else if (m?.type === "ready") {
-      conn.onReady?.();
-    } else if (m?.type === "button") {
-      this.onButtonState(conn, m.id, m.state);
-    } else if (m?.type === "exporter") {
-      conn.exporter = m.on === true;
-    } else if (m?.type === "exported") {
+  private onFrameMessage(conn: Conn, m: FrameToHost) {
+    const handle = this.frameHandlers[m?.type] as ((conn: Conn, m: FrameToHost) => void) | undefined;
+    handle?.(conn, m);
+  }
+
+  /** What each frame message does, by type. */
+  private readonly frameHandlers: { [T in FrameToHost["type"]]: (conn: Conn, m: Extract<FrameToHost, { type: T }>) => void } = {
+    send: (conn, m) => this.onSend(conn, m),
+    storage: (conn, m) => this.onStorageSet(conn, m.key, m.value),
+    visible: (conn, m) => conn.onVisible?.(m.visible === true),
+    interactive: (conn, m) => conn.onInteractive?.(sanitizeInteractive(m.value)),
+    layers: (conn, m) => this.onLayers(conn, m),
+    ready: (conn) => conn.onReady?.(),
+    button: (conn, m) => this.onButtonState(conn, m.id, m.state),
+    exporter: (conn, m) => { conn.exporter = m.on === true; },
+    exported: (_conn, m) => {
       if (typeof m.id === "number") this.exports.get(m.id)?.({ bytes: m.bytes, error: m.error });
-    } else if (m?.type === "history") {
-      this.onHistoryMessage(conn, m);
-    } else if (m?.type === "request") {
-      void this.answer(conn, m.id, m.kind, m.args);
+    },
+    history: (conn, m) => this.onHistoryMessage(conn, m),
+    request: (conn, m) => void this.answer(conn, m.id, m.kind, m.args),
+  };
+
+  /** presio.send: to the plugin's other frames here, then out to other devices. */
+  private onSend(conn: Conn, m: Extract<FrameToHost, { type: "send" }>) {
+    if (typeof m.msgType !== "string" || !PLUGIN_TYPE_RE.test(m.msgType)) return;
+    // The server drops what's over the cap, so this device's other frames
+    // mustn't see it either (nor keep it, to be re-sent on every join).
+    if (jsonBytes(m.payload ?? null) > MAX_PLUGIN_MESSAGE_BYTES) {
+      console.warn(`Plugin "${conn.plugin.manifest.id}": "${m.msgType}" is over ${MAX_PLUGIN_MESSAGE_BYTES / 1024} KB of JSON and wasn't sent`);
+      return;
     }
+    const event: WireEvent = {
+      plugin: conn.plugin.manifest.id,
+      type: m.msgType,
+      payload: m.payload ?? null,
+      retain: this.ctx.role === "presenter" && (m.retain === true || m.retain === "deck") ? m.retain : false,
+      volatile: m.volatile === true,
+      from: this.ctx.role,
+    };
+    if (event.retain) this.retained.keep(event);
+    for (const other of this.conns) {
+      if (other !== conn && other.plugin.manifest.id === event.plugin) this.deliver(other, event);
+    }
+    this.outbound(event);
   }
 
   private onButtonState(conn: Conn, id: unknown, state: unknown) {
@@ -561,7 +564,7 @@ export class PluginHost {
 
   private async answer(conn: Conn, id: unknown, kind: unknown, args: unknown) {
     const { result, error } = await answerRequest(this.requestEnv(), conn.plugin.manifest, kind, args);
-    conn.port.postMessage({ type: "reply", id, result, error });
+    post(conn.port, { type: "reply", id, result, error });
   }
 
   private requestEnv(): RequestEnv {
@@ -574,4 +577,9 @@ export class PluginHost {
       history: this.history,
     };
   }
+}
+
+/** Send a frame one of the messages it understands. */
+function post(port: MessagePort, m: HostToFrame) {
+  port.postMessage(m);
 }
