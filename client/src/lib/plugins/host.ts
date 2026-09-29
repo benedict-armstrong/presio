@@ -330,23 +330,33 @@ export class PluginHost {
    * (`accept`) arrives with the one picked.
    */
   pressButton(pluginId: string, buttonId: string, file?: ButtonFile) {
-    for (const conn of this.handlerFrames(pluginId)) post(conn.port, { type: "button", id: buttonId, file });
+    const conn = this.handlerFrame(pluginId);
+    if (conn) post(conn.port, { type: "button", id: buttonId, file });
   }
 
   /** The presenter picked an item from a button's menu; delivered like a press. */
   pickMenuItem(pluginId: string, buttonId: string, itemId: string) {
-    for (const conn of this.handlerFrames(pluginId)) post(conn.port, { type: "menu", id: buttonId, item: itemId });
+    const conn = this.handlerFrame(pluginId);
+    if (conn) post(conn.port, { type: "menu", id: buttonId, item: itemId });
   }
 
   /** The presenter pressed one of a plugin's keybindings; delivered like a button. */
   runCommand(pluginId: string, command: string) {
-    for (const conn of this.handlerFrames(pluginId)) post(conn.port, { type: "command", id: command });
+    const conn = this.handlerFrame(pluginId);
+    if (conn) post(conn.port, { type: "command", id: command });
   }
 
-  private handlerFrames(pluginId: string): Conn[] {
-    const mine = [...this.conns].filter((c) => c.plugin.manifest.id === pluginId);
-    const background = mine.filter((c) => c.surface === "background");
-    return background.length ? background : mine.filter((c) => c.surface === "tile");
+  private handlerFrame(pluginId: string): Conn | undefined {
+    return this.primaryFrame(pluginId, (c) => c.surface === "background" || c.surface === "tile");
+  }
+
+  /**
+   * The one frame of a plugin that answers for it: its background when that
+   * qualifies (it's always running), else the first that does.
+   */
+  private primaryFrame(pluginId: string, qualifies: (conn: Conn) => boolean): Conn | undefined {
+    const frames = [...this.conns].filter((c) => c.plugin.manifest.id === pluginId && qualifies(c));
+    return frames.find((c) => c.surface === "background") ?? frames[0];
   }
 
   // --- Histories (presio.history) ---
@@ -359,8 +369,7 @@ export class PluginHost {
 
   /** Ask one of a plugin's frames (its background, if open) for a snapshot. */
   private async requestSnapshot(plugin: string): Promise<{ seq: number; data: unknown } | null> {
-    const frames = [...this.conns].filter((c) => c.plugin.manifest.id === plugin && c.history && c.snapshots);
-    const conn = frames.find((c) => c.surface === "background") ?? frames[0];
+    const conn = this.primaryFrame(plugin, (c) => !!c.history && !!c.snapshots);
     if (!conn) return null;
     // No answer in time is no snapshot: the history goes on without one.
     const reply = await this.snapshots.start((id) => post(conn.port, { type: "history", kind: "snapshot", id })).catch(() => null);
@@ -398,8 +407,7 @@ export class PluginHost {
   async exportDeck(bytes: Uint8Array, mode: ExportMode): Promise<Uint8Array> {
     let out = bytes;
     for (const pluginId of this.running) {
-      const frames = [...this.conns].filter((c) => c.plugin.manifest.id === pluginId && c.exporter);
-      const conn = frames.find((c) => c.surface === "background") ?? frames[0];
+      const conn = this.primaryFrame(pluginId, (c) => !!c.exporter);
       if (!conn) continue;
       try {
         out = await this.exportThrough(conn, out, mode);
