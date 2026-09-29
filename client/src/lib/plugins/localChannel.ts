@@ -4,6 +4,7 @@
 import type { PluginHost } from "./host";
 import type { HistoryEntry, SyncReply } from "./history";
 import type { WireEvent } from "./protocol";
+import { PendingCalls } from "./pendingCalls";
 
 /** Everything the windows say to each other on the channel. */
 type ChannelMessage =
@@ -33,8 +34,7 @@ export function connectLocalChannel(host: PluginHost, id: string, isPresenter: b
   // Histories: the presenter's window orders edits and passes each on; the
   // viewer window asks it for what it's missing (blobs it reads itself, from
   // this browser's IndexedDB).
-  const syncs = new Map<number, (reply: SyncReply) => void>();
-  let nextSync = 1;
+  const syncs = new PendingCalls<SyncReply>(SYNC_TIMEOUT_MS, "the presenter's window didn't answer");
   host.history.setLink(
     isPresenter
       ? {
@@ -44,20 +44,7 @@ export function connectLocalChannel(host: PluginHost, id: string, isPresenter: b
           loaded: (plugin) => post({ kind: "history_loaded", plugin }),
         }
       : {
-          sync: (plugin, head) =>
-            new Promise<SyncReply>((resolve, reject) => {
-              const reqId = nextSync++;
-              const timer = setTimeout(() => {
-                syncs.delete(reqId);
-                reject(new Error("the presenter's window didn't answer"));
-              }, SYNC_TIMEOUT_MS);
-              syncs.set(reqId, (reply) => {
-                clearTimeout(timer);
-                syncs.delete(reqId);
-                resolve(reply);
-              });
-              post({ kind: "history_sync", reqId, plugin, head });
-            }),
+          sync: (plugin, head) => syncs.start((reqId) => post({ kind: "history_sync", reqId, plugin, head })),
         },
     true
   );
@@ -87,7 +74,7 @@ export function connectLocalChannel(host: PluginHost, id: string, isPresenter: b
         if (isPresenter) post({ kind: "history_sync_reply", reqId: m.reqId, reply: host.history.answerSync(m.plugin, m.head) });
         break;
       case "history_sync_reply":
-        if (!isPresenter) syncs.get(m.reqId)?.(m.reply);
+        if (!isPresenter) syncs.settle(m.reqId, m.reply);
         break;
     }
   };

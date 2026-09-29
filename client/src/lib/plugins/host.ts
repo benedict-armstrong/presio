@@ -30,6 +30,7 @@ import {
   type WireEvent,
 } from "./protocol";
 import { RetainedStore } from "./retained";
+import { PendingCalls } from "./pendingCalls";
 import { answerRequest, type RequestEnv } from "./requests";
 import { sanitizeButtonState, sanitizeInteractive, sanitizeLayerItems } from "./sanitize";
 
@@ -75,10 +76,8 @@ export class PluginHost {
   private keymap: Keymap = DEFAULT_KEYMAP;
   // Running plugins in the presenter's order: the order exports apply in.
   private running: readonly string[] = [];
-  private exports = new Map<number, (result: { bytes?: unknown; error?: unknown }) => void>();
-  private nextExport = 1;
-  private snapshots = new Map<number, (result: { seq?: unknown; data?: unknown }) => void>();
-  private nextSnapshot = 1;
+  private exports = new PendingCalls<{ bytes?: unknown; error?: unknown }>(EXPORT_TIMEOUT_MS);
+  private snapshots = new PendingCalls<{ seq?: unknown; data?: unknown }>(SNAPSHOT_TIMEOUT_MS);
   /** Plugins' edit histories (presio.history), and the way to other devices'. */
   readonly history: HistoryHub;
 
@@ -359,23 +358,15 @@ export class PluginHost {
   }
 
   /** Ask one of a plugin's frames (its background, if open) for a snapshot. */
-  private requestSnapshot(plugin: string): Promise<{ seq: number; data: unknown } | null> {
+  private async requestSnapshot(plugin: string): Promise<{ seq: number; data: unknown } | null> {
     const frames = [...this.conns].filter((c) => c.plugin.manifest.id === plugin && c.history && c.snapshots);
     const conn = frames.find((c) => c.surface === "background") ?? frames[0];
-    if (!conn) return Promise.resolve(null);
-    const id = this.nextSnapshot++;
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        this.snapshots.delete(id);
-        resolve(null);
-      }, SNAPSHOT_TIMEOUT_MS);
-      this.snapshots.set(id, ({ seq, data }) => {
-        clearTimeout(timer);
-        this.snapshots.delete(id);
-        resolve(typeof seq === "number" && Number.isInteger(seq) && data !== undefined ? { seq, data } : null);
-      });
-      post(conn.port, { type: "history", kind: "snapshot", id });
-    });
+    if (!conn) return null;
+    // No answer in time is no snapshot: the history goes on without one.
+    const reply = await this.snapshots.start((id) => post(conn.port, { type: "history", kind: "snapshot", id })).catch(() => null);
+    if (!reply) return null;
+    const { seq, data } = reply;
+    return typeof seq === "number" && Number.isInteger(seq) && data !== undefined ? { seq, data } : null;
   }
 
   private onHistoryMessage(conn: Conn, m: Extract<FrameToHost, { type: "history" }>) {
@@ -393,7 +384,7 @@ export class PluginHost {
       const result = this.history.commit(plugin, m.id, m.op);
       if (result) post(conn.port, { type: "history", kind: "error", id: m.id, error: result });
     } else if (m.kind === "snapshot") {
-      if (typeof m.id === "number") this.snapshots.get(m.id)?.({ seq: m.seq, data: m.data });
+      this.snapshots.settle(m.id, { seq: m.seq, data: m.data });
     }
   }
 
@@ -419,22 +410,11 @@ export class PluginHost {
     return out;
   }
 
-  private exportThrough(conn: Conn, bytes: Uint8Array, mode: ExportMode): Promise<Uint8Array> {
-    const id = this.nextExport++;
-    return new Promise<Uint8Array>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.exports.delete(id);
-        reject(new Error("timed out"));
-      }, EXPORT_TIMEOUT_MS);
-      this.exports.set(id, (result) => {
-        clearTimeout(timer);
-        this.exports.delete(id);
-        if (result.bytes instanceof Uint8Array) resolve(result.bytes);
-        else reject(new Error(typeof result.error === "string" ? result.error : "no PDF returned"));
-      });
-      // A copy: the caller's bytes stay intact whatever the plugin does.
-      post(conn.port, { type: "export", id, mode, bytes: bytes.slice() });
-    });
+  private async exportThrough(conn: Conn, bytes: Uint8Array, mode: ExportMode): Promise<Uint8Array> {
+    // A copy: the caller's bytes stay intact whatever the plugin does.
+    const result = await this.exports.start((id) => post(conn.port, { type: "export", id, mode, bytes: bytes.slice() }));
+    if (result.bytes instanceof Uint8Array) return result.bytes;
+    throw new Error(typeof result.error === "string" ? result.error : "no PDF returned");
   }
 
   /**
@@ -520,9 +500,7 @@ export class PluginHost {
     ready: (conn) => conn.onReady?.(),
     button: (conn, m) => this.onButtonState(conn, m.id, m.state),
     exporter: (conn, m) => { conn.exporter = m.on === true; },
-    exported: (_conn, m) => {
-      if (typeof m.id === "number") this.exports.get(m.id)?.({ bytes: m.bytes, error: m.error });
-    },
+    exported: (_conn, m) => this.exports.settle(m.id, { bytes: m.bytes, error: m.error }),
     history: (conn, m) => this.onHistoryMessage(conn, m),
     request: (conn, m) => void this.answer(conn, m.id, m.kind, m.args),
   };
