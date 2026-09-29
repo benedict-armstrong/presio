@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { idbPut } from "@/lib/localStore";
 import { setSessionAuth } from "@/lib/sessionAuth";
+import { sessionPath } from "@/lib/joinUrl";
 
 function safeDecode(value: string): string {
   try {
@@ -55,7 +56,7 @@ export default function Start() {
           method: "POST",
           headers: { "x-controller-token": token },
         });
-        if (!cancelled) navigate(`/s/${id}?role=controller`, { replace: true });
+        if (!cancelled) navigate(sessionPath(id, "controller"), { replace: true });
       } catch (e: unknown) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : "Failed to start presentation");
       }

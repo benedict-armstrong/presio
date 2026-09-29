@@ -282,6 +282,14 @@ export function useLanOrigin(): JoinOrigin {
   };
 }
 
+export type SessionRole = "viewer" | "controller";
+
+/** A session's page in the app, for a role. */
+export const sessionPath = (id: string, role: SessionRole) => `/s/${id}?role=${role}`;
+
+/** A session's share page. */
+export const sharePath = (id: string) => `/s/${id}/share`;
+
 /** Join URLs plus the LAN-address state behind them, for the share surfaces
  *  that render both the links and the field. */
 export function useJoinUrls(id: string) {
@@ -291,15 +299,15 @@ export function useJoinUrls(id: string) {
     origin,
     // Audiences join on the viewer origin when the deployment has one
     // (lib/origins.ts); control always stays on the app origin.
-    viewerUrl: `${viewerOrigin ?? origin}/s/${id}?role=viewer`,
-    controllerUrl: `${origin}/s/${id}?role=controller`,
+    viewerUrl: `${viewerOrigin ?? origin}${sessionPath(id, "viewer")}`,
+    controllerUrl: `${origin}${sessionPath(id, "controller")}`,
   };
 }
 
 /** A single join URL, for surfaces that show a QR without the field. Comes with
  *  the verdict on whether it's worth showing at all. */
-export function useJoinUrl(id: string, role: "viewer" | "controller") {
+export function useJoinUrl(id: string, role: SessionRole) {
   const { origin, shareable } = useLanOrigin();
   const base = role === "viewer" ? (viewerOrigin ?? origin) : origin;
-  return { url: `${base}/s/${id}?role=${role}`, shareable };
+  return { url: `${base}${sessionPath(id, role)}`, shareable };
 }

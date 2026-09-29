@@ -12,6 +12,7 @@ import { ValidityBadge, ValidityDot } from "./ValidityBadge";
 import { PageDetailModal } from "./PageDetailModal";
 import "@/lib/pdf"; // ensure worker is configured
 import { saveFile } from "@/lib/saveFile";
+import { sharePath } from "@/lib/joinUrl";
 
 /** Thumbnails rendered at once. */
 const THUMB_CONCURRENCY = 4;
@@ -212,7 +213,7 @@ export default function CheckerPage() {
       // here and never leaves the browser, so this works with no connection.
       // Its join code is created only if the presenter later shares it.
       const id = await createLocalDeck(await ingestPdfBytes(bytes.slice().buffer, filename));
-      navigate(`/s/${id}/share`);
+      navigate(sharePath(id));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to open presentation");
       setPresenting(false);

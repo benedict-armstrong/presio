@@ -30,6 +30,7 @@ import { FeaturesSection, IntegrationsSection } from "@/components/home/Marketin
 import { JoinCodeInput } from "@/components/home/JoinCodeInput";
 import { REPO_URL } from "@/components/home/links";
 import "@/lib/pdf"; // ensure pdf.js worker is configured
+import { sessionPath, sharePath } from "@/lib/joinUrl";
 
 // A dropped file that matched a known presentation and is waiting on the
 // update-vs-create prompt. The decoded blob is kept so "Create separate"
@@ -114,7 +115,7 @@ export default function Home() {
         // so assigning a bare { controllerToken } would drop a passphrase.
         setSessionAuth(r.id, { ...getSessionAuth(r.id), controllerToken: r.controllerToken });
       }
-      navigate(`/s/${r.id}?role=controller`);
+      navigate(sessionPath(r.id, "controller"));
     },
     [navigate]
   );
@@ -235,7 +236,7 @@ export default function Home() {
       // the controller page to fetch past any copy this browser already has —
       // it's the one most likely to be holding the pre-replace deck. Viewers
       // in the room get there by their own route (the deck_updated broadcast).
-      navigate(`/s/${target.id}?role=controller`, { state: { deckReplaced: Date.now() } });
+      navigate(sessionPath(target.id, "controller"), { state: { deckReplaced: Date.now() } });
     },
     [navigate, setRecents]
   );
@@ -267,7 +268,7 @@ export default function Home() {
   const createDeck = useCallback(
     async (p: IngestedPdf & { handle?: FileSystemFileHandle }) => {
       const id = await createLocalDeck(p, { handle: p.handle, hotReload });
-      navigate(`/s/${id}/share`);
+      navigate(sharePath(id));
     },
     [navigate, hotReload]
   );
@@ -290,7 +291,7 @@ export default function Home() {
           // Byte-identical re-drop — the person most likely lost their link
           // rather than changed their deck. Reopen the existing presentation
           // and create nothing.
-          navigate(`/s/${match.target.id}?role=controller`);
+          navigate(sessionPath(match.target.id, "controller"));
           return;
         }
         if (match) {
@@ -352,7 +353,7 @@ export default function Home() {
         const meta = await loadExternalPdfMeta(pdfUrl);
         const { data: sessionData } = await supabase.auth.getSession();
         const id = await createExternalSession(meta, sessionData.session?.access_token);
-        navigate(`/s/${id}/share`);
+        navigate(sharePath(id));
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Failed to create session");
       } finally {
@@ -488,13 +489,7 @@ export default function Home() {
             <div className='max-w-xl'>
               <h1 className="mb-8 font-mono text-4xl font-semibold leading-[1.06] tracking-tight md:text-5xl">
                 Better PDF presentations.
-                {/* Turn a PDF into a{" "}
-              <span className="text-[var(--home2-accent)]">live</span> presentation. */}
               </h1>
-              {/* <p className="mb-8 max-w-[46ch] text-base text-muted-foreground md:text-[17px]">
-              Drop a deck and get a controller with notes and a viewer that mirrors it in real
-              time — on this laptop, or on every screen in the room.
-            </p> */}
             </div>
             )}
 

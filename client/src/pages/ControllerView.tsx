@@ -27,7 +27,7 @@ import { ControllerDashboard, type CardEntry } from "@/components/controller/Con
 import { ControllerSettings } from "@/components/controller/ControllerSettings";
 import { ShareDialog } from "@/components/controller/ShareDialog";
 import { ConfirmEndDialog } from "@/components/controller/ConfirmEndDialog";
-import { useJoinUrls } from "@/lib/joinUrl";
+import { sessionPath, useJoinUrls } from "@/lib/joinUrl";
 import { ConfirmReplaceDialog } from "@/components/controller/ConfirmReplaceDialog";
 import { useIsLandscape, useIsMobile } from "@/hooks/useIsMobile";
 import { useSlideTapNav } from "@/hooks/useSlideTapNav";
@@ -186,7 +186,7 @@ export function ControllerView({
     const shared = await sync(currentSlide);
     if (!shared) return;
     onSynced();
-    if (shared !== id) navigate(`/s/${shared}?role=controller`, { replace: true });
+    if (shared !== id) navigate(sessionPath(shared, "controller"), { replace: true });
   };
 
   // Rather than auto-opening the viewer (which steals the active tab), prompt
@@ -235,7 +235,7 @@ export function ControllerView({
   // Navigations this device performs itself (viewer popup) use the page's own
   // origin — it always works locally. The share dialog's QR/links honor the
   // presenter-entered LAN address instead (lib/joinUrl.ts), so phones can scan.
-  const viewerUrl = `${window.location.origin}/s/${id}?role=viewer`;
+  const viewerUrl = `${window.location.origin}${sessionPath(id, "viewer")}`;
   const {
     address: lanAddress,
     setAddress: setLanAddress,
@@ -375,7 +375,7 @@ export function ControllerView({
       canSharePassphrase={canSharePassphrase}
       onShare={() => setShareDialogOpen(true)}
       onShowPassphrase={() => { setPassphraseDialogOpen(true); void passphrase.request(); }}
-      onSwitchToViewer={isMobile ? () => navigate(`/s/${id}?role=viewer`, { replace: true }) : undefined}
+      onSwitchToViewer={isMobile ? () => navigate(sessionPath(id, "viewer"), { replace: true }) : undefined}
       onReplaceClick={openReplacePicker}
       onEndClick={() => setConfirmEnd(true)}
       onSettings={() => setSettingsOpen(true)}

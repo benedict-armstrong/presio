@@ -14,7 +14,7 @@
 // settings.json too.
 
 import { useCallback, useSyncExternalStore } from "react";
-import { lsGet, lsSet, STORAGE_KEYS } from "./storage";
+import { lsGet, lsGetString, lsRemove, lsSet, STORAGE_KEYS } from "./storage";
 import { DEFAULT_KEYMAP, KEYMAP_ACTIONS, type KeyBinding, type Keymap } from "./keymap";
 
 // --- Schema ---
@@ -288,22 +288,9 @@ export function importSettings(text: string) {
  */
 function migrateLegacySettings(): Doc {
   const out: Doc = {};
-  const read = (key: string): string | null => {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  };
-  const json = (key: string): unknown => {
-    const raw = read(key);
-    if (raw === null) return undefined;
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return undefined;
-    }
-  };
+  // An empty value is as good as none for every legacy key.
+  const read = (key: string): string | null => lsGetString(key) || null;
+  const json = (key: string): unknown => lsGet<unknown>(key, undefined);
   const put = <K extends CoreSettingKey>(key: K, raw: unknown) => {
     if (raw === undefined || (raw === null && CORE_SETTINGS[key].default !== null)) return;
     const spec = CORE_SETTINGS[key] as CoreSpec<CoreSettings[K]>;
@@ -335,11 +322,7 @@ function migrateLegacySettings(): Doc {
   put("home.minimal", json("presio_home_minimal"));
   if (read("presio_force_desktop") !== null) put("layout.forceDesktop", read("presio_force_desktop") === "true");
 
-  for (const key of LEGACY_KEYS) {
-    try {
-      localStorage.removeItem(key);
-    } catch { /* storage unavailable */ }
-  }
+  for (const key of LEGACY_KEYS) lsRemove(key);
   return out;
 }
 

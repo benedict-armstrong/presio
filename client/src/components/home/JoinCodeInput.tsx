@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { SESSION_CODE_LENGTH } from "@shared/session";
+import { sessionPath } from "@/lib/joinUrl";
 
 /**
  * One box per character of a join code. Typing, pasting and backspacing move
@@ -13,7 +14,7 @@ export function JoinCodeInput() {
   const code = chars.join("");
 
   useEffect(() => {
-    if (code.length === SESSION_CODE_LENGTH) navigate(`/s/${code}?role=viewer`);
+    if (code.length === SESSION_CODE_LENGTH) navigate(sessionPath(code, "viewer"));
   }, [code, navigate]);
 
   return (
@@ -54,7 +55,7 @@ export function JoinCodeInput() {
             } else if (e.key === "ArrowRight" && i < SESSION_CODE_LENGTH - 1) {
               charRefs.current[i + 1]?.focus();
             } else if (e.key === "Enter" && code.length === SESSION_CODE_LENGTH) {
-              navigate(`/s/${code}?role=viewer`);
+              navigate(sessionPath(code, "viewer"));
             }
           }}
           onPaste={(e) => {

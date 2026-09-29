@@ -15,6 +15,7 @@ import { ViewerHint } from "@/components/ViewerHint";
 import { ViewerPluginLayer } from "@/components/plugins/ViewerPluginLayer";
 import { SlideLayers } from "@/components/plugins/SlideLayers";
 import type { PluginHostState } from "@/lib/plugins/usePluginHost";
+import { sessionPath } from "@/lib/joinUrl";
 
 export function ViewerView({
   id,
@@ -118,7 +119,7 @@ export function ViewerView({
         controllerToken: data.controllerToken,
         passphrase: data.passphrase,
       });
-      navigate(`/s/${id}?role=controller`, { replace: true });
+      navigate(sessionPath(id, "controller"), { replace: true });
     } catch (e: unknown) {
       setAuthError(e instanceof Error ? e.message : "Authentication failed");
     } finally {
@@ -210,13 +211,13 @@ export function ViewerView({
                 // origin (lib/origins.ts): ask for the passphrase on the app
                 // origin instead.
                 if (onViewerOrigin) {
-                  window.location.assign(`${appOrigin}/s/${id}?role=viewer&${TAKEOVER_PARAM}=1`);
+                  window.location.assign(`${appOrigin}${sessionPath(id, "viewer")}&${TAKEOVER_PARAM}=1`);
                   return;
                 }
                 // Local sessions are same-device; no passphrase gate needed.
                 const { controllerToken } = getSessionAuth(id);
                 if (local || controllerToken) {
-                  navigate(`/s/${id}?role=controller`, { replace: true });
+                  navigate(sessionPath(id, "controller"), { replace: true });
                 } else {
                   setMenuOpen(false);
                   setAuthOpen(true);

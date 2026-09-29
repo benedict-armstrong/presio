@@ -19,6 +19,7 @@ import {
   TYPST_EXAMPLE_PDF_URL,
   TYPST_PACKAGE_URL,
 } from "./links";
+import { sharePath } from "@/lib/joinUrl";
 
 const FEATURES = [
   {
@@ -74,7 +75,7 @@ export function IntegrationsSection() {
         const meta = await loadExternalPdfMeta(url);
         const { data: sessionData } = await supabase.auth.getSession();
         const id = await createExternalSession(meta, sessionData.session?.access_token);
-        navigate(`/s/${id}/share`);
+        navigate(sharePath(id));
       } catch (e: unknown) {
         setExampleError(e instanceof Error ? e.message : "Failed to open example");
       } finally {

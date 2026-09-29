@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { loadExternalPdfMeta, createExternalSession } from "@/lib/externalSession";
 import { supabase } from "@/lib/supabaseClient";
+import { sessionPath } from "@/lib/joinUrl";
 
 // Deep link: /present?from=<url-to-pdf> creates a shareable session from an
 // externally-hosted PDF and drops the visitor straight into the controller.
@@ -24,7 +25,7 @@ export default function Present() {
         const meta = await loadExternalPdfMeta(from);
         const { data: sessionData } = await supabase.auth.getSession();
         const id = await createExternalSession(meta, sessionData.session?.access_token);
-        if (!cancelled) navigate(`/s/${id}?role=controller`, { replace: true });
+        if (!cancelled) navigate(sessionPath(id, "controller"), { replace: true });
       } catch (e: unknown) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : "Failed to start presentation");
       }

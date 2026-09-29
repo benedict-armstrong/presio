@@ -11,7 +11,7 @@ import { useClaim } from "@/hooks/useClaim";
 import { LoginDialog } from "@/components/LoginDialog";
 import { LanAddressField } from "@/components/LanAddressField";
 import { ShareEmptyState } from "@/components/ShareEmptyState";
-import { useJoinUrls } from "@/lib/joinUrl";
+import { sessionPath, sharePath, useJoinUrls } from "@/lib/joinUrl";
 
 export default function Share() {
   const { id } = useParams<{ id: string }>();
@@ -70,7 +70,7 @@ export default function Share() {
   // Don't auto-open the viewer here — the controller prompts the presenter to
   // open it themselves, which keeps the controller as the active tab.
   const start = (role: "controller" | "viewer") => {
-    navigate(`/s/${id}?role=${role}`);
+    navigate(sessionPath(id!, role));
   };
 
   // Sharing a deck that was never registered mints its code server-side, so
@@ -80,7 +80,7 @@ export default function Share() {
     const shared = await sync();
     if (!shared) return;
     setLocal(false);
-    if (shared !== id) navigate(`/s/${shared}/share`, { replace: true });
+    if (shared !== id) navigate(sharePath(shared), { replace: true });
   };
 
   const showOverlay = local;
