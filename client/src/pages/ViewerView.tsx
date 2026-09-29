@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { RotateCw, EllipsisVertical } from "lucide-react";
 import { getSessionAuth, setSessionAuth } from "@/lib/utils";
 import { appOrigin, onViewerOrigin, TAKEOVER_PARAM } from "@/lib/origins";
+import { isEditableTarget } from "@/lib/keymap";
 import { Button } from "@/components/ui/button";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import { SessionQRCode } from "@/components/SessionQRCode";
@@ -82,6 +83,8 @@ export function ViewerView({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // The passphrase field lives on this page too.
+      if (isEditableTarget(e.target)) return;
       if (e.key === "f" || e.key === "F") {
         if (document.fullscreenElement) document.exitFullscreen();
         else document.documentElement.requestFullscreen();
