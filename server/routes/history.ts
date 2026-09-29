@@ -1,6 +1,6 @@
 import express from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { safeEqual } from "../auth.js";
+import { authorizeController, loadSession } from "../lib/sessionAccess.js";
 import { HistoryError, type HistoryStore } from "../history.js";
 import { MAX_BLOB_BYTES } from "../../shared/limits.js";
 import { SHA256_RE } from "../../shared/pluginProtocol.js";
@@ -24,12 +24,12 @@ export function registerHistoryRoutes(app: express.Express, { supabase, history 
         res.status(400).json({ error: "Bad blob address" });
         return;
       }
-      const { data } = await supabase.from("sessions").select("controller_token").eq("id", id).neq("status", "expired").single();
+      const data = await loadSession(supabase, id, "controller_token");
       if (!data) {
         res.status(404).json({ error: "Session not found" });
         return;
       }
-      if (!safeEqual(req.get("x-controller-token") || "", data.controller_token)) {
+      if (!(await authorizeController(supabase, req, data))) {
         res.status(403).json({ error: "Not authorized" });
         return;
       }

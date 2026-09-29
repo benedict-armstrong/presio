@@ -12,6 +12,7 @@ import { clearSessionState, forgetDeckRetained, type SocketState } from "../sock
 import { baseUrl } from "../lib/baseUrl.js";
 import { fetchRemotePdfMeta } from "../lib/remotePdf.js";
 import { createPresentHandoff, handoffTokenFrom, updatePresentDeck } from "../lib/presentHandoff.js";
+import { authorizeController, loadSession } from "../lib/sessionAccess.js";
 import { generatePassphrase, insertSession, ownedExpiry } from "../lib/sessionRows.js";
 
 export interface RouteDeps {
@@ -210,18 +211,12 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   // Download a staged handoff PDF (token required). Does not delete yet.
   app.get("/api/sessions/:id/handoff", async (req, res) => {
     try {
-      const token = handoffTokenFrom(req);
-      const { data, error } = await supabase
-        .from("sessions")
-        .select("id, local, pdf_path, controller_token, filename, total_slides")
-        .eq("id", req.params.id)
-        .neq("status", "expired")
-        .single();
-      if (error || !data) {
+      const data = await loadSession(supabase, req.params.id, "id, local, pdf_path, controller_token, filename, total_slides");
+      if (!data) {
         res.status(404).json({ error: "Session not found" });
         return;
       }
-      if (!safeEqual(token, data.controller_token)) {
+      if (!(await authorizeController(supabase, req, data, { token: handoffTokenFrom(req) }))) {
         res.status(403).json({ error: "Not authorized" });
         return;
       }
@@ -260,18 +255,12 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   // After the browser has stored the PDF in IndexedDB, clear the server copy.
   app.post("/api/sessions/:id/handoff/complete", async (req, res) => {
     try {
-      const token = handoffTokenFrom(req);
-      const { data, error } = await supabase
-        .from("sessions")
-        .select("id, local, pdf_path, controller_token")
-        .eq("id", req.params.id)
-        .neq("status", "expired")
-        .single();
-      if (error || !data) {
+      const data = await loadSession(supabase, req.params.id, "id, local, pdf_path, controller_token");
+      if (!data) {
         res.status(404).json({ error: "Session not found" });
         return;
       }
-      if (!safeEqual(token, data.controller_token)) {
+      if (!(await authorizeController(supabase, req, data, { token: handoffTokenFrom(req) }))) {
         res.status(403).json({ error: "Not authorized" });
         return;
       }
@@ -449,24 +438,15 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   // and a deck that was never shared has no row to hold one.
   app.post("/api/sessions/:id/passphrase", async (req, res) => {
     try {
-      const { data: row, error } = await supabase
-        .from("sessions")
-        .select("id, controller_token, passphrase, user_id")
-        .eq("id", req.params.id)
-        .neq("status", "expired")
-        .single();
-      if (error || !row) {
+      const row = await loadSession(supabase, req.params.id, "id, controller_token, passphrase, user_id");
+      if (!row) {
         res.status(404).json({ error: "Session not found" });
         return;
       }
 
       // Same authorization as the other presenter-side writes: the controller
       // token this browser holds, or (hosted only) the logged-in owner.
-      const user = isLocalMode ? null : await resolveOptionalUserId(supabase, req);
-      const authorized =
-        safeEqual(req.get("x-controller-token") || "", row.controller_token) ||
-        (!!user && row.user_id === user);
-      if (!authorized) {
+      if (!(await authorizeController(supabase, req, row, { allowOwner: true }))) {
         res.status(403).json({ error: "Not authorized" });
         return;
       }
@@ -546,13 +526,8 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       // storage on the shared hosted service.
       let userId: string | null;
       if (isLocalMode) {
-        const { data: row } = await supabase
-          .from("sessions")
-          .select("controller_token")
-          .eq("id", req.params.id)
-          .single();
-        const controllerToken = req.get("x-controller-token") || "";
-        if (!row || !safeEqual(controllerToken, row.controller_token)) {
+        const row = await loadSession(supabase, req.params.id, "controller_token");
+        if (!row || !(await authorizeController(supabase, req, row))) {
           res.status(403).json({ error: "Not authorized" });
           return;
         }
@@ -590,12 +565,8 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         return;
       }
 
-      const { data: row, error: rowError } = await supabase
-        .from("sessions")
-        .select("id, local, controller_token, passphrase")
-        .eq("id", req.params.id)
-        .single();
-      if (rowError || !row) {
+      const row = await loadSession(supabase, req.params.id, "id, local, controller_token, passphrase");
+      if (!row) {
         res.status(404).json({ error: "Session not found" });
         return;
       }
@@ -686,30 +657,21 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   //     reload the new bytes live.
   app.post("/api/sessions/:id/pdf", uploadField("pdf"), async (req, res) => {
     try {
-      // Authorized either by the controller token — the same model as ending a
-      // session, so an anonymous presenter (and later agents/CLIs) can rewrite
-      // the deck they control — or, in hosted mode, by the logged-in owner.
-      const user = isLocalMode ? null : await resolveOptionalUserId(supabase, req);
-
       const file = req.file;
       if (!file || file.mimetype !== "application/pdf") {
         res.status(400).json({ error: "A PDF file is required" });
         return;
       }
 
-      const { data: row, error: rowError } = await supabase
-        .from("sessions")
-        .select("id, local, pdf_path, pdf_url, user_id, controller_token, filename, current_slide")
-        .eq("id", req.params.id)
-        .single();
-      if (rowError || !row) {
+      const row = await loadSession(supabase, req.params.id, "id, local, pdf_path, pdf_url, user_id, controller_token, filename, current_slide");
+      if (!row) {
         res.status(404).json({ error: "Session not found" });
         return;
       }
-      const authorized =
-        safeEqual(req.get("x-controller-token") || "", row.controller_token) ||
-        (!isLocalMode && !!user && row.user_id === user);
-      if (!authorized) {
+      // Authorized either by the controller token — the same model as ending a
+      // session, so an anonymous presenter (and later agents/CLIs) can rewrite
+      // the deck they control — or, in hosted mode, by the logged-in owner.
+      if (!(await authorizeController(supabase, req, row, { allowOwner: true }))) {
         res.status(403).json({ error: "Not authorized" });
         return;
       }
@@ -787,22 +749,12 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   //     off and keeps today's behaviour; nothing surfaces to the presenter.
   app.get("/api/sessions/:id/remote-version", async (req, res) => {
     try {
-      const user = isLocalMode ? null : await resolveOptionalUserId(supabase, req);
-
-      const { data: row, error: rowError } = await supabase
-        .from("sessions")
-        .select("id, local, pdf_url, user_id, controller_token")
-        .eq("id", req.params.id)
-        .neq("status", "expired")
-        .single();
-      if (rowError || !row) {
+      const row = await loadSession(supabase, req.params.id, "id, local, pdf_url, user_id, controller_token");
+      if (!row) {
         res.status(404).json({ error: "Session not found" });
         return;
       }
-      const authorized =
-        safeEqual(req.get("x-controller-token") || "", row.controller_token) ||
-        (!isLocalMode && !!user && row.user_id === user);
-      if (!authorized) {
+      if (!(await authorizeController(supabase, req, row, { allowOwner: true }))) {
         res.status(403).json({ error: "Not authorized" });
         return;
       }
@@ -841,28 +793,18 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   // until the next real update.
   app.post("/api/sessions/:id/deck-refreshed", async (req, res) => {
     try {
-      const user = isLocalMode ? null : await resolveOptionalUserId(supabase, req);
-
       const totalSlides = parseInt(req.body.total_slides, 10);
       if (!isValidTotalSlides(totalSlides)) {
         res.status(400).json({ error: "A valid total_slides is required" });
         return;
       }
 
-      const { data: row, error: rowError } = await supabase
-        .from("sessions")
-        .select("id, local, pdf_url, user_id, controller_token, filename, current_slide")
-        .eq("id", req.params.id)
-        .neq("status", "expired")
-        .single();
-      if (rowError || !row) {
+      const row = await loadSession(supabase, req.params.id, "id, local, pdf_url, user_id, controller_token, filename, current_slide");
+      if (!row) {
         res.status(404).json({ error: "Session not found" });
         return;
       }
-      const authorized =
-        safeEqual(req.get("x-controller-token") || "", row.controller_token) ||
-        (!isLocalMode && !!user && row.user_id === user);
-      if (!authorized) {
+      if (!(await authorizeController(supabase, req, row, { allowOwner: true }))) {
         res.status(403).json({ error: "Not authorized" });
         return;
       }
@@ -892,14 +834,8 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   });
 
   app.get("/api/sessions/:id", async (req, res) => {
-    const { data, error } = await supabase
-      .from("sessions")
-      .select("id, pdf_path, pdf_url, filename, total_slides, current_slide, local")
-      .eq("id", req.params.id)
-      .neq("status", "expired")
-      .single();
-
-    if (error || !data) {
+    const data = await loadSession(supabase, req.params.id, "id, pdf_path, pdf_url, filename, total_slides, current_slide, local");
+    if (!data) {
       res.status(404).json({ error: "Session not found" });
       return;
     }
@@ -939,14 +875,8 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       return;
     }
 
-    const { data, error } = await supabase
-      .from("sessions")
-      .select("controller_token, passphrase")
-      .eq("id", req.params.id)
-      .neq("status", "expired")
-      .single();
-
-    if (error || !data) {
+    const data = await loadSession(supabase, req.params.id, "controller_token, passphrase");
+    if (!data) {
       res.status(404).json({ error: "Session not found" });
       return;
     }
@@ -962,20 +892,14 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   });
 
   app.delete("/api/sessions/:id", async (req, res) => {
-    const { data, error } = await supabase
-      .from("sessions")
-      .select("id, pdf_path, controller_token")
-      .eq("id", req.params.id)
-      .single();
-
-    if (error || !data) {
+    const data = await loadSession(supabase, req.params.id, "id, pdf_path, controller_token");
+    if (!data) {
       res.status(404).json({ error: "Session not found" });
       return;
     }
 
     // Only the controller (who holds the token) may end a presentation.
-    const token = req.get("x-controller-token") || "";
-    if (!safeEqual(token, data.controller_token)) {
+    if (!(await authorizeController(supabase, req, data))) {
       res.status(403).json({ error: "Not authorized" });
       return;
     }

@@ -6,6 +6,7 @@ import { isValidTotalSlides } from "../validation.js";
 import { MAX_TOTAL_SLIDES } from "../../shared/limits.js";
 import { safeEqual } from "../auth.js";
 import { forgetDeckRetained, type SocketState } from "../socket.js";
+import { loadSession } from "./sessionAccess.js";
 import { generatePassphrase, insertSession, ownedExpiry } from "./sessionRows.js";
 
 export const PRESENT_NEXT =
@@ -115,17 +116,11 @@ export async function updatePresentDeck(
     socketState?: SocketState;
   }
 ): Promise<PresentUpdateResult> {
-  const { data: row, error } = await supabase
-    .from("sessions")
-    .select("id, local, pdf_path, filename, current_slide, controller_token")
-    .eq("id", opts.sessionId)
-    .neq("status", "expired")
-    // `status` is only reconciled by the hourly sweeper in index.ts, so a row
-    // past its expiry can still read as active. Check the timestamp too, or an
-    // update revives a presentation the API documents as gone.
-    .gt("expires_at", new Date().toISOString())
-    .single();
-  if (error || !row) {
+  const row = await loadSession(supabase, opts.sessionId, "id, local, pdf_path, filename, current_slide, controller_token, expires_at");
+  // `status` is only reconciled by the hourly sweeper in index.ts, so a row
+  // past its expiry can still read as active. Check the timestamp too, or an
+  // update revives a presentation the API documents as gone.
+  if (!row || !(Date.parse(row.expires_at) > Date.now())) {
     return { ok: false, status: 404, error: "Presentation not found or expired" };
   }
   if (!safeEqual(opts.token, row.controller_token)) {
