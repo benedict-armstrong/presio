@@ -665,13 +665,15 @@ export default function Presentation() {
         currentCanvasRef={currentCanvasRef}
         blanked={blanked}
         filename={filename}
-        deckWatchMode={deckWatch.mode}
-        deckWatchStatus={deckWatch.status}
-        onDeckWatchModeChange={deckWatch.setMode}
-        onDeckWatchApply={deckWatch.apply}
-        onDeckWatchResume={deckWatch.resume}
-        remoteDeckUpdate={!!remoteUpdate}
-        onRemoteDeckApply={applyRemoteDeckUpdate}
+        deckUpdates={{
+          mode: deckWatch.mode,
+          status: deckWatch.status,
+          onSetMode: deckWatch.setMode,
+          onApply: deckWatch.apply,
+          onResume: deckWatch.resume,
+          remoteUpdate: !!remoteUpdate,
+          onRemoteApply: applyRemoteDeckUpdate,
+        }}
         onBlankToggle={() => {
           const next = !blanked;
           // Server mode learns the new state from the socket echo; local mode has
