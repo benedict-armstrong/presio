@@ -7,6 +7,7 @@
 // safe because every one of them is a literal in our own route code. Never
 // pass a caller-supplied string as a table or column name.
 import type Database from "better-sqlite3";
+import { UNIQUE_VIOLATION } from "../lib/sessionRows.js";
 
 type Op = "eq" | "neq" | "gt" | "lt" | "in";
 interface Filter {
@@ -34,11 +35,9 @@ function fromSqlRow<T extends Record<string, unknown>>(row: T): T {
   return out;
 }
 
-// Postgres unique-violation SQLSTATE. The session-code insert helpers retry on
-// this specific code (routes/sessions/, lib/presentHandoff.ts), so a SQLite
-// constraint failure has to surface as the same code or a code collision turns
-// into a 500 instead of a retry with a fresh code.
-const UNIQUE_VIOLATION = "23505";
+// insertSession() (lib/sessionRows.ts) retries on Postgres' unique-violation
+// code, so a SQLite constraint failure has to surface as the same code or a
+// code collision turns into a 500 instead of a retry with a fresh code.
 
 function toPostgrestError(err: unknown): { message: string; code?: string } {
   const message = (err as Error).message;

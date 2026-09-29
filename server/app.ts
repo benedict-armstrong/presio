@@ -17,7 +17,7 @@ import { registerHistoryRoutes } from "./routes/history.js";
 import { registerNewsletterRoutes } from "./routes/newsletter.js";
 import { registerCheckRoute } from "./routes/check.js";
 import { registerLanAddressRoute } from "./routes/lanAddress.js";
-import { registerAgentDocRoutes } from "./routes/agentDocs.js";
+import { MARKDOWN_MIRRORS, registerAgentDocRoutes } from "./routes/agentDocs.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
 import type { SocketState } from "./socket/index.js";
 import { APP_VERSION } from "./version.js";
@@ -198,12 +198,6 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
     })
   );
 
-  // Pages with a markdown mirror advertise it via rel="alternate".
-  const MD_MIRRORS: Record<string, string> = {
-    "/": "/index.md",
-    "/check": "/check.md",
-  };
-
   // Serve the SPA shell with a per-request canonical URL and og:url so every
   // route carries correct metadata without the client rendering it.
   let indexHtml: string | undefined;
@@ -232,8 +226,9 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
     tags += `\n  <meta name="presio-app-origin" content="${attr(origins.app)}" />`;
     if (origins.viewer) tags += `\n  <meta name="presio-viewer-origin" content="${attr(origins.viewer)}" />`;
     if (origins.onViewer) res.setHeader("X-Robots-Tag", "noindex");
-    const mirror = MD_MIRRORS[req.path];
-    if (mirror) tags += `\n  <link rel="alternate" type="text/markdown" href="${base}${mirror}" />`;
+    // Pages with a markdown mirror advertise it via rel="alternate".
+    const mirror = Object.hasOwn(MARKDOWN_MIRRORS, req.path) ? MARKDOWN_MIRRORS[req.path] : undefined;
+    if (mirror) tags += `\n  <link rel="alternate" type="text/markdown" href="${base}/${mirror}" />`;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(indexHtml.replace("</head>", `${tags}\n</head>`));
   });

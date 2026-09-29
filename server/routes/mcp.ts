@@ -9,6 +9,7 @@ import { createPresentHandoff, updatePresentDeck } from "../lib/presentHandoff.j
 import { buildCheckReport } from "./check.js";
 import { resolveOptionalUserId } from "../auth.js";
 import type { SocketState } from "../socket/index.js";
+import { APP_VERSION } from "../version.js";
 
 /** Live-broadcast deps, so an MCP deck replacement reaches viewers exactly as
  *  the REST one does. Without them `updatePresentDeck` silently skips the
@@ -22,7 +23,7 @@ export interface McpDeps {
 function createPresioMcp(supabase: SupabaseClient, origin: string, req: express.Request, deps: McpDeps) {
   const server = new McpServer({
     name: "presio",
-    version: "1.0.0",
+    version: APP_VERSION,
   });
 
   server.registerTool(
@@ -147,13 +148,13 @@ export function registerMcpRoutes(app: express.Express, supabase: SupabaseClient
       // Top-level name/description/version/endpoint duplicated for scanners
       // that expect a flat server card rather than the nested shape.
       name: "presio",
-      version: "1.0.0",
+      version: APP_VERSION,
       description: "Start local PDF presentations and validate Presio sidecars",
       endpoint: `${origin}/mcp`,
       protocolVersion: "2025-11-25",
       serverInfo: {
         name: "presio",
-        version: "1.0.0",
+        version: APP_VERSION,
         description: "Start local PDF presentations and validate Presio sidecars",
       },
       transport: { type: "streamable-http", endpoint: `${origin}/mcp` },

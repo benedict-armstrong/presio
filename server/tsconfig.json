@@ -11,5 +11,6 @@
     // breaks by importing ../e2e/constants.ts.
     "skipLibCheck": true
   },
-  "include": ["*.ts"]
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
 }

@@ -31,8 +31,8 @@ export function createLocalClient() {
       // No GoTrue in local mode, so every request is anonymous.
       // resolveOptionalUserId() treats this as "no owner" (fine, anonymous
       // sessions are allowed); requireUser() treats it as "not authenticated",
-      // which correctly disables the login-gated routes (claim, PDF replace)
-      // rather than crashing them.
+      // which correctly disables the login-gated routes (syncing a deck,
+      // claiming one) rather than crashing them.
       async getUser() {
         return { data: { user: null }, error: { message: "Auth is not available in local mode" } };
       },
