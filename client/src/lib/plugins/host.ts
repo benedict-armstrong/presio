@@ -5,150 +5,30 @@
 // BroadcastChannel, see usePluginHost) to its frames on other devices.
 
 import type { PdfAttachment } from "@/lib/pdf";
-import { lsGet, lsRemove, lsSet, pluginRetainedKey, pluginStateKey } from "@/lib/storage";
-import { sanitizeSettingValue, setPluginSetting } from "@/lib/settings";
+import { lsGet, lsSet, pluginStateKey } from "@/lib/storage";
 import { clockOffset } from "@/lib/clock";
 import { DEFAULT_KEYMAP, formatBinding, pluginBindings, type Keymap } from "@/lib/keymap";
-import { asRecord, type LoadedPlugin, type PluginSurface } from "./manifest";
+import type { LoadedPlugin, PluginSurface } from "./manifest";
 import { HistoryHub, type HistoryFrameMessage } from "./history";
-import { MAX_BLOB_BYTES } from "@shared/limits";
+import { jsonBytes, MAX_PLUGIN_MESSAGE_BYTES, MAX_PLUGIN_STORAGE_BYTES, PLUGIN_TYPE_RE } from "@shared/pluginProtocol";
 import {
-  fitsRetainedBudget,
-  jsonBytes,
-  MAX_PLUGIN_MESSAGE_BYTES,
-  MAX_PLUGIN_STORAGE_BYTES,
-  PLUGIN_TYPE_RE,
-  retainKey,
-  type Retain,
-} from "@shared/pluginProtocol";
-
-export type PluginRole = "presenter" | "audience";
-
-export interface PluginContext {
-  role: PluginRole;
-  theme: "light" | "dark";
-  session: { id: string; local: boolean; joinUrl: string | null };
-  slide: { current: number; total: number };
-}
-
-export type { Retain };
-
-/** A plugin message as it travels between devices. */
-export interface WireEvent {
-  plugin: string;
-  type: string;
-  payload: unknown;
-  /** Kept for devices that join later: for the session, or ("deck") only
-   *  until the deck is replaced. */
-  retain?: Retain;
-  /** May be dropped rather than queued (a stream where only the latest counts). */
-  volatile?: boolean;
-  from?: PluginRole;
-  sender?: string;
-}
-
-/** What a plugin has set on one of its contributed buttons. */
-export interface ButtonState {
-  active?: boolean;
-  label?: string;
-  disabled?: boolean;
-  /** A small menu beside the button (a mic to use, a mode): picking an item
-   *  goes to the plugin's presio.onMenu. */
-  menu?: ButtonMenuEntry[];
-}
-
-/** One row of a button's menu: an item to pick, a heading, or a divider. */
-export type ButtonMenuEntry =
-  | { id: string; label: string; checked?: boolean; disabled?: boolean }
-  | { heading: string }
-  | { separator: true };
-
-/** How many rows a button's menu may have. */
-const MAX_MENU_ENTRIES = 32;
-
-/** A file the presenter picked for a button that asks for one. */
-export interface ButtonFile {
-  name: string;
-  type: string;
-  bytes: Uint8Array;
-}
-
-/** A static layer item: an image at a position on the page (fractions). */
-export interface LayerItem {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  image: string;
-  fit: "cover" | "contain";
-}
-
-/** One plugin's static layer on one slide. */
-export interface PluginLayer {
-  pluginId: string;
-  items: LayerItem[];
-}
-
-/** A page's size in PDF points (presio.deck.pages()). */
-export interface PageSize {
-  width: number;
-  height: number;
-}
-
-/** Which download a plugin's export handler is transforming. */
-export type ExportMode = "everything" | "no-attachments";
-
-/** How the deck changed (presio.deck.onChange): the same pages edited in
- *  place, or a different document. */
-export type DeckChange = "edit" | "replace";
-
-/** The part of a "slide" surface on screen (fractions of it: page fractions
- *  for one sized to the page), and the zoom it's drawn at. */
-export interface SlideView {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  scale: number;
-}
-
-export const FULL_VIEW: SlideView = { x: 0, y: 0, w: 1, h: 1, scale: 1 };
-
-/** Where the page is within a "slide" surface, as fractions of it: all of it,
- *  unless the surface covers the slide area around the page too. */
-export interface SlidePage {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-export const FULL_PAGE: SlidePage = { x: 0, y: 0, w: 1, h: 1 };
-
-/** Where a "slide" surface takes pointer input: nowhere, everywhere, or in
- *  these areas (fractions of it). */
-/** Where a slide surface takes pointer input: none, all, some areas, or
- *  "pen": a pen's and a mouse's, while fingers stay Presio's (pan, pinch, tap
- *  to turn the page) — the plugin still sees them. */
-export type Interactive = boolean | "pen" | { x: number; y: number; w: number; h: number }[];
-
-/** What a mounted frame wants told about it. */
-export interface FrameHooks {
-  /** Viewer surface: show or hide its layer. */
-  onVisible?: (visible: boolean) => void;
-  /** Slide surface: where it takes pointer input. */
-  onInteractive?: (value: Interactive) => void;
-  /** The plugin's document is in place (after boot). */
-  onReady?: () => void;
-}
-
-/** What the page tells one mounted frame about how it's shown. */
-export interface FrameLink {
-  disconnect(): void;
-  setView(view: SlideView): void;
-  setPage(page: SlidePage): void;
-  setHovered(hovered: boolean): void;
-}
+  FULL_PAGE,
+  FULL_VIEW,
+  type ButtonFile,
+  type ButtonState,
+  type DeckChange,
+  type ExportMode,
+  type FrameHooks,
+  type FrameLink,
+  type LayerItem,
+  type PageSize,
+  type PluginContext,
+  type PluginLayer,
+  type WireEvent,
+} from "./protocol";
+import { RetainedStore } from "./retained";
+import { answerRequest, type RequestEnv } from "./requests";
+import { sanitizeButtonState, sanitizeInteractive, sanitizeLayerItems } from "./sanitize";
 
 interface Conn extends FrameHooks {
   plugin: LoadedPlugin;
@@ -161,12 +41,7 @@ interface Conn extends FrameHooks {
   snapshots?: boolean;
 }
 
-const MAX_LAYER_ITEMS = 32;
-/** An image URL a layer may show: inline, a blob, or on the web. */
-const LAYER_IMAGE_RE = /^(data:image\/|blob:|https:\/\/|http:\/\/(localhost|127\.0\.0\.1)[:/])/;
 const NO_LAYERS: PluginLayer[] = [];
-/** How long retained changes wait before the presenter's copy is saved. */
-const PERSIST_DELAY_MS = 300;
 const NO_BUTTONS: Record<string, ButtonState> = {};
 /** How long one plugin may take over its part of a download. */
 const EXPORT_TIMEOUT_MS = 60_000;
@@ -177,10 +52,7 @@ const OP_ID_RE = /^[A-Za-z0-9_-]{8,40}$/;
 
 export class PluginHost {
   private conns = new Set<Conn>();
-  private retained = new Map<string, WireEvent>();
-  // Each retained payload's size (JSON), for the per-plugin budget.
-  private retainedSize = new Map<string, number>();
-  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly retained: RetainedStore;
   private nextDeckChange: DeckChange = "replace";
   private ctx: PluginContext;
   private outbound: (event: WireEvent) => void = () => {};
@@ -215,29 +87,11 @@ export class PluginHost {
       deliver: (plugin, message) => this.deliverHistory(plugin, message),
       requestSnapshot: (plugin) => this.requestSnapshot(plugin),
     });
-    // The presenter's retained messages outlive a reload of their page: they
-    // are the plugins' shared state (what's playing, what's showing), and after
-    // a server restart they're what the session is re-seeded from.
-    if (ctx.role === "presenter") {
-      const saved = lsGet<unknown>(pluginRetainedKey(ctx.session.id), []);
-      for (const event of Array.isArray(saved) ? saved : []) {
-        const e = event as Partial<WireEvent>;
-        if (typeof e?.plugin === "string" && typeof e.type === "string" && e.payload !== undefined) {
-          this.keepRetained({ plugin: e.plugin, type: e.type, payload: e.payload, retain: e.retain === "deck" ? "deck" : true, from: "presenter" });
-        }
-      }
-      // Restoring isn't a change to save.
-      if (this.persistTimer) clearTimeout(this.persistTimer);
-      this.persistTimer = null;
-    }
+    this.retained = new RetainedStore(() => ({ presenter: this.ctx.role === "presenter", sessionId: this.ctx.session.id }));
   }
 
-  // Changes not yet saved when the page goes: save them now. Only this host's
-  // own changes — a host that never changed anything (React may build one it
-  // then discards) mustn't overwrite what another saved.
-  private readonly onPageHide = () => {
-    if (this.persistTimer) this.persistRetained();
-  };
+  // Changes not yet saved when the page goes: save them now.
+  private readonly onPageHide = () => this.retained.flush();
 
   /** Start listening to the page. Pair with dispose() (an effect's mount and cleanup). */
   attach() {
@@ -405,12 +259,7 @@ export class PluginHost {
     }
     const slide = m.slide;
     if (typeof slide !== "number" || !Number.isInteger(slide) || slide < 1 || slide > 10_000) return;
-    const items = (Array.isArray(m.items) ? m.items : []).slice(0, MAX_LAYER_ITEMS).flatMap((raw): LayerItem[] => {
-      const r = asRecord(raw);
-      const rect = parseRect(r);
-      if (!rect || typeof r.image !== "string" || !LAYER_IMAGE_RE.test(r.image)) return [];
-      return [{ ...rect, image: r.image, fit: r.fit === "contain" ? "contain" : "cover" }];
-    });
+    const items: LayerItem[] = sanitizeLayerItems(m.items);
     let bySlide = this.layers.get(pluginId);
     if (!bySlide) this.layers.set(pluginId, (bySlide = new Map()));
     if (items.length) bySlide.set(slide, items);
@@ -594,7 +443,7 @@ export class PluginHost {
     const conn: Conn = { plugin, surface, port, ...hooks };
     this.conns.add(conn);
     port.onmessage = (e) => this.onFrameMessage(conn, e.data);
-    for (const event of this.retained.values()) {
+    for (const event of this.retained.all()) {
       if (event.plugin === plugin.manifest.id) this.deliver(conn, event);
     }
     let view = FULL_VIEW;
@@ -625,55 +474,12 @@ export class PluginHost {
 
   /** A message from another device. */
   receive(event: WireEvent) {
-    if (event.retain && event.from === "presenter") this.keepRetained(event);
+    if (event.retain && event.from === "presenter") this.retained.keep(event);
     for (const conn of this.conns) {
       if (conn.plugin.manifest.id === event.plugin) this.deliver(conn, event);
     }
   }
 
-  /**
-   * Keep (or, for a null payload, forget) a retained message, within the
-   * plugin's budget. Returns whether it's kept. Over budget, the message still
-   * goes out live; it just isn't there for devices that join later.
-   */
-  private keepRetained(event: WireEvent): boolean {
-    const key = retainKey(event);
-    if (event.payload === null) {
-      this.retained.delete(key);
-      this.retainedSize.delete(key);
-      this.schedulePersist();
-      return false;
-    }
-    const size = jsonBytes(event.payload);
-    const sizes = [...this.retained].map(([k, e]): [string, { plugin: string; size: number }] => [
-      k,
-      { plugin: e.plugin, size: this.retainedSize.get(k) ?? 0 },
-    ]);
-    if (!fitsRetainedBudget(sizes, { key, plugin: event.plugin, size })) {
-      console.warn(`Plugin "${event.plugin}" is over its retained budget; "${event.type}" won't reach late joiners`);
-      return false;
-    }
-    this.retained.set(key, { plugin: event.plugin, type: event.type, payload: event.payload, retain: event.retain || true, from: "presenter" });
-    this.retainedSize.set(key, size);
-    this.schedulePersist();
-    return true;
-  }
-
-  private schedulePersist() {
-    if (this.ctx.role !== "presenter" || this.persistTimer) return;
-    this.persistTimer = setTimeout(() => this.persistRetained(), PERSIST_DELAY_MS);
-  }
-
-  /** Save the presenter's retained messages for this session (see the constructor). */
-  private persistRetained() {
-    if (this.persistTimer) clearTimeout(this.persistTimer);
-    this.persistTimer = null;
-    if (this.ctx.role !== "presenter") return;
-    const key = pluginRetainedKey(this.ctx.session.id);
-    const events = [...this.retained.values()].map(({ plugin, type, payload, retain }) => ({ plugin, type, payload, retain }));
-    if (events.length) lsSet(key, events);
-    else lsRemove(key);
-  }
 
   /** Retained messages from the server's snapshot, for a device (re)joining. */
   seedRetained(events: WireEvent[]) {
@@ -682,16 +488,11 @@ export class PluginHost {
 
   /** The deck was replaced: forget what was retained for it (retain: "deck"). */
   forgetDeckRetained() {
-    for (const [key, event] of this.retained) {
-      if (event.retain !== "deck") continue;
-      this.retained.delete(key);
-      this.retainedSize.delete(key);
-    }
-    this.schedulePersist();
+    this.retained.forgetDeck();
   }
 
   retainedEvents(): WireEvent[] {
-    return [...this.retained.values()];
+    return this.retained.all();
   }
 
   private deliver(conn: Conn, event: WireEvent) {
@@ -718,7 +519,7 @@ export class PluginHost {
         volatile: m.volatile === true,
         from: this.ctx.role,
       };
-      if (event.retain) this.keepRetained(event);
+      if (event.retain) this.retained.keep(event);
       // The plugin's other frames on this page, then everyone else.
       for (const other of this.conns) {
         if (other !== conn && other.plugin.manifest.id === event.plugin) this.deliver(other, event);
@@ -749,145 +550,28 @@ export class PluginHost {
 
   private onButtonState(conn: Conn, id: unknown, state: unknown) {
     // Only the presenter's buttons exist, and only declared ones.
-    if (this.ctx.role !== "presenter" || typeof state !== "object" || state === null) return;
+    const next = sanitizeButtonState(state);
+    if (this.ctx.role !== "presenter" || !next) return;
     const { manifest } = conn.plugin;
     if (!manifest.contributes.buttons.some((b) => b.id === id)) return;
-    const s = state as Record<string, unknown>;
-    const next: ButtonState = {
-      active: typeof s.active === "boolean" ? s.active : undefined,
-      label: typeof s.label === "string" ? s.label.slice(0, 24) : undefined,
-      disabled: typeof s.disabled === "boolean" ? s.disabled : undefined,
-      menu: sanitizeMenu(s.menu),
-    };
     const current = this.buttons.get(manifest.id) ?? {};
     this.buttons.set(manifest.id, { ...current, [id as string]: next });
     this.buttonListeners.forEach((l) => l());
   }
 
   private async answer(conn: Conn, id: unknown, kind: unknown, args: unknown) {
-    const reply = (result: unknown, error?: string) => conn.port.postMessage({ type: "reply", id, result, error });
-    const a = asRecord(args);
-    const { manifest } = conn.plugin;
-    const readsDeck = kind === "attachments" || kind === "deckBytes" || kind === "pages";
-    if (readsDeck && !manifest.permissions.includes("deck")) {
-      return reply(null, 'Reading the deck needs the "deck" permission in presio-plugin.json');
-    }
-    if ((kind === "blobPut" || kind === "blobGet") && !manifest.permissions.includes("history")) {
-      return reply(null, 'Blobs need the "history" permission in presio-plugin.json');
-    }
-    switch (kind) {
-      case "attachments": {
-        try {
-          // Copies, so a plugin can't mutate the bytes the app itself renders from.
-          const list = await this.attachments();
-          return reply(list.map(({ filename, content }) => ({ filename, bytes: content.slice() })));
-        } catch {
-          return reply(null, "Couldn't read the deck's attachments");
-        }
-      }
-      case "deckBytes": {
-        try {
-          const bytes = await this.deckBytes();
-          if (!bytes) return reply(null, "The deck hasn't loaded yet");
-          return reply(bytes.slice());
-        } catch {
-          return reply(null, "Couldn't read the deck");
-        }
-      }
-      case "pages": {
-        try {
-          return reply(await this.pageSizes());
-        } catch {
-          return reply(null, "Couldn't read the deck's pages");
-        }
-      }
-      case "saveDeck": {
-        if (!manifest.permissions.includes("editDeck")) {
-          return reply(null, 'Saving the deck needs the "editDeck" permission in presio-plugin.json');
-        }
-        if (this.ctx.role !== "presenter" || !this.saveDeck) return reply(null, "The deck can't be edited from here");
-        if (!(a.bytes instanceof Uint8Array)) return reply(null, "save() takes the PDF as a Uint8Array");
-        try {
-          await this.saveDeck(a.bytes);
-          return reply(null);
-        } catch (e) {
-          return reply(null, e instanceof Error ? e.message : "Couldn't save the deck");
-        }
-      }
-      case "setSetting": {
-        const spec = typeof a.name === "string" ? manifest.contributes.settings[a.name] : undefined;
-        if (this.ctx.role !== "presenter") return reply(null, "Only the presenter can change settings");
-        if (!spec) return reply(null, `No setting "${String(a.name)}" in presio-plugin.json`);
-        if (sanitizeSettingValue(spec, a.value) === undefined) return reply(null, `Invalid value for "${a.name as string}"`);
-        setPluginSetting(manifest.id, a.name as string, spec, a.value);
-        return reply(null);
-      }
-      case "blobPut": {
-        const data = a.data;
-        const blob =
-          data instanceof Blob ? data
-          : data instanceof Uint8Array || data instanceof ArrayBuffer ? new Blob([data as BlobPart])
-          : null;
-        if (!blob) return reply(null, "blobs.put() takes a Blob, a Uint8Array or an ArrayBuffer");
-        if (blob.size > MAX_BLOB_BYTES) return reply(null, `A blob is at most ${MAX_BLOB_BYTES / 1024 / 1024} MB`);
-        try {
-          return reply(await this.history.putBlob(blob));
-        } catch (e) {
-          return reply(null, e instanceof Error ? e.message : "Couldn't keep the blob");
-        }
-      }
-      case "blobGet": {
-        if (typeof a.sha !== "string" || !/^[0-9a-f]{64}$/.test(a.sha)) return reply(null, "blobs.get() takes a blob's hash");
-        return reply(await this.history.getBlob(a.sha));
-      }
-      default:
-        return reply(null, `Unknown request "${String(kind)}"`);
-    }
+    const { result, error } = await answerRequest(this.requestEnv(), conn.plugin.manifest, kind, args);
+    conn.port.postMessage({ type: "reply", id, result, error });
   }
-}
 
-/** A plugin-given box (fractions): finite, with a positive size; else null. */
-function parseRect(r: Record<string, unknown>): SlidePage | null {
-  const { x, y, w, h } = r;
-  if (![x, y, w, h].every((v) => typeof v === "number" && Number.isFinite(v))) return null;
-  const rect = { x, y, w, h } as SlidePage;
-  return rect.w > 0 && rect.h > 0 ? rect : null;
-}
-
-function sanitizeInteractive(value: unknown): Interactive {
-  if (typeof value === "boolean" || value === "pen") return value;
-  if (!Array.isArray(value)) return false;
-  return value.slice(0, 32).flatMap((raw) => parseRect(asRecord(raw)) ?? []);
-}
-
-/** A deck replaced while its presenter's page wasn't open (from Home): forget
- *  the retained messages saved for it that belonged to the old deck. */
-export function forgetDeckRetained(sessionId: string) {
-  const key = pluginRetainedKey(sessionId);
-  const saved = lsGet<unknown>(key, []);
-  if (!Array.isArray(saved)) return;
-  const kept = saved.filter((e) => (e as Partial<WireEvent>)?.retain !== "deck");
-  if (kept.length) lsSet(key, kept);
-  else lsRemove(key);
-}
-
-/** A button menu as a plugin set it, reduced to rows Presio can draw. */
-function sanitizeMenu(raw: unknown): ButtonMenuEntry[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
-  const entries: ButtonMenuEntry[] = [];
-  for (const r of raw.slice(0, MAX_MENU_ENTRIES)) {
-    if (typeof r !== "object" || r === null) continue;
-    const e = r as Record<string, unknown>;
-    if (e.separator === true) entries.push({ separator: true });
-    else if (typeof e.heading === "string" && e.heading) entries.push({ heading: e.heading.slice(0, 64) });
-    else if (typeof e.id === "string" && e.id && e.id.length <= 256 && typeof e.label === "string" && e.label) {
-      entries.push({
-        id: e.id,
-        label: e.label.slice(0, 64),
-        checked: typeof e.checked === "boolean" ? e.checked : undefined,
-        disabled: typeof e.disabled === "boolean" ? e.disabled : undefined,
-      });
-    }
+  private requestEnv(): RequestEnv {
+    return {
+      role: this.ctx.role,
+      attachments: this.attachments,
+      deckBytes: this.deckBytes,
+      pageSizes: this.pageSizes,
+      saveDeck: this.saveDeck,
+      history: this.history,
+    };
   }
-  return entries.length ? entries : undefined;
 }

@@ -9,6 +9,7 @@
 import { RESERVED_SETTING_SECTIONS, sanitizeSettingValue, type SettingSpec } from "@/lib/settings";
 import type { KeyBinding } from "@/lib/keymap";
 import { PLUGIN_ID_RE } from "@shared/pluginProtocol";
+import { asRecord } from "./sanitize";
 
 /** Where a plugin runs. The same HTML runs in each; presio.surface says which. */
 export type PluginSurface =
@@ -121,11 +122,6 @@ export interface LoadedPlugin {
   html: string;
   /** SHA-256 of `html`: what viewers check what they load against. */
   hash: string;
-}
-
-/** An untrusted value as an object to read fields from ({} when it isn't one). */
-export function asRecord(value: unknown): Record<string, unknown> {
-  return (typeof value === "object" && value !== null ? value : {}) as Record<string, unknown>;
 }
 
 const SURFACES: PluginSurface[] = ["background", "tile", "viewer", "slide"];

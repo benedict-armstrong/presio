@@ -30,7 +30,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import type { ButtonMenuEntry, PluginHost } from "@/lib/plugins/host";
+import type { PluginHost } from "@/lib/plugins/host";
+import type { ButtonMenuEntry } from "@/lib/plugins/protocol";
 import type { ButtonContribution, ButtonLocation, LoadedPlugin } from "@/lib/plugins/manifest";
 import { PluginFrame } from "./PluginFrame";
 

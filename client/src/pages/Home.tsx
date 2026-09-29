@@ -14,7 +14,7 @@ import { idbPut, idbGet, idbDelete } from "@/lib/localStore";
 import { isDeckWatchSupported, PDF_PICKER_OPTIONS } from "@/lib/deckWatcher";
 import { getSessionAuth, setSessionAuth, endSession, controllerHeaders } from "@/lib/sessionAuth";
 import { lsRemove, sessionKey } from "@/lib/storage";
-import { forgetDeckRetained } from "@/lib/plugins/host";
+import { forgetDeckRetained } from "@/lib/plugins/retained";
 import { useSetting } from "@/lib/settings";
 import { track } from "@/lib/analytics";
 import { createLocalDeck, ingestPdfFile, type IngestedPdf } from "@/lib/deckImport";

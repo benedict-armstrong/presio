@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useContainedCanvasRect } from "@/hooks/useContainedCanvasRect";
-import { FULL_PAGE, FULL_VIEW, type Interactive, type PluginHost, type SlidePage, type SlideView } from "@/lib/plugins/host";
+import type { PluginHost } from "@/lib/plugins/host";
+import { FULL_PAGE, FULL_VIEW, type Interactive, type SlidePage, type SlideView } from "@/lib/plugins/protocol";
 import type { LoadedPlugin } from "@/lib/plugins/manifest";
 import type { PluginHostState } from "@/lib/plugins/usePluginHost";
 import { PluginFrame } from "./PluginFrame";
