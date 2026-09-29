@@ -11,7 +11,8 @@ import { getAllowedOrigins, buildCspDirectives, PLUGIN_FRAME_CSP } from "./secur
 import { canonicalBaseUrl, originPair } from "./lib/baseUrl.js";
 import { localBlobsDir } from "./local/paths.js";
 import { isDevOrLocal } from "./local/mode.js";
-import { registerSessionRoutes } from "./routes/sessions.js";
+import { registerSessionRoutes } from "./routes/sessions/index.js";
+import { registerPresentRoute } from "./routes/present.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerNewsletterRoutes } from "./routes/newsletter.js";
 import { registerCheckRoute } from "./routes/check.js";
@@ -136,6 +137,7 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   // swallowed by index.html.
   registerAgentDocRoutes(app);
 
+  registerPresentRoute(app, { supabase, io, socketState });
   registerSessionRoutes(app, { supabase, io, socketState });
   if (socketState) registerHistoryRoutes(app, { supabase, history: socketState.history });
   registerNewsletterRoutes(app, supabase);
