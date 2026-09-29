@@ -36,6 +36,8 @@ RUN apk add --no-cache --virtual .build-deps python3 make g++ \
   && npm ci \
   && apk del .build-deps
 COPY server/ .
+# Served at /schema/*.json (server/app.ts); check reports link to them.
+COPY schema/ /app/schema
 COPY --from=client-build /app/client/dist /app/client/dist
 
 # Baked in so a running container can say which build it is (served on
