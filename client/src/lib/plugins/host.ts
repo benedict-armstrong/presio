@@ -216,7 +216,7 @@ export class PluginHost {
       requestSnapshot: (plugin) => this.requestSnapshot(plugin),
     });
     // The presenter's retained messages outlive a reload of their page: they
-    // are the plugins' shared state (what's drawn, what's showing), and after
+    // are the plugins' shared state (what's playing, what's showing), and after
     // a server restart they're what the session is re-seeded from.
     if (ctx.role === "presenter") {
       const saved = lsGet<unknown>(pluginRetainedKey(ctx.session.id), []);

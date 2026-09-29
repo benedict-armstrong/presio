@@ -243,7 +243,7 @@ export function buildOpenApi(base: string) {
         post: {
           summary: "Announce a republished URL-backed deck to the room",
           description:
-            "The presenter accepted a deck that was republished at its source URL. Records the new page count, clamps the stored current slide into range, drops the stored drawings, and broadcasts deck_updated so every connected client re-fetches the source URL. No bytes are uploaded — pdf_url decks keep no server copy.",
+            "The presenter accepted a deck that was republished at its source URL. Records the new page count, clamps the stored current slide into range, drops what plugins retained for the old deck, and broadcasts deck_updated so every connected client re-fetches the source URL. No bytes are uploaded — pdf_url decks keep no server copy.",
           operationId: "deckRefreshed",
           parameters: [
             { name: "id", in: "path", required: true, schema: { type: "string" } },

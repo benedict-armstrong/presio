@@ -66,7 +66,7 @@ export async function setRoomTotalSlides(io: Server, sessionId: string, totalSli
 }
 
 // The session's deck was replaced: forget what plugins retained for the old
-// one (retain: "deck" — e.g. drawings, keyed by slide number). The presenter's
+// one (retain: "deck": state tied to the old deck's slides). The presenter's
 // page does the same when it swaps the deck in.
 export function forgetDeckRetained(state: SocketState, sessionId: string) {
   const retained = state.pluginRetained.get(sessionId);

@@ -216,8 +216,8 @@ export default function Home() {
           throw new Error(body.error || "Failed to replace the PDF");
         }
       }
-      // What plugins kept for the old deck (drawings, keyed by slide number)
-      // doesn't belong on the new one.
+      // What plugins retained for the old deck (retain: "deck") doesn't
+      // belong on the new one.
       forgetDeckRetained(target.id);
       // Keep the in-memory recents row in step with the stored record — the
       // hash must reflect the new bytes for the next re-drop to be matched.

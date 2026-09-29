@@ -82,7 +82,7 @@ Presentations created with `POST /api/sessions/external` point at a PDF hosted e
   - **403** on a wrong controller token.
 
   The probe is https-only and restricted to public addresses: a `pdf_url` that resolves to a loopback, private, link-local or otherwise internal address is refused, and redirects are followed only while they stay https and public. A deck hosted somewhere only reachable inside a private network can be presented as normal — it just gets no republish detection.
-- `POST /api/sessions/:id/deck-refreshed` — same auth — the presenter accepted a republished deck. Body: `{ "total_slides": N }` (the new page count, read from the republished PDF). Records the new page count, clamps the stored current slide into range, drops the stored drawings, and broadcasts `deck_updated` to the room so every connected client re-fetches the source URL.
+- `POST /api/sessions/:id/deck-refreshed` — same auth — the presenter accepted a republished deck. Body: `{ "total_slides": N }` (the new page count, read from the republished PDF). Records the new page count, clamps the stored current slide into range, drops what plugins retained for the old deck, and broadcasts `deck_updated` to the room so every connected client re-fetches the source URL.
   **200:** `{ ok: true, totalSlides, filename }`. **400** for a missing/invalid `total_slides` or a presentation that is not URL-backed. No bytes are uploaded — `pdf_url` decks keep no server copy.
 
 ## OpenAPI

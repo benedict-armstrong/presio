@@ -118,9 +118,8 @@ export default function Presentation() {
   // Swap in a replacement deck: announced over the wire (socket `deck_updated`
   // for synced sessions, a BroadcastChannel `deck_update` for local ones) or by
   // the reply to this window's own replace. What plugins retained for the old
-  // deck (retain: "deck" — drawings, keyed by slide number, which the new
-  // document may renumber) is dropped wholesale, and they hear it's a new
-  // document. Slide clamping needs no extra work here: the deck effect
+  // deck (retain: "deck": state tied to slides the new document may
+  // renumber) is dropped wholesale, and they hear it's a new document. Slide clamping needs no extra work here: the deck effect
   // adopts the new document's page count once it loads.
   const applyDeckUpdate = useCallback(
     ({ filename, totalSlides }: { filename: string; totalSlides: number }): Promise<void> => {

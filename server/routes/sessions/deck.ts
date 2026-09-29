@@ -18,9 +18,9 @@ export function registerDeckRoutes(app: express.Express, { supabase, io, socketS
   //     written by the client. No filename field → nothing announced.
   //   - A deck replacement sends `filename`. The row's filename/slide count
   //     follow the new document, the current slide is clamped into range,
-  //     what plugins retained for the old deck is dropped (drawings, keyed by
-  //     slide number), and everyone in the room gets `deck_updated` so they
-  //     reload the new bytes live.
+  //     what plugins retained for the old deck (retain: "deck") is dropped,
+  //     and everyone in the room gets `deck_updated` so they reload the new
+  //     bytes live.
   app.post("/api/sessions/:id/pdf", uploadField("pdf"), async (req, res) => {
     const file = req.file;
     if (!isPdfUpload(file)) {
@@ -108,8 +108,7 @@ export function registerDeckRoutes(app: express.Express, { supabase, io, socketS
   // source and the presenter accepted the new version. Unlike /pdf there are
   // no bytes to store — pdf_url decks keep no server copy — so this only
   // records the new page count, clamps the current slide into range, drops
-  // what plugins retained for the old deck (drawings, keyed by slide number)
-  // and announces the swap to the room; every client re-fetches the URL
+  // what plugins retained for the old deck (retain: "deck") and announces the swap to the room; every client re-fetches the URL
   // itself. The filename is unchanged: a republish replaces the content, not
   // the presentation's title.
   //
