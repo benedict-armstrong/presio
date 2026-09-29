@@ -4,20 +4,14 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { loadPdf, loadPdfData, freshPdfUrl, loadLatestPdf, renderPageInto, clearCache, destroyPdf } from "@/lib/pdf";
 import { loadDeck, type Deck } from "@/lib/deck";
 import { useRenderTargetWidth } from "@/hooks/useRenderTargetWidth";
-import { lsGetString, lsSetString, deckWatchKey } from "@/lib/storage";
 import { socket } from "@/lib/socket";
 import { useLatestRef } from "@/hooks/useLatestRef";
-import { startClockSync } from "@/lib/clock";
-import { getSessionAuth, endSession, controllerHeaders } from "@/lib/sessionAuth";
+import { useSessionTransport } from "@/hooks/useSessionTransport";
+import { useDeckWatch } from "@/hooks/useDeckWatch";
+import { endSession, controllerHeaders } from "@/lib/sessionAuth";
 import { idbGet, idbPut, idbDelete } from "@/lib/localStore";
 import { isLocalDeckId } from "@/lib/localId";
-import {
-  DeckWatcher,
-  isDeckWatchSupported,
-  isDeckWatchMode,
-  type DeckWatchMode,
-  type DeckWatchStatus,
-} from "@/lib/deckWatcher";
+import { RemoteDeckPoller } from "@/lib/remoteDeckPoller";
 import { ConfirmDeckReloadDialog } from "@/components/controller/ConfirmDeckReloadDialog";
 import { track } from "@/lib/analytics";
 import { ingestPdfFile } from "@/lib/deckImport";
@@ -69,7 +63,6 @@ export default function Presentation() {
   }, [pdf, pdfUrl, filename]);
 
   const currentCanvasRef = useRef<HTMLDivElement>(null);
-  const channelRef = useRef<BroadcastChannel | null>(null);
   // Object URL backing a local session's PDF, swapped when notes are edited.
   const localUrlRef = useRef("");
   // Resolved during load: true if this presentation's PDF lives in this
@@ -89,61 +82,22 @@ export default function Presentation() {
     totalSlides,
   });
 
-  // Latest broadcastable state, for replying to a local window's state_request
-  // without re-subscribing the channel on every slide change.
-  const stateRef = useLatestRef({
-    currentSlide,
-    totalSlides,
-    blanked,
-  });
-
-  // Mirror of pdfUrl for callbacks that must not re-subscribe the socket
-  // effect when it changes (a deck replace rewrites it on local sessions).
+  // Mirror of pdfUrl for callbacks that must not re-run their effect when it
+  // changes (a deck replace rewrites it on local sessions).
   const pdfUrlRef = useLatestRef(pdfUrl);
 
-  // Deck file watching (File System Access API, Chromium only). When the
-  // IndexedDB record carries a handle to the deck's file on disk, the
-  // controller polls it and offers a recompile through the header pill —
-  // nothing swaps until the presenter clicks. Viewers don't watch: the
-  // controller applies the update on everyone's behalf.
-  const [deckWatchStatus, setDeckWatchStatus] = useState<DeckWatchStatus | null>(null);
-  const watcherRef = useRef<DeckWatcher | null>(null);
-  const applyingWatchRef = useRef(false);
-  // Auto mode applies from inside the watcher's callback, which captured an
-  // older closure; a ref keeps that path on the current applyDeckWatchUpdate.
-  const applyDeckWatchUpdateRef = useRef<() => Promise<void>>(async () => {});
-  // Bumped when a replace stores a new file handle, so the effect below tears
-  // the watcher down and re-reads the record — otherwise watching would stay
-  // pinned to the previous file until a reload.
-  const [watchedHandleEpoch, setWatchedHandleEpoch] = useState(0);
-  // Whether this deck carries a watchable file handle. Until that's known the
-  // header shows no live-reload control at all rather than a wrong one.
-  // Whether this deck's IndexedDB record carries a handle to a file on disk.
-  // Resolved by the watcher effect below; whether that handle is any use right
-  // now is a separate, derivable question (see deckWatchable).
-  const [deckHasHandle, setDeckHasHandle] = useState(false);
-  // How the presenter wants recompiles handled. Chosen at upload (Home's
-  // live-reload checkbox), changed from the header, and remembered per deck.
-  const [deckWatchMode, setDeckWatchMode] = useState<DeckWatchMode>(() => {
-    const stored = lsGetString(deckWatchKey(id!));
-    return isDeckWatchMode(stored) ? stored : "prompt";
-  });
-  const deckWatchModeRef = useLatestRef(deckWatchMode);
-  // A detected deck change waiting on the presenter: "watch" from the file
-  // watcher (prompt mode only), "remote" from the URL-republish poller. Both
-  // replace the deck (dropping edits saved into it here, and what plugins
-  // hung off its slides), so both get the same warning.
-  const [reloadPrompt, setReloadPrompt] = useState<"watch" | "remote" | null>(null);
-  const [applyingWatch, setApplyingWatch] = useState(false);
   // Edits a plugin saved into the deck (e.g. speaker notes) live in the
-  // current PDF's bytes, so a recompiled file replaces them. Tracked to warn
-  // before that happens.
+  // current PDF's bytes, so a recompiled or republished file replaces them.
+  // Tracked to warn before that happens.
   const [deckEdited, setDeckEdited] = useState(false);
 
-  // A URL-backed deck's source PDF was republished (remote-version polling
-  // below); held until the presenter applies it or the poller replaces it
-  // with a newer sighting. Null = nothing pending.
+  // A URL-backed deck's source PDF was republished (see RemoteDeckPoller);
+  // held until the presenter applies it or the poller replaces it with a
+  // newer sighting. Null = nothing pending.
   const [remoteUpdate, setRemoteUpdate] = useState<{ totalSlides: number } | null>(null);
+  // Whether the republish prompt is open, and whether it's being applied.
+  const [remotePrompt, setRemotePrompt] = useState(false);
+  const [applyingRemote, setApplyingRemote] = useState(false);
   // Whether pdfUrl points at someone else's host (a URL-backed deck) rather
   // than our own storage. Decides how a changed deck is re-fetched.
   const [externalPdf, setExternalPdf] = useState(false);
@@ -151,62 +105,6 @@ export default function Presentation() {
   // The republished deck, already downloaded and parsed by the poller to
   // confirm it. Handed to applyDeckUpdate so applying costs no second download.
   const prefetchedDeckRef = useRef<PDFDocumentProxy | null>(null);
-
-  // The settled role, not the requested one: a second controller demoted to
-  // viewer by session_state must stop watching too.
-  const canWatchDeck = !!local && role === "controller" && isDeckWatchSupported();
-  const deckWatchable = canWatchDeck && deckHasHandle;
-
-  useEffect(() => {
-    if (!canWatchDeck) return;
-    let cancelled = false;
-    idbGet(id!)
-      .then((rec) => {
-        if (cancelled || !rec?.handle) return;
-        // The control appears as soon as there's a file to watch, whatever the
-        // mode — that's what makes "live reload off" a state you can leave.
-        setDeckHasHandle(true);
-        if (deckWatchModeRef.current === "off") return;
-        const watcher = new DeckWatcher(rec.handle, {
-          onStatus: (status) => {
-            if (!cancelled) setDeckWatchStatus(status);
-          },
-          // Signal only — the File seen at detection is re-read at apply time.
-          onUpdate: () => {
-            if (cancelled) return;
-            setDeckWatchStatus("updated");
-            // Auto mode swaps without asking; prompt mode puts the decision
-            // (and what it costs) in front of the presenter first.
-            if (deckWatchModeRef.current === "auto") void applyDeckWatchUpdateRef.current();
-            else setReloadPrompt("watch");
-          },
-        });
-        watcherRef.current = watcher;
-        void watcher.begin().catch(() => {
-          // Unexpected permission-check failure: offer the explicit resume.
-          if (!cancelled) setDeckWatchStatus("needs-permission");
-        });
-      })
-      .catch(() => { /* no record, no watcher */ });
-    return () => {
-      cancelled = true;
-      watcherRef.current?.stop();
-      watcherRef.current = null;
-      setDeckWatchStatus(null);
-      setReloadPrompt((p) => (p === "watch" ? null : p));
-    };
-  }, [canWatchDeck, id, watchedHandleEpoch, deckWatchMode, deckWatchModeRef]);
-
-  // Persist the live-reload choice per deck, so it survives a reload.
-  useEffect(() => {
-    if (local && role === "controller") lsSetString(deckWatchKey(id!), deckWatchMode);
-  }, [deckWatchMode, local, role, id]);
-
-  // Picked from the header's live-reload menu. The effect above persists it,
-  // so a mode chosen here survives a controller reload.
-  const chooseDeckWatchMode = useCallback((mode: DeckWatchMode) => {
-    setDeckWatchMode(mode);
-  }, []);
 
   // The deck swap currently being loaded, if any. A replacement uploaded from
   // this window is announced to it twice — by the upload's own response and by
@@ -388,172 +286,40 @@ export default function Presentation() {
     return () => { document.title = "Presio"; };
   }, [filename, role]);
 
-  useEffect(() => {
-    if (local === null) return; // wait until we know local vs. server
-
-    const channel = new BroadcastChannel(`presio-${id}`);
-    channelRef.current = channel;
-    channel.onmessage = (e) => {
-      const { type, payload } = e.data;
-      if (type === "slide_update") setCurrentSlide(payload.slideNumber);
-      else if (type === "blank_update") setBlanked(payload.blanked);
-      else if (type === "deck_update") void applyDeckUpdate(payload);
-      else if (type === "session_ended") navigate("/", { replace: true });
-      else if (type === "rekeyed") {
-        // The presenter shared this deck from another window. Its local record
-        // is gone and the code the server minted is where it lives now, so
-        // follow it — the alternative is a viewer left on an id that no longer
-        // resolves to anything.
-        navigate(`/s/${payload.id}?role=${requestedRole}`, { replace: true });
-      }
-      else if (type === "state_request") {
-        // Controller is the source of truth for a local session; reply so a
-        // newly opened or reloaded window can catch up.
-        if (requestedRole === "controller") {
-          channel.postMessage({ type: "state_sync", payload: stateRef.current });
-        }
-      } else if (type === "state_sync") {
-        setCurrentSlide(payload.currentSlide);
-        if (payload.totalSlides) setTotalSlides(payload.totalSlides);
-        setBlanked(payload.blanked);
-      }
-    };
-
-    // Local sessions never touch the server: no socket, sync over the channel.
-    if (local) {
-      // Subscribing to a transport: the role this window starts with is part
-      // of setting that transport up, not something a render can derive.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      applyRole(requestedRole);
-      channel.postMessage({ type: "state_request" });
-      return () => {
-        channel.close();
-        channelRef.current = null;
-      };
-    }
-
-    const { controllerToken } = getSessionAuth(id!);
-
-    // Re-emit join on every (re)connect, not just the first mount. Socket.io
-    // transparently reconnects after a network blip, server restart, or a
-    // sleeping laptop, but the reconnected socket is in no room and would
-    // silently miss every broadcast until it re-joins (looking connected the
-    // whole time). The server answers join_session with full session_state, so
-    // this also reconciles anything that changed while we were away, and
-    // re-registers the controller after a server restart wiped its in-memory map.
-    const join = () => {
-      socket.emit("join_session", { sessionId: id, role: requestedRole, token: controllerToken });
-    };
-
-    socket.on("connect", join);
-    socket.connect();
-    startClockSync();
-    if (socket.connected) join();
-
-    // Re-request authoritative state when a viewer's tab returns to the
-    // foreground — background tabs get frozen and can miss broadcasts.
-    const reconcile = () => {
-      if (requestedRole === "viewer" && !document.hidden && socket.connected) join();
-    };
-    document.addEventListener("visibilitychange", reconcile);
-
-    // Recovery / reconciliation watchdog. While disconnected, every role nudges
-    // the socket to reconnect on a fast 5s cadence so a dropped connection comes
-    // back quickly instead of waiting out socket.io's backoff. While connected,
-    // viewers re-request state on a slow backstop interval in case a broadcast
-    // was ever dropped without a disconnect — kept infrequent and skipped while
-    // hidden so a large audience can't hammer the server. The controller is
-    // excluded from the backstop: it drives state, so reconciling it from the
-    // server could yank it back mid-advance.
-    const RECONNECT_EVERY_MS = 5000;
-    const RECONCILE_EVERY_MS = 30000;
-    let sinceReconcile = 0;
-    const watchdog = setInterval(() => {
-      if (!socket.connected) {
-        socket.connect(); // idempotent; nudges reconnection if it stalled
-        sinceReconcile = 0;
-        return;
-      }
-      sinceReconcile += RECONNECT_EVERY_MS;
-      if (sinceReconcile >= RECONCILE_EVERY_MS && requestedRole === "viewer" && !document.hidden) {
-        sinceReconcile = 0;
-        join();
-      }
-    }, RECONNECT_EVERY_MS);
-
-    socket.on("session_state", ({ currentSlide, totalSlides, role: grantedRole }) => {
-      setCurrentSlide(currentSlide);
-      setTotalSlides(totalSlides);
-      if (grantedRole && grantedRole !== requestedRole) {
-        applyRole(grantedRole);
-        setSearchParams({ role: grantedRole }, { replace: true });
-      } else {
-        applyRole(requestedRole);
-      }
-    });
-
-    socket.on("slide_update", ({ slideNumber }) => {
-      setCurrentSlide(slideNumber);
-    });
-
-    // The controller corrected the session's page count against the document
-    // it loaded; follow suit and stay in range.
-    socket.on("total_slides_update", ({ totalSlides }: { totalSlides: number }) => {
-      setTotalSlides(totalSlides);
-      setCurrentSlide((slide) => Math.min(Math.max(slide, 1), totalSlides));
-    });
-
-    socket.on("sync_all", () => {
-      setViewerSlide(null);
-    });
-
-    socket.on("blank_update", ({ blanked }: { blanked: boolean }) => {
-      setBlanked(blanked);
-    });
-
-    // The controller replaced the deck (server broadcast from the replace
-    // endpoint); reload the new document under the same session. The window
-    // that performed the replace has usually applied it already, straight from
-    // the reply to its own upload — this then coalesces into that swap.
-    socket.on("deck_updated", (payload: { filename: string; totalSlides: number }) => {
-      void applyDeckUpdate(payload);
-    });
-
-    // Another window took controllership (same token, e.g. a second tab).
-    // Demote this one to a viewer — updating the role param re-runs this
-    // effect, so the tab rejoins as a viewer and won't grab control back on
-    // its next reconnect.
-    socket.on("controller_replaced", () => {
-      applyRole("viewer");
-      setSearchParams({ role: "viewer" }, { replace: true });
-    });
-
-    socket.on("error", ({ message }) => {
-      setError(message);
-    });
-
-    socket.on("session_ended", () => {
-      navigate("/", { replace: true });
-    });
-
-    return () => {
-      channel.close();
-      channelRef.current = null;
-      document.removeEventListener("visibilitychange", reconcile);
-      clearInterval(watchdog);
-      socket.off("connect", join);
-      socket.off("session_state");
-      socket.off("slide_update");
-      socket.off("total_slides_update");
-      socket.off("sync_all");
-      socket.off("blank_update");
-      socket.off("deck_updated");
-      socket.off("controller_replaced");
-      socket.off("error");
-      socket.off("session_ended");
-      socket.disconnect();
-    };
-  }, [id, local, requestedRole, navigate, setSearchParams, applyRole, applyDeckUpdate, stateRef]);
+  const clampSlide = useCallback((total: number) => {
+    setCurrentSlide((slide) => Math.min(Math.max(slide, 1), total));
+  }, []);
+  const { channelRef, broadcast } = useSessionTransport(id!, local, requestedRole, {
+    onRole: applyRole,
+    onRoleChanged: (next) => {
+      applyRole(next);
+      setSearchParams({ role: next }, { replace: true });
+    },
+    onSlide: setCurrentSlide,
+    onTotalSlides: (total) => {
+      setTotalSlides(total);
+      clampSlide(total);
+    },
+    onBlanked: setBlanked,
+    onSessionState: (state) => {
+      setCurrentSlide(state.currentSlide);
+      setTotalSlides(state.totalSlides);
+    },
+    onStateSync: (state) => {
+      setCurrentSlide(state.currentSlide);
+      if (state.totalSlides) setTotalSlides(state.totalSlides);
+      setBlanked(state.blanked);
+    },
+    onSyncAll: () => setViewerSlide(null),
+    onDeckUpdate: (update) => void applyDeckUpdate(update),
+    onError: setError,
+    onEnded: () => navigate("/", { replace: true }),
+    // The presenter shared this deck from another window. Its local record is
+    // gone and the code the server minted is where it lives now, so follow it
+    // — the alternative is a viewer left on an id that no longer resolves.
+    onRekeyed: (next) => navigate(`/s/${next}?role=${requestedRole}`, { replace: true }),
+    getState: () => ({ currentSlide, totalSlides, blanked }),
+  });
 
   // Report the settled role to analytics. The `?role=` query param is already
   // in every tracked URL, but Umami's Pages report keys on the path alone, so
@@ -584,21 +350,6 @@ export default function Presentation() {
     // deck gates mounting of the view that owns the container, and refs
     // don't trigger effects — re-run once the container actually exists.
   }, [pdf, displaySlide, role, deck, viewWidth]);
-
-  // Mirror a local state change outward: always to other same-browser windows
-  // (BroadcastChannel) and, for synced sessions, to the server (socket). The
-  // channel message `type` and the socket `event` intentionally differ — the
-  // server echoes a *_update broadcast in response to a *_change/control emit.
-  const broadcast = useCallback(
-    (
-      channelMsg: { type: string; payload?: unknown },
-      socketEmit?: { event: string; payload?: unknown }
-    ) => {
-      if (!local && socketEmit) socket.emit(socketEmit.event, socketEmit.payload);
-      channelRef.current?.postMessage(channelMsg);
-    },
-    [local]
-  );
 
   const goTo = useCallback(
     (slide: number) => {
@@ -634,7 +385,7 @@ export default function Presentation() {
       await endSession(id!);
     }
     navigate("/", { replace: true });
-  }, [local, id, navigate]);
+  }, [local, id, navigate, channelRef]);
 
   // Authorization for rewriting a synced deck's stored PDF.
   const pdfWriteAuth = useCallback(async (): Promise<Record<string, string>> => {
@@ -645,150 +396,27 @@ export default function Presentation() {
     return headers;
   }, [id]);
 
-  // Remote republish watching for URL-backed decks. A deck loaded from an
-  // external link re-fetches its PDF on every load, so a republish at the
-  // same URL is only invisible to a session that is already running. The
-  // controller polls the server's cheap metadata endpoint (one poller per
-  // session — viewers never poll) and, when the remote file provably changed,
-  // offers the new deck through the header pill. Same house rule as the file
-  // watcher: nothing swaps until the presenter clicks, and nothing surfaces
-  // when the host is unreachable or doesn't support the check.
+  // Watch a URL-backed deck for republishes at its source (controller only).
   useEffect(() => {
     if (local !== false || role !== "controller") return;
-    const base = pdfUrlRef.current;
-    if (!base || base.startsWith("blob:")) return;
-
-    const BASE_MS = 30_000;
-    const MAX_MS = 4 * 60_000;
-    interface Sig {
-      etag: string;
-      lastModified: string;
-      contentLength: string;
-    }
-    const same = (a: Sig, b: Sig) =>
-      a.etag === b.etag && a.lastModified === b.lastModified && a.contentLength === b.contentLength;
-    const hasValidators = (s: Sig) => !!(s.etag || s.lastModified || s.contentLength);
-
-    let stopped = false;
-    let busy = false; // a poll's probes + parse can outlast one interval; never overlap
-    let backedOff = false; // parked at the slow cadence by an unreachable host
-    let delay = BASE_MS;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let baseline: Sig | null = null;
-    let candidate: Sig | null = null;
-
-    const stop = () => {
-      stopped = true;
-      if (timer !== null) {
-        clearTimeout(timer);
-        timer = null;
-      }
-    };
-    const schedule = () => {
-      if (stopped) return;
-      timer = setTimeout(() => { void poll(); }, delay);
-    };
-
-    const poll = async () => {
-      if (stopped || busy) return;
-      // Frozen background tabs can't present anyway; skip the round without
-      // spending a request on the remote host.
-      if (document.hidden) {
-        schedule();
-        return;
-      }
-      busy = true;
-      try {
-        let headers: Record<string, string>;
-        try {
-          headers = await pdfWriteAuth();
-        } catch {
-          stop(); // no credential to poll with — degrade silently
-          return;
-        }
-        let sig: Sig;
-        try {
-          const res = await fetch(`/api/sessions/${id}/remote-version`, { headers });
-          if (res.status === 403 || res.status === 404) {
-            stop(); // session gone, or not URL-backed: nothing to watch
-            return;
-          }
-          if (!res.ok) {
-            // Remote host unreachable (the server answers 502): back off to
-            // the slowest cadence and keep trying, still silently.
-            delay = MAX_MS;
-            backedOff = true;
-            schedule();
-            return;
-          }
-          sig = await res.json();
-          if (backedOff) {
-            // The host answered again. Without this the session stays parked at
-            // the four-minute cadence for good, since only a confirmed change
-            // resets it — and it can't see one while the host is down.
-            backedOff = false;
-            delay = BASE_MS;
-          }
-        } catch {
-          stop(); // network failure — today's behaviour, without errors
-          return;
-        }
-        if (!hasValidators(sig)) {
-          stop(); // host sends no validators — there is nothing to compare
-          return;
-        }
-        if (!baseline) {
-          baseline = sig; // first observation is the reference, never a change
-          schedule();
-          return;
-        }
-        if (same(sig, baseline)) {
-          candidate = null;
-          delay = Math.min(delay * 2, MAX_MS); // polite backoff while unchanged
-          schedule();
-          return;
-        }
-        // Different from the baseline. Hosts behind some CDNs mint a fresh
-        // ETag per request, so require the new signature to hold steady
-        // across two consecutive polls before trusting it.
-        if (!candidate || !same(sig, candidate)) {
-          candidate = sig;
-          schedule();
-          return;
-        }
-        // Confirmed change: read the new document's page count before
-        // offering it, so applying clamps correctly. A parse failure means
-        // the publish is probably mid-flight — keep watching silently and
-        // re-detect on the next poll.
-        candidate = null;
-        try {
-          // Always external here: the server only answers remote-version for a
-          // deck backed by someone else's URL.
-          const doc = await loadLatestPdf(base, { external: true, version: Date.now() });
-          if (stopped) {
-            destroyPdf(doc);
-            return;
-          }
-          // Keep it: if the presenter applies this update, applyDeckUpdate
-          // adopts the document instead of downloading the same bytes again.
-          destroyPdf(prefetchedDeckRef.current);
-          prefetchedDeckRef.current = doc;
-          baseline = sig;
-          delay = BASE_MS; // stay fast for a while after a real change
-          setRemoteUpdate({ totalSlides: doc.numPages });
-          setReloadPrompt("remote");
-        } catch {
-          // candidate stays null: the next poll re-confirms and retries.
-        }
-        schedule();
-      } finally {
-        busy = false;
-      }
-    };
-
-    schedule();
+    const url = pdfUrlRef.current;
+    if (!url || url.startsWith("blob:")) return;
+    const poller = new RemoteDeckPoller({
+      id: id!,
+      url,
+      auth: pdfWriteAuth,
+      onChange: (doc) => {
+        // Keep it: if the presenter applies this update, applyDeckUpdate
+        // adopts the document instead of downloading the same bytes again.
+        destroyPdf(prefetchedDeckRef.current);
+        prefetchedDeckRef.current = doc;
+        setRemoteUpdate({ totalSlides: doc.numPages });
+        setRemotePrompt(true);
+      },
+    });
+    poller.start();
     return () => {
-      stop();
+      poller.stop();
       destroyPdf(prefetchedDeckRef.current);
       prefetchedDeckRef.current = null;
     };
@@ -798,8 +426,8 @@ export default function Presentation() {
   // the server's deck_updated broadcast — every client (this one included)
   // cache-busts the URL and reloads through the ordinary deck_updated path.
   const applyRemoteDeckUpdate = useCallback(async () => {
-    if (!remoteUpdate || applyingWatch) return;
-    setApplyingWatch(true);
+    if (!remoteUpdate || applyingRemote) return;
+    setApplyingRemote(true);
     try {
       const authHeaders = await pdfWriteAuth();
       const res = await fetch(`/api/sessions/${id}/deck-refreshed`, {
@@ -812,13 +440,13 @@ export default function Presentation() {
         throw new Error(body.error || "Failed to apply the updated deck");
       }
       setRemoteUpdate(null);
-      setReloadPrompt(null);
+      setRemotePrompt(false);
     } catch (e) {
       window.alert(e instanceof Error ? e.message : "Failed to apply the updated deck");
     } finally {
-      setApplyingWatch(false);
+      setApplyingRemote(false);
     }
-  }, [remoteUpdate, applyingWatch, id, pdfWriteAuth]);
+  }, [remoteUpdate, applyingRemote, id, pdfWriteAuth]);
 
   // Save an edited PDF over the deck (a plugin's presio.deck.save), then swap
   // in the updated document so further edits build on it. Local sessions
@@ -940,57 +568,21 @@ export default function Presentation() {
         slides: totalSlides,
         mode: local ? "local" : "server",
       });
-      // A replace writes IndexedDB, never the file on disk, so the watcher's
-      // reference point is still valid. What can change is *which* file is
-      // watched: a pick that came with its own handle replaced the stored one,
-      // so restart the watcher against it.
-      if (handle) setWatchedHandleEpoch((n) => n + 1);
     },
-    [local, id, applyDeckUpdate, pdfWriteAuth]
+    [local, id, applyDeckUpdate, pdfWriteAuth, channelRef]
   );
 
-  // Pill click: swap the detected recompile in for controller and viewers via
-  // the ordinary replace path (one presenter-side decision for everyone).
-  const applyDeckWatchUpdate = useCallback(async () => {
-    const watcher = watcherRef.current;
-    if (!watcher || applyingWatchRef.current) return;
-    applyingWatchRef.current = true;
-    setApplyingWatch(true);
-    try {
-      // Read the file as it is *now*: the version detected a moment ago has
-      // usually been rewritten again by a watch-mode build, and its bytes no
-      // longer read back.
-      const update = await watcher.takeUpdate();
-      if (!update) {
-        window.alert("The deck file is still being written. Try again in a moment.");
-        return;
-      }
-      await replacePdf(update.file);
-      // Only move the reference point once the swap actually took, so a failed
-      // replace leaves the update pending and the pill clickable.
-      watcher.adopt(update.meta);
-      setDeckWatchStatus("watching");
-      setReloadPrompt(null);
-    } catch (e) {
-      window.alert(e instanceof Error ? e.message : "Failed to replace the PDF");
-    } finally {
-      applyingWatchRef.current = false;
-      setApplyingWatch(false);
-    }
-  }, [replacePdf]);
-  // The watcher holds this callback for as long as it runs, so it reads the
-  // current one through a ref rather than being re-armed on every render.
-  useEffect(() => {
-    applyDeckWatchUpdateRef.current = applyDeckWatchUpdate;
-  }, [applyDeckWatchUpdate]);
+  const deckWatch = useDeckWatch(id!, local, role === "controller", replacePdf);
 
-
-
-  // Explicit re-grant after a reload dropped the permission. Runs from the
-  // pill's click, which is the user gesture requestPermission() needs.
-  const resumeDeckWatch = useCallback(() => {
-    void watcherRef.current?.resume();
-  }, []);
+  // The controller's own replace (picked or dropped file). A pick that came
+  // with a file handle replaced the stored one, so watching follows it.
+  const replaceFromController = useCallback(
+    async (file: File, handle?: FileSystemFileHandle) => {
+      await replacePdf(file, handle);
+      if (handle) deckWatch.rewatch();
+    },
+    [replacePdf, deckWatch]
+  );
 
   if (loading || (!error && !deck)) {
     return (
@@ -1040,16 +632,24 @@ export default function Presentation() {
 
   return (
     <>
-      {reloadPrompt && (
+      {/* A detected deck change waiting on the presenter: a recompile from the
+          file watcher (prompt mode only) or a republish at the deck's URL.
+          Never both: only local decks are watched, only synced ones polled.
+          Either replaces the deck (dropping edits saved into it here, and
+          what plugins hung off its slides), so both get the same warning. */}
+      {(deckWatch.prompt || remotePrompt) && (
         <ConfirmDeckReloadDialog
           filename={filename}
-          source={reloadPrompt}
+          source={deckWatch.prompt ? "watch" : "remote"}
           deckEdited={deckEdited}
-          busy={applyingWatch}
-          onConfirm={reloadPrompt === "watch" ? applyDeckWatchUpdate : applyRemoteDeckUpdate}
+          busy={deckWatch.prompt ? deckWatch.applying : applyingRemote}
+          onConfirm={deckWatch.prompt ? deckWatch.apply : applyRemoteDeckUpdate}
           // Dismissed, not declined: the header keeps the "Deck updated" chip
           // so the update can still be applied when the moment is right.
-          onClose={() => setReloadPrompt(null)}
+          onClose={() => {
+            deckWatch.dismissPrompt();
+            setRemotePrompt(false);
+          }}
         />
       )}
       <ControllerView
@@ -1061,15 +661,15 @@ export default function Presentation() {
         onSyncAll={syncAll}
         onEnd={endPresentation}
         onSynced={() => setLocal(false)}
-        onReplacePdf={replacePdf}
+        onReplacePdf={replaceFromController}
         currentCanvasRef={currentCanvasRef}
         blanked={blanked}
         filename={filename}
-        deckWatchMode={deckWatchable ? deckWatchMode : null}
-        deckWatchStatus={deckWatchStatus}
-        onDeckWatchModeChange={chooseDeckWatchMode}
-        onDeckWatchApply={applyDeckWatchUpdate}
-        onDeckWatchResume={resumeDeckWatch}
+        deckWatchMode={deckWatch.mode}
+        deckWatchStatus={deckWatch.status}
+        onDeckWatchModeChange={deckWatch.setMode}
+        onDeckWatchApply={deckWatch.apply}
+        onDeckWatchResume={deckWatch.resume}
         remoteDeckUpdate={!!remoteUpdate}
         onRemoteDeckApply={applyRemoteDeckUpdate}
         onBlankToggle={() => {
