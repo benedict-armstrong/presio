@@ -10,7 +10,17 @@ import { sanitizeSettingValue, setPluginSetting } from "@/lib/settings";
 import { clockOffset } from "@/lib/clock";
 import { DEFAULT_KEYMAP, formatBinding, pluginBindings, type Keymap } from "@/lib/keymap";
 import { asRecord, type LoadedPlugin, type PluginSurface } from "./manifest";
-import { HistoryHub, MAX_BLOB_BYTES, type HistoryFrameMessage } from "./history";
+import { HistoryHub, type HistoryFrameMessage } from "./history";
+import { MAX_BLOB_BYTES } from "@shared/limits";
+import {
+  fitsRetainedBudget,
+  jsonBytes,
+  MAX_PLUGIN_MESSAGE_BYTES,
+  MAX_PLUGIN_STORAGE_BYTES,
+  PLUGIN_TYPE_RE,
+  retainKey,
+  type Retain,
+} from "@shared/pluginProtocol";
 
 export type PluginRole = "presenter" | "audience";
 
@@ -21,7 +31,7 @@ export interface PluginContext {
   slide: { current: number; total: number };
 }
 
-export type Retain = boolean | "deck";
+export type { Retain };
 
 /** A plugin message as it travels between devices. */
 export interface WireEvent {
@@ -151,26 +161,13 @@ interface Conn extends FrameHooks {
   snapshots?: boolean;
 }
 
-const TYPE_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
 const MAX_LAYER_ITEMS = 32;
 /** An image URL a layer may show: inline, a blob, or on the web. */
 const LAYER_IMAGE_RE = /^(data:image\/|blob:|https:\/\/|http:\/\/(localhost|127\.0\.0\.1)[:/])/;
 const NO_LAYERS: PluginLayer[] = [];
-/** What one plugin may keep in presio.storage for one session, as JSON. */
-const STORAGE_LIMIT = 16 * 1024;
-/**
- * What one plugin may keep retained: this many message types, this many bytes
- * of payload (as JSON) — the server's caps (server/validation.ts). A drawing
- * keeps its strokes this way, a slide's worth per message; 2 MB is several
- * hundred thousand compactly encoded points.
- */
-const MAX_RETAINED_PER_PLUGIN = 1024;
-const MAX_RETAINED_BYTES_PER_PLUGIN = 2 * 1024 * 1024;
 /** How long retained changes wait before the presenter's copy is saved. */
 const PERSIST_DELAY_MS = 300;
 const NO_BUTTONS: Record<string, ButtonState> = {};
-/** A retained message's identity: its plugin and type (a later one replaces it). */
-export const retainKey = ({ plugin, type }: Pick<WireEvent, "plugin" | "type">) => `${plugin}\u0000${type}`;
 /** How long one plugin may take over its part of a download. */
 const EXPORT_TIMEOUT_MS = 60_000;
 /** How long a frame may take to hand over a snapshot of its history. */
@@ -437,11 +434,11 @@ export class PluginHost {
     const refuse = () => conn.port.postMessage({ type: "storage", storage: this.readStorage(pluginId) });
     // A local deck's viewer window shares this browser's storage; only the
     // presenter's frames write it.
-    if (this.ctx.role !== "presenter" || typeof key !== "string" || !TYPE_RE.test(key)) return refuse();
+    if (this.ctx.role !== "presenter" || typeof key !== "string" || !PLUGIN_TYPE_RE.test(key)) return refuse();
     const next = { ...this.readStorage(pluginId) };
     if (value === undefined) delete next[key];
     else next[key] = value;
-    if (JSON.stringify(next).length > STORAGE_LIMIT) {
+    if (jsonBytes(next) > MAX_PLUGIN_STORAGE_BYTES) {
       console.warn(`Plugin "${pluginId}" is over its storage limit; "${key}" wasn't saved`);
       return refuse();
     }
@@ -647,20 +644,12 @@ export class PluginHost {
       this.schedulePersist();
       return false;
     }
-    let size: number;
-    try {
-      size = JSON.stringify(event.payload).length;
-    } catch {
-      return false;
-    }
-    let count = 0;
-    let bytes = 0;
-    for (const [k, e] of this.retained) {
-      if (e.plugin !== event.plugin || k === key) continue;
-      count++;
-      bytes += this.retainedSize.get(k) ?? 0;
-    }
-    if (count >= MAX_RETAINED_PER_PLUGIN || bytes + size > MAX_RETAINED_BYTES_PER_PLUGIN) {
+    const size = jsonBytes(event.payload);
+    const sizes = [...this.retained].map(([k, e]): [string, { plugin: string; size: number }] => [
+      k,
+      { plugin: e.plugin, size: this.retainedSize.get(k) ?? 0 },
+    ]);
+    if (!fitsRetainedBudget(sizes, { key, plugin: event.plugin, size })) {
       console.warn(`Plugin "${event.plugin}" is over its retained budget; "${event.type}" won't reach late joiners`);
       return false;
     }
@@ -714,7 +703,13 @@ export class PluginHost {
 
   private onFrameMessage(conn: Conn, m: { type?: string; [key: string]: unknown }) {
     if (m?.type === "send") {
-      if (typeof m.msgType !== "string" || !TYPE_RE.test(m.msgType)) return;
+      if (typeof m.msgType !== "string" || !PLUGIN_TYPE_RE.test(m.msgType)) return;
+      // The server drops what's over the cap, so this device's other frames
+      // mustn't see it either (nor keep it, to be re-sent on every join).
+      if (jsonBytes(m.payload ?? null) > MAX_PLUGIN_MESSAGE_BYTES) {
+        console.warn(`Plugin "${conn.plugin.manifest.id}": "${m.msgType}" is over ${MAX_PLUGIN_MESSAGE_BYTES / 1024} KB of JSON and wasn't sent`);
+        return;
+      }
       const event: WireEvent = {
         plugin: conn.plugin.manifest.id,
         type: m.msgType,

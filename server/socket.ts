@@ -4,18 +4,20 @@ import { safeEqual } from "./auth.js";
 import {
   isValidSlideNumber,
   isValidTotalSlides,
-  jsonSize,
   sanitizePluginEvent,
   sanitizePublishedPlugin,
   sanitizePluginSettings,
   sanitizePluginLoadFailure,
+} from "./validation.js";
+import {
+  fitsRetainedBudget,
+  jsonBytes,
   MAX_PLUGINS_PER_SESSION,
-  MAX_RETAINED_PER_PLUGIN,
-  MAX_RETAINED_BYTES_PER_PLUGIN,
   PLUGIN_ID_RE,
+  retainKey,
   type PublishedPlugin,
   type Retain,
-} from "./validation.js";
+} from "../shared/pluginProtocol.js";
 import { HistoryError, HistoryStore, parseBase, sanitizeHead, sanitizeHistoryCommit, SHA256_RE, type HistoryBucket } from "./history.js";
 
 // A presenter plugin message kept for viewers who join later (the plugin's
@@ -161,22 +163,12 @@ export function registerSocketHandlers(
   // live, just not kept for late joiners.
   const retain = (sessionId: string, event: RetainedPluginEvent) => {
     const retained = pluginRetained.get(sessionId) ?? new Map<string, RetainedPluginEvent>();
-    const key = `${event.plugin}\u0000${event.type}`;
+    const key = retainKey(event);
     if (event.payload === null) {
       retained.delete(key);
       return;
     }
-    const plugins = new Set<string>();
-    let count = 0;
-    let bytes = 0;
-    for (const [k, e] of retained) {
-      plugins.add(e.plugin);
-      if (e.plugin !== event.plugin || k === key) continue;
-      count++;
-      bytes += e.size;
-    }
-    if (!plugins.has(event.plugin) && plugins.size >= MAX_PLUGINS_PER_SESSION) return;
-    if (count >= MAX_RETAINED_PER_PLUGIN || bytes + event.size > MAX_RETAINED_BYTES_PER_PLUGIN) return;
+    if (!fitsRetainedBudget(retained, { key, plugin: event.plugin, size: event.size })) return;
     retained.set(key, event);
     pluginRetained.set(sessionId, retained);
   };
@@ -339,7 +331,7 @@ export function registerSocketHandlers(
       const { plugin, type, payload } = event;
 
       if (controllers.get(sessionId) === socket.id) {
-        if (event.retain) retain(sessionId, { plugin, type, payload, retain: event.retain, size: jsonSize(payload) });
+        if (event.retain) retain(sessionId, { plugin, type, payload, retain: event.retain, size: jsonBytes(payload) });
         // Volatile ones (a laser position) may be dropped for a viewer whose
         // connection is backed up, rather than queued behind newer ones.
         const room = event.volatile ? socket.to(sessionId).volatile : socket.to(sessionId);

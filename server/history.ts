@@ -20,7 +20,7 @@
 // removed when the session ends or expires.
 
 import { createHash } from "crypto";
-import { PLUGIN_ID_RE } from "./validation.js";
+import { PLUGIN_ID_RE } from "../shared/pluginProtocol.js";
 
 export interface HistoryEntry {
   seq: number;

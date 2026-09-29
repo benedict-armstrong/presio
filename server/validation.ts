@@ -1,3 +1,14 @@
+import { MAX_TOTAL_SLIDES } from "../shared/limits.js";
+import {
+  jsonBytes,
+  MAX_PLUGIN_MESSAGE_BYTES,
+  PLUGIN_ID_RE,
+  PLUGIN_TYPE_RE,
+  SHA256_RE,
+  type PublishedPlugin,
+  type Retain,
+} from "../shared/pluginProtocol.js";
+
 // Pure validation/sanitization helpers, factored out of the request/socket
 // handlers so they can be unit-tested without a server or Supabase.
 
@@ -29,15 +40,8 @@ export function isValidEmail(value: unknown): value is string {
   );
 }
 
-// Upper bound on a deck's declared page count. total_slides is client-supplied
-// at session creation and bounds slide numbers, so it must be bounded; no real
-// presentation comes close.
-export const MAX_TOTAL_SLIDES = 3000;
-
-// Largest PDF the server accepts on an upload. The client mirrors this in
-// client/src/lib/limits.ts to disable Sync before an upload that would fail.
-export const MAX_PDF_BYTES = 50 * 1024 * 1024;
-
+// total_slides is client-supplied at session creation and bounds slide
+// numbers, so it must be bounded (shared/limits.ts).
 export function isValidTotalSlides(value: unknown): value is number {
   return Number.isInteger(value) && (value as number) >= 1 && (value as number) <= MAX_TOTAL_SLIDES;
 }
@@ -52,28 +56,9 @@ export function isValidSlideNumber(slideNumber: unknown, total: unknown): boolea
 
 // --- Plugins ---
 //
-// The server never runs plugin code or looks inside plugin messages: it relays
-// them between the presenter and the audience, keeps the presenter's "retained"
-// messages for late joiners, and tells viewers which plugins the presenter
-// published (where to load them — never the plugins themselves). These caps
-// bound what a controller or viewer can make it hold.
-
-export const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const PLUGIN_TYPE_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
-// A plugin page's SHA-256, hex.
-const HASH_RE = /^[0-9a-f]{64}$/;
-const MAX_PLUGIN_PAYLOAD_BYTES = 16 * 1024;
-export const MAX_PLUGINS_PER_SESSION = 8;
-// Retained messages are a plugin's state for late joiners, one message per
-// piece of it — a drawing keeps each slide's strokes in a few. So a plugin may
-// keep many, and the byte budget is what bounds memory: 2 MB per plugin (a
-// few hundred thousand compactly encoded points), 16 MB for a session with
-// every plugin slot full.
-export const MAX_RETAINED_PER_PLUGIN = 1024;
-export const MAX_RETAINED_BYTES_PER_PLUGIN = 2 * 1024 * 1024;
-
-/** true: kept for the session; "deck": kept until the deck is replaced. */
-export type Retain = boolean | "deck";
+// The limits, id rules and wire shapes live in shared/pluginProtocol.ts, which
+// the client enforces too. These bound what a controller or viewer can make
+// the server hold.
 
 export interface PluginEvent {
   plugin: string;
@@ -82,35 +67,6 @@ export interface PluginEvent {
   retain: Retain;
   /** May be dropped for a backed-up viewer rather than queued. */
   volatile: boolean;
-}
-
-interface PluginManifest {
-  id: string;
-  name: string;
-  version: string;
-  author?: string;
-  description?: string;
-  surfaces: string[];
-  permissions: string[];
-}
-
-/** A plugin the presenter runs on viewers: where they load it from, and the
- *  hash of its HTML, which viewers check what they load against. The server
- *  never carries the plugin itself. */
-export interface PublishedPlugin {
-  manifest: PluginManifest;
-  url: string;
-  hash: string;
-}
-
-// Size of a value once serialized, or Infinity when it can't be (cycles are
-// impossible off the wire, but BigInt-like oddities aren't worth reasoning about).
-export function jsonSize(value: unknown): number {
-  try {
-    return Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
-  } catch {
-    return Infinity;
-  }
 }
 
 /** A plugin message's fields, when it's an object naming a valid plugin id. */
@@ -125,7 +81,7 @@ export function sanitizePluginEvent(raw: unknown): PluginEvent | null {
   if (!e) return null;
   if (typeof e.type !== "string" || !PLUGIN_TYPE_RE.test(e.type)) return null;
   const payload = e.payload === undefined ? null : e.payload;
-  if (jsonSize(payload) > MAX_PLUGIN_PAYLOAD_BYTES) return null;
+  if (jsonBytes(payload) > MAX_PLUGIN_MESSAGE_BYTES) return null;
   const retain = e.retain === true || e.retain === "deck" ? e.retain : false;
   return { plugin: e.plugin, type: e.type, payload, retain, volatile: e.volatile === true };
 }
@@ -136,7 +92,7 @@ export function sanitizePluginSettings(raw: unknown): { plugin: string; settings
   if (!e) return null;
   const settings = e.settings;
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) return null;
-  if (jsonSize(settings) > MAX_PLUGIN_PAYLOAD_BYTES) return null;
+  if (jsonBytes(settings) > MAX_PLUGIN_MESSAGE_BYTES) return null;
   return { plugin: e.plugin, settings: settings as Record<string, unknown> };
 }
 
@@ -145,7 +101,7 @@ export function sanitizePluginSettings(raw: unknown): { plugin: string; settings
 export function sanitizePluginLoadFailure(raw: unknown): { plugin: string; hash: string; reason: string } | null {
   const e = pluginMessage(raw);
   if (!e) return null;
-  if (typeof e.hash !== "string" || !HASH_RE.test(e.hash)) return null;
+  if (typeof e.hash !== "string" || !SHA256_RE.test(e.hash)) return null;
   const reason = typeof e.reason === "string" ? e.reason.slice(0, 200) : "";
   return { plugin: e.plugin, hash: e.hash, reason };
 }
@@ -173,7 +129,7 @@ export function sanitizePublishedPlugin(raw: unknown): PublishedPlugin | null {
   // origin) or a web URL — nothing a browser would run as a script.
   const url = typeof b.url === "string" && b.url.length <= 2048 ? b.url : "";
   if (!/^(\/(?!\/)|https?:\/\/)/i.test(url)) return null;
-  if (typeof b.hash !== "string" || !HASH_RE.test(b.hash)) return null;
+  if (typeof b.hash !== "string" || !SHA256_RE.test(b.hash)) return null;
   return {
     manifest: {
       id: m.id,

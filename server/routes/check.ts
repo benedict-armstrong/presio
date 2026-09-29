@@ -7,7 +7,7 @@ import multer from "multer";
 import { openPdf, closePdf, readAttachments } from "../lib/pdfDoc.js";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { canonicalBaseUrl } from "../lib/baseUrl.js";
-import { MAX_PDF_BYTES } from "../validation.js";
+import { MAX_PDF_BYTES } from "../../shared/limits.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_PDF_BYTES } });
 

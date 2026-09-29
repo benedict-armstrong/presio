@@ -8,6 +8,7 @@ Coding agents working in this repository.
 
 - `client/` — Vite + React SPA
 - `server/` — Express + Socket.IO + Supabase
+- `shared/` — code both import: limits, the plugin protocol, history core, sidecar validators (`@shared/*` in the client, `../shared/*.js` in the server)
 - `schema/` — JSON schemas for sidecar formats
 
 ## Agent-facing product APIs (runtime)

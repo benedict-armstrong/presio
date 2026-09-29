@@ -3,7 +3,7 @@ import { QrCode } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { authEnabled } from "@/lib/authMode";
 import { idbGet } from "@/lib/localStore";
-import { MAX_PDF_BYTES, MAX_PDF_MB } from "@/lib/limits";
+import { MAX_PDF_BYTES, MAX_PDF_MB } from "@shared/limits";
 
 // Why this deck can't be uploaded, or "" when it can. Read fresh from
 // IndexedDB each time the share surface opens, so a PDF replaced since (a

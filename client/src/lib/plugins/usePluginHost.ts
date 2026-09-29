@@ -12,22 +12,14 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { socket } from "@/lib/socket";
 import { readAttachments, type PdfAttachment } from "@/lib/pdf";
 import { useJoinUrl } from "@/lib/joinUrl";
-import { PluginHost, retainKey, type PageSize, type PluginContext, type WireEvent } from "./host";
+import { PluginHost, type PageSize, type PluginContext, type WireEvent } from "./host";
+import { retainKey, type PublishedPlugin } from "@shared/pluginProtocol";
 import { isActivatedBy, type LoadedPlugin, type PluginManifest } from "./manifest";
 import { loadPlugin, usePluginEntries } from "./registry";
 import { clockOffset, onClockSample } from "@/lib/clock";
 import { resolvePluginSettings, useSettingsDocument } from "@/lib/settings";
 import { getSessionAuth } from "@/lib/utils";
 import { blobSha, type HistoryEntry, type HistoryLink, type SyncReply } from "./history";
-
-/** A plugin viewers run: where to load it, and what it must hash to. */
-interface PublishedPlugin {
-  manifest: Pick<PluginManifest, "id" | "name" | "version" | "author" | "description" | "surfaces" | "permissions">;
-  /** As the presenter registered it: built-ins by path, so each viewer
-   *  loads them from its own origin; others by absolute URL. */
-  url: string;
-  hash: string;
-}
 
 interface PluginsState {
   plugins: PublishedPlugin[];
