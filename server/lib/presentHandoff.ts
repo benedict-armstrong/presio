@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Server } from "socket.io";
 import { nanoid } from "nanoid";
 import { countPages } from "./pdfDoc.js";
+import { DEFAULT_DECK_NAME, normalizeDeckName } from "./upload.js";
 import { safeEqual } from "../auth.js";
 import type { SocketState } from "../socket.js";
 import { announceDeckUpdate, clampSlide, replaceHostedDeck } from "./hostedDeck.js";
@@ -24,7 +25,7 @@ export async function createPresentHandoff(
   if (!pages.ok) return pages;
   const { totalSlides } = pages;
 
-  const filename = opts.originalName.replace(/\.pdf$/i, "") || "presentation";
+  const filename = normalizeDeckName(opts.originalName) || DEFAULT_DECK_NAME;
   const controllerToken = nanoid(24);
   const passphrase = generatePassphrase();
   const pdfPath = `handoff/${nanoid(32)}.pdf`;
@@ -123,8 +124,8 @@ export async function updatePresentDeck(
   const { totalSlides } = pages;
 
   // An empty name means "keep the current title" rather than resetting it.
-  const rawName = (opts.originalName ?? "").trim().replace(/\.pdf$/i, "");
-  const filename = rawName || row.filename || "presentation";
+  const rawName = normalizeDeckName(opts.originalName);
+  const filename = rawName || row.filename || DEFAULT_DECK_NAME;
 
   if (row.local) {
     // Handoff may already be complete (the browser cleared the server copy),

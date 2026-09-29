@@ -1,11 +1,10 @@
 import type express from "express";
-import multer from "multer";
 import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { nanoid } from "nanoid";
 import { countPages } from "../lib/pdfDoc.js";
+import { DEFAULT_DECK_NAME, isPdfUpload, normalizeDeckName, singleField, uploadField } from "../lib/upload.js";
 import { isValidHttpsUrl, isValidTotalSlides } from "../validation.js";
-import { MAX_PDF_BYTES } from "../../shared/limits.js";
 import { requireUser, resolveOptionalUserId, safeEqual } from "../auth.js";
 import { isLocalMode } from "../local/mode.js";
 import { clearSessionState, type SocketState } from "../socket.js";
@@ -27,46 +26,7 @@ export interface RouteDeps {
 // not lifetime — presentations.
 export const MAX_CONCURRENT_PRESENTATIONS = 3;
 
-/**
- * Read a multipart text field that may legitimately appear at most once.
- * Multer hands a repeated field back as an array, which a bare
- * `typeof x === "string"` check silently reads as "absent" — on /api/present
- * that turned a duplicated `session_id` into a brand new presentation, burning
- * a concurrent slot and handing back a fresh link. `null` means "sent more than
- * once" so callers can reject instead of guessing which copy was meant.
- */
-function singleField(value: unknown): string | null {
-  if (value === undefined) return "";
-  return typeof value === "string" ? value : null;
-}
-
 export function registerSessionRoutes(app: express.Express, { supabase, io, socketState }: RouteDeps) {
-  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_PDF_BYTES } });
-
-  // Multer/busboy failures are otherwise unhandled: they carry no `status`, so
-  // they fall past the body-parser handler in app.ts to Express's default one,
-  // which dumps a stack to stderr and answers with an HTML 500 the client can't
-  // parse. The common case is a body that ends before its closing boundary
-  // ("Unexpected end of form") — the browser aborted mid-upload, e.g. because
-  // the Blob it was streaming couldn't be read — which is the uploader's
-  // problem to retry, not a server fault. Answer 400 with a usable message.
-  const uploadField = (field: string): express.RequestHandler => {
-    const handler = upload.single(field);
-    return (req, res, next) =>
-      handler(req, res, (err: unknown) => {
-        if (!err) return next();
-        const code = (err as { code?: string }).code;
-        if (code === "LIMIT_FILE_SIZE") {
-          res.status(413).json({ error: `PDF exceeds the ${MAX_PDF_BYTES / 1024 / 1024}MB limit` });
-          return;
-        }
-        console.error(`Upload failed for ${req.method} ${req.path}:`, err);
-        res.status(400).json({
-          error: "The upload didn't complete. Check your connection and try again.",
-        });
-      });
-  };
-
   /**
    * POST /api/present — upload a PDF; get a URL that opens a local presentation
    * (skips share). The PDF is staged briefly, then moved into the browser.
@@ -86,7 +46,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         res.status(400).json({ error: 'Missing "file" field (multipart/form-data)' });
         return;
       }
-      if (file.mimetype !== "application/pdf" && !file.originalname.toLowerCase().endsWith(".pdf")) {
+      if (!isPdfUpload(file)) {
         res.status(400).json({ error: "File must be a PDF" });
         return;
       }
@@ -362,7 +322,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       }
 
       const file = req.file;
-      if (!file || file.mimetype !== "application/pdf") {
+      if (!isPdfUpload(file)) {
         res.status(400).json({ error: "A PDF file is required" });
         return;
       }
@@ -372,7 +332,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         res.status(400).json({ error: "filename was sent more than once" });
         return;
       }
-      const filename = rawName.trim().replace(/\.pdf$/i, "") || "Presentation";
+      const filename = normalizeDeckName(rawName) || DEFAULT_DECK_NAME;
 
       const pages = await countPages(file.buffer);
       if (!pages.ok) {
@@ -488,7 +448,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   // the PDF directly from the URL, so it must be a public, CORS-friendly host.
   app.post("/api/sessions/external", async (req, res) => {
     const url = req.body.url;
-    const filename = typeof req.body.filename === "string" ? req.body.filename : "";
+    const filename = normalizeDeckName(req.body.filename);
     const totalSlides = parseInt(req.body.total_slides, 10);
     if (!isValidHttpsUrl(url)) {
       res.status(400).json({ error: "A valid https PDF URL is required" });
@@ -556,7 +516,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       }
 
       const file = req.file;
-      if (!file || file.mimetype !== "application/pdf") {
+      if (!isPdfUpload(file)) {
         res.status(400).json({ error: "A PDF file is required" });
         return;
       }
@@ -642,7 +602,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
   app.post("/api/sessions/:id/pdf", uploadField("pdf"), async (req, res) => {
     try {
       const file = req.file;
-      if (!file || file.mimetype !== "application/pdf") {
+      if (!isPdfUpload(file)) {
         res.status(400).json({ error: "A PDF file is required" });
         return;
       }
@@ -671,8 +631,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       }
       const { totalSlides } = pages;
 
-      const rawName = typeof req.body.filename === "string" ? req.body.filename.trim() : "";
-      const newFilename = rawName.replace(/\.pdf$/i, "");
+      const newFilename = normalizeDeckName(req.body.filename);
 
       const replaced = await replaceHostedDeck(supabase, row, { buffer: file.buffer, totalSlides, filename: newFilename });
       if (!replaced.ok) {
