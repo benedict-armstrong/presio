@@ -3,9 +3,9 @@ import multer from "multer";
 import type { Server } from "socket.io";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { nanoid } from "nanoid";
-import { openPdf, closePdf } from "../lib/pdfDoc.js";
+import { countPages } from "../lib/pdfDoc.js";
 import { isValidHttpsUrl, isValidTotalSlides } from "../validation.js";
-import { MAX_PDF_BYTES, MAX_TOTAL_SLIDES } from "../../shared/limits.js";
+import { MAX_PDF_BYTES } from "../../shared/limits.js";
 import { getBearerToken, requireUser, resolveOptionalUserId, safeEqual } from "../auth.js";
 import { isLocalMode } from "../local/mode.js";
 import { clearSessionState, forgetDeckRetained, type SocketState } from "../socket.js";
@@ -350,19 +350,12 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       }
       const filename = rawName.trim().replace(/\.pdf$/i, "") || "Presentation";
 
-      let totalSlides: number;
-      try {
-        const doc = await openPdf({ data: new Uint8Array(file.buffer) });
-        totalSlides = doc.numPages;
-        void closePdf(doc);
-      } catch {
-        res.status(400).json({ error: "The file could not be read as a PDF" });
+      const pages = await countPages(file.buffer);
+      if (!pages.ok) {
+        res.status(pages.status).json({ error: pages.error });
         return;
       }
-      if (!isValidTotalSlides(totalSlides)) {
-        res.status(400).json({ error: `PDF exceeds the ${MAX_TOTAL_SLIDES}-page limit` });
-        return;
-      }
+      const { totalSlides } = pages;
 
       // The row is inserted before the upload because the code it reserves is
       // also the object path. It starts as a local placeholder, so a failed
@@ -576,13 +569,12 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       }
 
       const pdfPath = `${row.id}.pdf`;
-      const doc = await openPdf({ data: new Uint8Array(file.buffer) });
-      const totalSlides = doc.numPages;
-      void closePdf(doc);
-      if (!isValidTotalSlides(totalSlides)) {
-        res.status(400).json({ error: `PDF exceeds the ${MAX_TOTAL_SLIDES}-page limit` });
+      const pages = await countPages(file.buffer);
+      if (!pages.ok) {
+        res.status(pages.status).json({ error: pages.error });
         return;
       }
+      const { totalSlides } = pages;
 
       const { error: uploadError } = await supabase.storage
         .from("presentations")
@@ -680,19 +672,12 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         return;
       }
 
-      let totalSlides: number;
-      try {
-        const doc = await openPdf({ data: new Uint8Array(file.buffer) });
-        totalSlides = doc.numPages;
-        void closePdf(doc);
-      } catch {
-        res.status(400).json({ error: "The file could not be read as a PDF" });
+      const pages = await countPages(file.buffer);
+      if (!pages.ok) {
+        res.status(pages.status).json({ error: pages.error });
         return;
       }
-      if (!isValidTotalSlides(totalSlides)) {
-        res.status(400).json({ error: `PDF exceeds the ${MAX_TOTAL_SLIDES}-page limit` });
-        return;
-      }
+      const { totalSlides } = pages;
 
       const rawName = typeof req.body.filename === "string" ? req.body.filename.trim() : "";
       const newFilename = rawName.replace(/\.pdf$/i, "");

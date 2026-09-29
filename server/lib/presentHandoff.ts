@@ -1,9 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Server } from "socket.io";
 import { nanoid } from "nanoid";
-import { openPdf, closePdf } from "./pdfDoc.js";
-import { isValidTotalSlides } from "../validation.js";
-import { MAX_TOTAL_SLIDES } from "../../shared/limits.js";
+import { countPages } from "./pdfDoc.js";
 import { safeEqual } from "../auth.js";
 import { forgetDeckRetained, type SocketState } from "../socket.js";
 import { loadSession } from "./sessionAccess.js";
@@ -21,17 +19,9 @@ export async function createPresentHandoff(
   supabase: SupabaseClient,
   opts: { buffer: Buffer; originalName: string; userId: string | null; baseUrl: string }
 ): Promise<PresentResult> {
-  let totalSlides: number;
-  try {
-    const doc = await openPdf({ data: new Uint8Array(opts.buffer) });
-    totalSlides = doc.numPages;
-    void closePdf(doc);
-  } catch {
-    return { ok: false, status: 422, error: "Could not parse PDF" };
-  }
-  if (!isValidTotalSlides(totalSlides)) {
-    return { ok: false, status: 400, error: `PDF exceeds the ${MAX_TOTAL_SLIDES}-page limit` };
-  }
+  const pages = await countPages(opts.buffer);
+  if (!pages.ok) return pages;
+  const { totalSlides } = pages;
 
   const filename = opts.originalName.replace(/\.pdf$/i, "") || "presentation";
   const controllerToken = nanoid(24);
@@ -127,17 +117,9 @@ export async function updatePresentDeck(
     return { ok: false, status: 403, error: "Not authorized" };
   }
 
-  let totalSlides: number;
-  try {
-    const doc = await openPdf({ data: new Uint8Array(opts.buffer) });
-    totalSlides = doc.numPages;
-    void closePdf(doc);
-  } catch {
-    return { ok: false, status: 422, error: "Could not parse PDF" };
-  }
-  if (!isValidTotalSlides(totalSlides)) {
-    return { ok: false, status: 400, error: `PDF exceeds the ${MAX_TOTAL_SLIDES}-page limit` };
-  }
+  const pages = await countPages(opts.buffer);
+  if (!pages.ok) return pages;
+  const { totalSlides } = pages;
 
   // An empty name means "keep the current title" rather than resetting it.
   const rawName = (opts.originalName ?? "").trim().replace(/\.pdf$/i, "");

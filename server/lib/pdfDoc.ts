@@ -8,6 +8,7 @@
 // and the `as Record<...>` casts they used hid it from the compiler.
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import { MAX_TOTAL_SLIDES } from "../../shared/limits.js";
 
 type DocumentSource = Parameters<typeof getDocument>[0];
 
@@ -36,6 +37,28 @@ export async function openPdf(source: DocumentSource): Promise<PDFDocumentProxy>
 export async function closePdf(doc: PDFDocumentProxy | null | undefined): Promise<void> {
   if (!doc) return;
   await tasks.get(doc)?.destroy();
+}
+
+export type PageCount = { ok: true; totalSlides: number } | { ok: false; status: number; error: string };
+
+/**
+ * An uploaded deck's page count: 422 when it isn't a PDF pdf.js can read, 400
+ * when it has more pages than a session may (MAX_TOTAL_SLIDES).
+ */
+export async function countPages(bytes: Uint8Array): Promise<PageCount> {
+  let totalSlides: number;
+  try {
+    // pdf.js may detach the buffer it's given; callers still need theirs.
+    const doc = await openPdf({ data: new Uint8Array(bytes) });
+    totalSlides = doc.numPages;
+    void closePdf(doc);
+  } catch {
+    return { ok: false, status: 422, error: "Could not parse PDF" };
+  }
+  if (totalSlides < 1 || totalSlides > MAX_TOTAL_SLIDES) {
+    return { ok: false, status: 400, error: `PDF exceeds the ${MAX_TOTAL_SLIDES}-page limit` };
+  }
+  return { ok: true, totalSlides };
 }
 
 /** One of a deck's sidecar attachments, with its bytes resolved. */
