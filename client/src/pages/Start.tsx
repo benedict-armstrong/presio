@@ -5,6 +5,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { idbPut } from "@/lib/localStore";
 import { setSessionAuth } from "@/lib/utils";
 
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 // Deep link from POST /api/present: /start/:id?t=<token>
 // Pulls the staged PDF into IndexedDB (local session), clears the server copy,
 // and opens the controller — skipping the share screen.
@@ -26,7 +34,8 @@ export default function Start() {
           const body = await res.json().catch(() => ({}));
           throw new Error(typeof body.error === "string" ? body.error : "Failed to download presentation");
         }
-        const filename = res.headers.get("X-Filename") || "presentation";
+        // Percent-encoded by the server: header values can't carry non-Latin-1.
+        const filename = safeDecode(res.headers.get("X-Filename") || "") || "presentation";
         const totalSlides = parseInt(res.headers.get("X-Total-Slides") || "0", 10);
         const blob = await res.blob();
         if (!totalSlides) throw new Error("Invalid presentation metadata");
