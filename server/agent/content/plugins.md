@@ -172,7 +172,7 @@ presio.settings.onChange(settings => {})
 presio.storage.get(key)                    // presenter: this plugin's state for this session
 presio.storage.set(key, value)             // JSON, 16 KB per plugin; set(key) removes
 presio.storage.all
-presio.storage.onChange(storage => {})     // another surface of this plugin changed it
+presio.storage.onChange(storage => {})     // another surface changed it, or a set() was refused
 
 presio.onButton(id, (id, file) => {})      // a contributed button was pressed; with "accept",
                                            // file is { name, type, bytes: Uint8Array }

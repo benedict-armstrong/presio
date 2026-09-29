@@ -111,6 +111,8 @@ interface Presio {
     get(key: string): unknown;
     readonly all: Record<string, unknown>;
     set(key: string, value?: unknown): void;
+    /** Another surface changed a value, or a set() was refused (over the
+     *  limit, or not the presenter) and this is what's actually stored. */
     onChange(cb: (storage: Record<string, unknown>) => void): Unsubscribe;
   };
   /** A contributed button was pressed; one with "accept" brings the file picked. */

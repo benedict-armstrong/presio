@@ -431,14 +431,20 @@ export class PluginHost {
   }
 
   private onStorageSet(conn: Conn, key: unknown, value: unknown) {
+    const pluginId = conn.plugin.manifest.id;
+    // The frame already applied the write to its own copy; when it's refused,
+    // hand back what is actually stored so the two don't disagree.
+    const refuse = () => conn.port.postMessage({ type: "storage", storage: this.readStorage(pluginId) });
     // A local deck's viewer window shares this browser's storage; only the
     // presenter's frames write it.
-    if (this.ctx.role !== "presenter" || typeof key !== "string" || !TYPE_RE.test(key)) return;
-    const pluginId = conn.plugin.manifest.id;
+    if (this.ctx.role !== "presenter" || typeof key !== "string" || !TYPE_RE.test(key)) return refuse();
     const next = { ...this.readStorage(pluginId) };
     if (value === undefined) delete next[key];
     else next[key] = value;
-    if (JSON.stringify(next).length > STORAGE_LIMIT) return;
+    if (JSON.stringify(next).length > STORAGE_LIMIT) {
+      console.warn(`Plugin "${pluginId}" is over its storage limit; "${key}" wasn't saved`);
+      return refuse();
+    }
     const storeKey = pluginStateKey(this.ctx.session.id);
     const all = lsGet<Record<string, unknown>>(storeKey, {});
     lsSet(storeKey, { ...all, [pluginId]: next });

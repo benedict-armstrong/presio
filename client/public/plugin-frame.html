@@ -367,7 +367,8 @@
           else ctx.storage[key] = value;
           post({ type: "storage", key: key, value: value });
         },
-        /** Another surface of this plugin changed a value. */
+        /** Another surface of this plugin changed a value, or the host
+         *  refused a set() and sent back what's stored. */
         onChange: function (cb) { return subscribe(storageListeners, cb); },
       },
       /** A contributed button (contributes.buttons) was pressed. Delivered to
