@@ -16,7 +16,8 @@ import { idbPut, idbGet, idbList, idbDelete } from "@/lib/localStore";
 import { newLocalDeckId } from "@/lib/localId";
 import { isDeckWatchSupported, PDF_PICKER_OPTIONS } from "@/lib/deckWatcher";
 import { getSessionAuth, setSessionAuth, endSession } from "@/lib/utils";
-import { lsRemove, lsSetString, sessionKey, deckWatchKey } from "@/lib/storage";
+import { lsRemove, lsSetString, sessionKey, sessionIdFromKey, deckWatchKey } from "@/lib/storage";
+import { SESSION_CODE_LENGTH } from "@shared/session";
 import { forgetDeckRetained } from "@/lib/plugins/host";
 import { useSetting } from "@/lib/settings";
 import { track, sha256Hex } from "@/lib/analytics";
@@ -417,8 +418,6 @@ interface RecentDeck {
   controllerToken?: string;
 }
 
-const SESSION_KEY_RE = /^session_([A-Z0-9]{6})$/;
-
 // A dropped file that matched a known presentation and is waiting on the
 // update-vs-create prompt. The decoded blob is kept so "Create separate"
 // doesn't re-read or re-parse the file. (The ArrayBuffer it came from is not:
@@ -449,8 +448,8 @@ async function listControlledSynced(): Promise<RecentDeck[]> {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (!key) continue;
-      const m = key.match(SESSION_KEY_RE);
-      if (m && localStorage.getItem(key)?.includes("controllerToken")) ids.push(m[1]);
+      const id = sessionIdFromKey(key);
+      if (id && localStorage.getItem(key)?.includes("controllerToken")) ids.push(id);
     }
   } catch {
     return []; // storage unavailable (private mode): nothing to scan
@@ -524,8 +523,7 @@ export default function Home() {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
-  const CODE_LENGTH = 6;
-  const [chars, setChars] = useState<string[]>(Array(CODE_LENGTH).fill(""));
+  const [chars, setChars] = useState<string[]>(Array(SESSION_CODE_LENGTH).fill(""));
   const charRefs = useRef<(HTMLInputElement | null)[]>([]);
   const code = chars.join("");
   const [pdfUrl, setPdfUrl] = useState("");
@@ -1055,7 +1053,7 @@ export default function Home() {
   );
 
   useEffect(() => {
-    if (code.length === CODE_LENGTH) navigate(`/s/${code}?role=viewer`);
+    if (code.length === SESSION_CODE_LENGTH) navigate(`/s/${code}?role=viewer`);
   }, [code, navigate]);
 
   return (
@@ -1237,7 +1235,7 @@ export default function Home() {
               </div>
 
               <div className="flex justify-center gap-2">
-                {Array.from({ length: CODE_LENGTH }, (_, i) => (
+                {Array.from({ length: SESSION_CODE_LENGTH }, (_, i) => (
                   <input
                     key={i}
                     ref={(el) => {
@@ -1254,7 +1252,7 @@ export default function Home() {
                       const next = [...chars];
                       next[i] = val[val.length - 1];
                       setChars(next);
-                      if (i < CODE_LENGTH - 1) charRefs.current[i + 1]?.focus();
+                      if (i < SESSION_CODE_LENGTH - 1) charRefs.current[i + 1]?.focus();
                     }}
                     onKeyDown={(e) => {
                       if (e.key === "Backspace") {
@@ -1270,9 +1268,9 @@ export default function Home() {
                         }
                       } else if (e.key === "ArrowLeft" && i > 0) {
                         charRefs.current[i - 1]?.focus();
-                      } else if (e.key === "ArrowRight" && i < CODE_LENGTH - 1) {
+                      } else if (e.key === "ArrowRight" && i < SESSION_CODE_LENGTH - 1) {
                         charRefs.current[i + 1]?.focus();
-                      } else if (e.key === "Enter" && code.length === CODE_LENGTH) {
+                      } else if (e.key === "Enter" && code.length === SESSION_CODE_LENGTH) {
                         navigate(`/s/${code}?role=viewer`);
                       }
                     }}
@@ -1280,11 +1278,11 @@ export default function Home() {
                       e.preventDefault();
                       const pasted = e.clipboardData.getData("text").toUpperCase().replace(/[^A-Z0-9]/g, "");
                       const next = [...chars];
-                      for (let j = 0; j < CODE_LENGTH - i && j < pasted.length; j++) {
+                      for (let j = 0; j < SESSION_CODE_LENGTH - i && j < pasted.length; j++) {
                         next[i + j] = pasted[j];
                       }
                       setChars(next);
-                      const focusIdx = Math.min(i + pasted.length, CODE_LENGTH - 1);
+                      const focusIdx = Math.min(i + pasted.length, SESSION_CODE_LENGTH - 1);
                       charRefs.current[focusIdx]?.focus();
                     }}
                     onFocus={(e) => e.target.select()}

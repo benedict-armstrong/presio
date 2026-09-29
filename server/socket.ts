@@ -19,6 +19,7 @@ import {
   type PublishedPlugin,
   type Retain,
 } from "../shared/pluginProtocol.js";
+import { SESSION_ID_RE } from "../shared/session.js";
 import { HistoryError, HistoryStore, parseBase, sanitizeHead, sanitizeHistoryCommit, type HistoryBucket } from "./history.js";
 
 // A presenter plugin message kept for viewers who join later (the plugin's
@@ -81,12 +82,6 @@ export function forgetDeckRetained(state: SocketState, sessionId: string) {
     if (event.retain === "deck") retained.delete(key);
   }
 }
-
-// Shape of a join code, used as a free pre-filter before touching the DB.
-// Deliberately looser than the generator's alphabet (which omits I/O/0/1):
-// this is a cheap "could this possibly be a code?" guard, not an auth boundary,
-// and it must keep accepting ids minted by older builds and fixtures.
-const SESSION_ID_RE = /^[A-Z0-9]{6}$/;
 
 // --- join_session throttling ---
 //

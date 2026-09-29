@@ -4,6 +4,7 @@ import { safeEqual } from "../auth.js";
 import { HistoryError, type HistoryStore } from "../history.js";
 import { MAX_BLOB_BYTES } from "../../shared/limits.js";
 import { SHA256_RE } from "../../shared/pluginProtocol.js";
+import { SESSION_ID_RE } from "../../shared/session.js";
 
 // Blobs for plugin histories (presio.history): content-addressed bytes too big
 // for a plugin message — snapshots, images. They travel over HTTP, not the
@@ -12,8 +13,6 @@ import { SHA256_RE } from "../../shared/pluginProtocol.js";
 // The controller uploads (its token, like every presenter-side write); anyone
 // with the session's code may download, as they may its PDF. A blob's URL is
 // its hash, so it never changes and caches forever.
-
-const SESSION_ID_RE = /^[A-Z0-9]{6}$/;
 
 export function registerHistoryRoutes(app: express.Express, { supabase, history }: { supabase: SupabaseClient; history: HistoryStore }) {
   app.put(
