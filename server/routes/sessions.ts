@@ -6,7 +6,7 @@ import { nanoid } from "nanoid";
 import { countPages } from "../lib/pdfDoc.js";
 import { isValidHttpsUrl, isValidTotalSlides } from "../validation.js";
 import { MAX_PDF_BYTES } from "../../shared/limits.js";
-import { getBearerToken, requireUser, resolveOptionalUserId, safeEqual } from "../auth.js";
+import { requireUser, resolveOptionalUserId, safeEqual } from "../auth.js";
 import { isLocalMode } from "../local/mode.js";
 import { clearSessionState, type SocketState } from "../socket.js";
 import { announceDeckUpdate, clampSlide, replaceHostedDeck } from "../lib/hostedDeck.js";
@@ -305,6 +305,37 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
     error: `You can have at most ${MAX_CONCURRENT_PRESENTATIONS} synced presentations at once. End one before syncing another.`,
   });
 
+  /**
+   * Whether the user has room for one more synced presentation (a re-claim of
+   * `exceptId` doesn't count itself). Answers the request when not.
+   */
+  async function ensureQuota(res: express.Response, userId: string, exceptId?: string): Promise<boolean> {
+    const live = await liveSyncedCount(userId, exceptId);
+    if (live === null) {
+      res.status(500).json({ error: "Failed to check presentation limit" });
+      return false;
+    }
+    if (live >= MAX_CONCURRENT_PRESENTATIONS) {
+      res.status(403).json(capReached());
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * The quota check races with concurrent shares (check-then-act isn't
+   * atomic). Re-count once the new synced row is visible; if parallel requests
+   * overshot the cap, undo this one and answer 403. Fail-closed: in the rare
+   * tie both revert and the user simply retries one. Returns whether it stands.
+   */
+  async function reconcileQuota(res: express.Response, userId: string, undo: () => Promise<void>): Promise<boolean> {
+    const after = await liveSyncedCount(userId);
+    if (after === null || after <= MAX_CONCURRENT_PRESENTATIONS) return true;
+    await undo();
+    res.status(403).json(capReached());
+    return false;
+  }
+
   // Share a presentation that until now existed only in the presenter's
   // browser: the PDF is uploaded and its session row is created here — which is
   // where the join code is minted, by insertSession's collision-retrying insert.
@@ -327,15 +358,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
           return;
         }
         userId = user.id;
-        const live = await liveSyncedCount(userId);
-        if (live === null) {
-          res.status(500).json({ error: "Failed to check presentation limit" });
-          return;
-        }
-        if (live >= MAX_CONCURRENT_PRESENTATIONS) {
-          res.status(403).json(capReached());
-          return;
-        }
+        if (!(await ensureQuota(res, userId))) return;
       }
 
       const file = req.file;
@@ -396,7 +419,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       const update: Record<string, unknown> = { local: false, pdf_path: pdfPath };
       const currentSlide = parseInt(req.body.current_slide, 10);
       if (Number.isFinite(currentSlide) && currentSlide >= 1) {
-        update.current_slide = Math.min(currentSlide, totalSlides);
+        update.current_slide = clampSlide(currentSlide, totalSlides);
       }
       const { error: updateError } = await supabase.from("sessions").update(update).eq("id", id);
       if (updateError) {
@@ -406,19 +429,11 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         return;
       }
 
-      // The pre-check races with concurrent shares (check-then-act isn't
-      // atomic). Re-count now that this row is visible and roll back if
-      // parallel requests overshot — the same fail-closed reconciliation the
-      // claim route does.
-      if (userId) {
-        const after = await liveSyncedCount(userId);
-        if (after !== null && after > MAX_CONCURRENT_PRESENTATIONS) {
-          await supabase.storage.from("presentations").remove([pdfPath]);
-          await supabase.from("sessions").update({ status: "expired" }).eq("id", id);
-          res.status(403).json(capReached());
-          return;
-        }
-      }
+      const undo = async () => {
+        await supabase.storage.from("presentations").remove([pdfPath]);
+        await supabase.from("sessions").update({ status: "expired" }).eq("id", id);
+      };
+      if (userId && !(await reconcileQuota(res, userId, undo))) return;
 
       res.json({ id, totalSlides, controllerToken });
     } catch (err) {
@@ -527,30 +542,17 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         }
         userId = null;
       } else {
-        const token = getBearerToken(req);
-        if (!token) {
+        const user = await requireUser(supabase, req);
+        if (!user) {
           res.status(401).json({ error: "Authentication required" });
           return;
         }
-        const { data: userData, error: userError } = await supabase.auth.getUser(token);
-        if (userError || !userData.user) {
-          res.status(401).json({ error: "Invalid session" });
-          return;
-        }
-        userId = userData.user.id;
+        userId = user.id;
 
         // Cap how many synced presentations a user can have live at once. Only
         // rows that are still active and not past expiry count, and the session
         // being claimed is excluded so a re-claim of the same code is a no-op.
-        const live = await liveSyncedCount(userId, req.params.id);
-        if (live === null) {
-          res.status(500).json({ error: "Failed to check presentation limit" });
-          return;
-        }
-        if (live >= MAX_CONCURRENT_PRESENTATIONS) {
-          res.status(403).json(capReached());
-          return;
-        }
+        if (!(await ensureQuota(res, userId, String(req.params.id)))) return;
       }
 
       const file = req.file;
@@ -597,7 +599,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         // doesn't vanish mid-session; owned/hosted claims get the same TTL.
         expires_at: ownedExpiry(),
       };
-      if (Number.isFinite(currentSlide) && currentSlide >= 1) update.current_slide = currentSlide;
+      if (Number.isFinite(currentSlide) && currentSlide >= 1) update.current_slide = clampSlide(currentSlide, totalSlides);
 
       const { error: updateError } = await supabase
         .from("sessions")
@@ -608,23 +610,12 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         return;
       }
 
-      // The pre-claim count check races with concurrent claims (check-then-act
-      // isn't atomic). Re-count now that this claim is visible; if parallel
-      // claims overshot the cap, roll this one back. Fail-closed: in the rare
-      // tie both claims revert and the user simply retries one. No cap in local
-      // mode, so nothing to reconcile there.
-      if (userId) {
-        const afterCount = await liveSyncedCount(userId);
-        if (afterCount !== null && afterCount > MAX_CONCURRENT_PRESENTATIONS) {
-          await supabase.storage.from("presentations").remove([pdfPath]);
-          await supabase
-            .from("sessions")
-            .update({ local: true, pdf_path: "" })
-            .eq("id", row.id);
-          res.status(403).json(capReached());
-          return;
-        }
-      }
+      // No cap in local mode, so nothing to reconcile there.
+      const undo = async () => {
+        await supabase.storage.from("presentations").remove([pdfPath]);
+        await supabase.from("sessions").update({ local: true, pdf_path: "" }).eq("id", row.id);
+      };
+      if (userId && !(await reconcileQuota(res, userId, undo))) return;
 
       res.json({
         id: row.id,
