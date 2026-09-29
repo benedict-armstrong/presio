@@ -32,13 +32,13 @@ import {
 import { cn } from "@/lib/utils";
 import type { PluginHost } from "@/lib/plugins/host";
 import type { ButtonMenuEntry } from "@/lib/plugins/protocol";
-import type { ButtonContribution, ButtonLocation, LoadedPlugin } from "@/lib/plugins/manifest";
+import type { ButtonContribution, ButtonLocation, LoadedPlugin, PluginIcon } from "@/lib/plugins/manifest";
 import { PluginFrame } from "./PluginFrame";
 
 // The presenter's side of plugins, drawn by Presio from what each plugin
 // declares: its tile, its hidden background frame, and its buttons.
 
-const ICONS: Record<string, LucideIcon> = {
+const ICONS: Record<PluginIcon, LucideIcon> = {
   "qr-code": QrCode,
   "bar-chart": BarChart3,
   message: MessageSquare,

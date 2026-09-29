@@ -60,7 +60,7 @@ export interface ButtonContribution {
   id: string;
   label: string;
   /** One of PLUGIN_ICONS; buttons without one are text-only. */
-  icon?: string;
+  icon?: PluginIcon;
   tooltip?: string;
   location: ButtonLocation;
   /** Ask for a file first, of these types (an <input accept> value): the
@@ -110,6 +110,7 @@ export const PLUGIN_ICONS = [
   "qr-code", "bar-chart", "message", "users", "timer", "bell", "star", "sparkles", "hand", "check", "eye", "megaphone", "pen",
   "download", "upload",
 ] as const;
+export type PluginIcon = (typeof PLUGIN_ICONS)[number];
 
 /** A plugin ready to mount: its manifest and HTML. */
 export interface LoadedPlugin {
@@ -209,7 +210,7 @@ function parseContributes(raw: unknown): PluginManifest["contributes"] {
       buttons.push({
         id: btn.id as string,
         label: btn.label as string,
-        icon: btn.icon as string | undefined,
+        icon: btn.icon as PluginIcon | undefined,
         tooltip: btn.tooltip as string | undefined,
         location: btn.location as ButtonLocation,
         accept: btn.accept as string | undefined,

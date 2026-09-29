@@ -4,6 +4,7 @@
 
 import type { LaserStyle } from "./palette";
 import type { PageBox } from "./layers";
+import { REFERENCE_WIDTH } from "./model";
 import { LaserTrail } from "./trail";
 
 // How long a viewer keeps showing a laser dot that stopped moving (covers a
@@ -49,7 +50,7 @@ export class Laser {
   }
 
   private sizeDot(size: number) {
-    const d = Math.max(6, (size / 960) * this.page.w);
+    const d = Math.max(6, (size / REFERENCE_WIDTH) * this.page.w);
     Object.assign(this.dot.style, { width: `${d}px`, height: `${d}px`, margin: `${-d / 2}px 0 0 ${-d / 2}px` });
   }
 

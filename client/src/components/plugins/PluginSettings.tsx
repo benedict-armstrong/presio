@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { PluginHost } from "@/lib/plugins/host";
-import type { LoadedPlugin, PluginManifest, PluginSettingSpec } from "@/lib/plugins/manifest";
+import type { LoadedPlugin, PluginManifest, PluginPermission, PluginSettingSpec, PluginSurface } from "@/lib/plugins/manifest";
 import { resolvePluginSettings, setPluginSetting, useSetting, useSettingsDocument } from "@/lib/settings";
 import { formatBinding, pluginBindings, shortcutTakenBy, type PluginShortcutSet } from "@/lib/keymap";
 import { addPlugin, describePluginUrl, removePlugin, setPluginEnabled } from "@/lib/plugins/registry";
@@ -13,12 +13,13 @@ import { PluginButtons } from "./PresenterPlugins";
 // see what it adds and may do, use its actions, edit its settings) and a page
 // to add one by URL. The Settings dialog lists them in its sidebar.
 
-const PERMISSION_LABELS: Record<string, string> = {
+const PERMISSION_LABELS: Record<PluginPermission, string> = {
   deck: "Reads the deck: its pages and attachments",
   editDeck: "Saves changes into your deck",
+  history: "Keeps an edit history for your deck, shared with every device",
 };
 
-const SURFACE_LABELS: Record<string, string> = {
+const SURFACE_LABELS: Record<PluginSurface, string> = {
   background: "Runs in the background while you present",
   tile: "A card on your dashboard",
   viewer: "A layer on every viewer's screen, including your audience's devices",

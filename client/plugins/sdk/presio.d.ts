@@ -1,4 +1,4 @@
-// Types for `window.presio`, the API public/plugin-frame.html installs in the
+// Types for `window.presio`, the API public/plugin-frame.html installs in
 // each plugin frame. Keep in step with that file and /plugins.md.
 
 type Unsubscribe = () => void;

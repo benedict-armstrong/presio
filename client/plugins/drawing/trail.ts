@@ -3,6 +3,8 @@
 // fades out shortly after the laser stops. Fed the same points as the dot;
 // null breaks the line (the laser was lifted).
 
+import { REFERENCE_WIDTH } from "./model";
+
 // The line stays until the laser has been still (or lifted) this long, then
 // fades out as a whole.
 const HOLD_MS = 1500;
@@ -76,7 +78,7 @@ export class LaserTrail {
         else ctx.lineTo(p.x * w, p.y * h);
       });
     };
-    const core = Math.max(2, (pts[pts.length - 1].size / 960) * w * 0.4);
+    const core = Math.max(2, (pts[pts.length - 1].size / REFERENCE_WIDTH) * w * 0.4);
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.globalAlpha = alpha;
