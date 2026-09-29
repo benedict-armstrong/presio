@@ -8,7 +8,8 @@ import { isValidHttpsUrl, isValidTotalSlides } from "../validation.js";
 import { MAX_PDF_BYTES } from "../../shared/limits.js";
 import { getBearerToken, requireUser, resolveOptionalUserId, safeEqual } from "../auth.js";
 import { isLocalMode } from "../local/mode.js";
-import { clearSessionState, forgetDeckRetained, type SocketState } from "../socket.js";
+import { clearSessionState, type SocketState } from "../socket.js";
+import { announceDeckUpdate, clampSlide, replaceHostedDeck } from "../lib/hostedDeck.js";
 import { baseUrl } from "../lib/baseUrl.js";
 import { fetchRemotePdfMeta } from "../lib/remotePdf.js";
 import { createPresentHandoff, handoffTokenFrom, updatePresentDeck } from "../lib/presentHandoff.js";
@@ -681,36 +682,16 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
 
       const rawName = typeof req.body.filename === "string" ? req.body.filename.trim() : "";
       const newFilename = rawName.replace(/\.pdf$/i, "");
-      const clampedSlide = Math.min(Math.max(row.current_slide ?? 1, 1), totalSlides);
 
-      const { error: uploadError } = await supabase.storage
-        .from("presentations")
-        .upload(row.pdf_path, file.buffer, { contentType: "application/pdf", upsert: true });
-      if (uploadError) {
-        res.status(500).json({ error: "Failed to save PDF" });
-        return;
-      }
-
-      const update: Record<string, unknown> = {
-        total_slides: totalSlides,
-        current_slide: clampedSlide,
-      };
-      if (newFilename) update.filename = newFilename;
-      const { error: updateError } = await supabase
-        .from("sessions")
-        .update(update)
-        .eq("id", row.id);
-      if (updateError) {
-        res.status(500).json({ error: "Failed to update session" });
+      const replaced = await replaceHostedDeck(supabase, row, { buffer: file.buffer, totalSlides, filename: newFilename });
+      if (!replaced.ok) {
+        res.status(replaced.status).json({ error: replaced.error });
         return;
       }
 
       // A real replacement announces itself; a notes re-save (no filename)
       // stays silent so viewers aren't forced to re-download identical slides.
-      if (newFilename) {
-        if (socketState) forgetDeckRetained(socketState, String(req.params.id));
-        io.to(req.params.id).emit("deck_updated", { filename: newFilename, totalSlides });
-      }
+      if (newFilename) announceDeckUpdate(io, socketState, row.id, { filename: newFilename, totalSlides });
 
       res.json({ ok: true, totalSlides, filename: newFilename || row.filename });
     } catch (err) {
@@ -798,18 +779,16 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
         return;
       }
 
-      const clampedSlide = Math.min(Math.max(row.current_slide ?? 1, 1), totalSlides);
       const { error: updateError } = await supabase
         .from("sessions")
-        .update({ total_slides: totalSlides, current_slide: clampedSlide })
+        .update({ total_slides: totalSlides, current_slide: clampSlide(row.current_slide, totalSlides) })
         .eq("id", row.id);
       if (updateError) {
         res.status(500).json({ error: "Failed to update session" });
         return;
       }
 
-      if (socketState) forgetDeckRetained(socketState, String(req.params.id));
-      io.to(req.params.id).emit("deck_updated", { filename: row.filename, totalSlides });
+      announceDeckUpdate(io, socketState, row.id, { filename: row.filename, totalSlides });
 
       res.json({ ok: true, totalSlides, filename: row.filename });
     } catch (err) {

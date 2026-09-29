@@ -3,7 +3,8 @@ import type { Server } from "socket.io";
 import { nanoid } from "nanoid";
 import { countPages } from "./pdfDoc.js";
 import { safeEqual } from "../auth.js";
-import { forgetDeckRetained, type SocketState } from "../socket.js";
+import type { SocketState } from "../socket.js";
+import { announceDeckUpdate, clampSlide, replaceHostedDeck } from "./hostedDeck.js";
 import { loadSession } from "./sessionAccess.js";
 import { generatePassphrase, insertSession, ownedExpiry } from "./sessionRows.js";
 
@@ -124,9 +125,6 @@ export async function updatePresentDeck(
   // An empty name means "keep the current title" rather than resetting it.
   const rawName = (opts.originalName ?? "").trim().replace(/\.pdf$/i, "");
   const filename = rawName || row.filename || "presentation";
-  // Keep the presenter near where they were; drawings keyed by slide number
-  // beyond the new count become stale just as with the notes replace path.
-  const clampedSlide = Math.min(Math.max(row.current_slide ?? 1, 1), totalSlides);
 
   if (row.local) {
     // Handoff may already be complete (the browser cleared the server copy),
@@ -141,7 +139,7 @@ export async function updatePresentDeck(
     }
     const { error: updateError } = await supabase
       .from("sessions")
-      .update({ pdf_path: pdfPath, total_slides: totalSlides, current_slide: clampedSlide, filename })
+      .update({ pdf_path: pdfPath, total_slides: totalSlides, current_slide: clampSlide(row.current_slide, totalSlides), filename })
       .eq("id", row.id);
     if (updateError) {
       return { ok: false, status: 500, error: "Failed to update presentation" };
@@ -153,27 +151,11 @@ export async function updatePresentDeck(
   if (!row.pdf_path) {
     return { ok: false, status: 400, error: "This presentation's PDF is not hosted on the server" };
   }
-  const { error: uploadError } = await supabase.storage
-    .from("presentations")
-    .upload(row.pdf_path, opts.buffer, { contentType: "application/pdf", upsert: true });
-  if (uploadError) {
-    return { ok: false, status: 500, error: "Failed to save PDF" };
-  }
-  const { error: updateError } = await supabase
-    .from("sessions")
-    .update({
-      total_slides: totalSlides,
-      current_slide: clampedSlide,
-      ...(rawName ? { filename } : {}),
-    })
-    .eq("id", row.id);
-  if (updateError) {
-    return { ok: false, status: 500, error: "Failed to update presentation" };
-  }
+  const replaced = await replaceHostedDeck(supabase, row, { buffer: opts.buffer, totalSlides, filename: rawName });
+  if (!replaced.ok) return replaced;
 
   // Everyone in the room reloads the new bytes live, as with any other replacement.
-  if (opts.socketState) forgetDeckRetained(opts.socketState, String(row.id));
-  opts.io?.to(row.id).emit("deck_updated", { filename, totalSlides });
+  announceDeckUpdate(opts.io, opts.socketState, row.id, { filename, totalSlides });
 
   return {
     ok: true,

@@ -72,6 +72,12 @@ export function clearSessionState(state: SocketState, sessionId: string) {
   void state.history.drop(sessionId).catch((err) => console.warn(`Couldn't drop the history of session ${sessionId}:`, err));
 }
 
+// The session's deck was replaced: its sockets check slide numbers against
+// the new page count (a controller's slide_change is refused past it).
+export async function setRoomTotalSlides(io: Server, sessionId: string, totalSlides: number) {
+  for (const socket of await io.in(sessionId).fetchSockets()) socket.data.totalSlides = totalSlides;
+}
+
 // The session's deck was replaced: forget what plugins retained for the old
 // one (retain: "deck" — e.g. drawings, keyed by slide number). The presenter's
 // page does the same when it swaps the deck in.
