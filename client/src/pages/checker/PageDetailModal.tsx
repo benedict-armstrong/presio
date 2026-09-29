@@ -181,7 +181,7 @@ export function PageDetailModal({
               {notesWillBeDeleted && (
                 <button
                   onClick={() => {
-                    const original = notes?.previewText ?? "";
+                    const original = notes?.notes ?? "";
                     setLocalNotes(original);
                     onNotesChange(page, original);
                   }}

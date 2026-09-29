@@ -151,7 +151,7 @@ export default function CheckerPage() {
 
   const hasEdits =
     report !== null &&
-    (report.pages.some((pr) => isPageEdited(pr.page, pr.notes?.previewText)) ||
+    (report.pages.some((pr) => isPageEdited(pr.page, pr.notes?.notes)) ||
       deletedMedia.size > 0);
 
   // Block browser tab close / refresh when there are unsaved edits.
@@ -168,7 +168,7 @@ export default function CheckerPage() {
     try {
       let bytes = pdfBytesRef.current;
       for (const pr of report.pages) {
-        if (!isPageEdited(pr.page, pr.notes?.previewText)) continue;
+        if (!isPageEdited(pr.page, pr.notes?.notes)) continue;
         bytes = await setSlideNotes(bytes, pr.page, editedNotes.get(pr.page) ?? "");
       }
       if (deletedMedia.size > 0) {
@@ -204,7 +204,7 @@ export default function CheckerPage() {
       // Apply pending edits/deletions to get the final bytes.
       let bytes = pdfBytesRef.current;
       for (const pr of report.pages) {
-        if (!isPageEdited(pr.page, pr.notes?.previewText)) continue;
+        if (!isPageEdited(pr.page, pr.notes?.notes)) continue;
         bytes = await setSlideNotes(bytes, pr.page, editedNotes.get(pr.page) ?? "");
       }
       if (deletedMedia.size > 0) {
@@ -371,7 +371,7 @@ export default function CheckerPage() {
               <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
                 {report.pages.map((pr) => {
                   const thumb = thumbs.get(pr.page);
-                  const notesEdited = isPageEdited(pr.page, pr.notes?.previewText);
+                  const notesEdited = isPageEdited(pr.page, pr.notes?.notes);
                   const showNotes = pr.notes !== null || notesEdited;
 
                   return (
@@ -511,10 +511,10 @@ export default function CheckerPage() {
           initialNotesValue={
             editedNotes.has(pageModal.page)
               ? (editedNotes.get(pageModal.page) ?? "")
-              : (activePageReport.notes?.previewText ?? "")
+              : (activePageReport.notes?.notes ?? "")
           }
           onNotesChange={handleNotesChange}
-          isNotesEdited={isPageEdited(pageModal.page, activePageReport.notes?.previewText)}
+          isNotesEdited={isPageEdited(pageModal.page, activePageReport.notes?.notes)}
           deletedMedia={deletedMedia}
           onToggleDeleteMedia={toggleDeleteMedia}
           binaries={report?.binaries ?? new Map()}
