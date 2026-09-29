@@ -81,7 +81,38 @@ export async function readAttachments(pdf: PDFDocumentProxy): Promise<PdfAttachm
 // to multiple consumers (thumbnails, next-slide preview, the main view) made
 // appending it in one spot yank it out of another — e.g. clicking a thumbnail
 // whose scale collided with the main view turned the thumbnail black.
+//
+// Least recently used first (a hit re-inserts its entry), and bounded by total
+// pixels: a long deck clicked through on a 4K projector would otherwise keep
+// every slide's full-size canvas alive for as long as the tab is open.
 const pageCache = new Map<string, HTMLCanvasElement>();
+let pageCachePixels = 0;
+
+// ~256 MB of RGBA: a few dozen presenter-sized slides, or several 4K ones.
+const MAX_CACHED_PIXELS = 64_000_000;
+
+function cacheGet(key: string): HTMLCanvasElement | undefined {
+  const canvas = pageCache.get(key);
+  if (canvas) {
+    pageCache.delete(key);
+    pageCache.set(key, canvas);
+  }
+  return canvas;
+}
+
+function cachePut(key: string, canvas: HTMLCanvasElement) {
+  const old = pageCache.get(key);
+  if (old) pageCachePixels -= old.width * old.height;
+  pageCache.delete(key);
+  pageCache.set(key, canvas);
+  pageCachePixels += canvas.width * canvas.height;
+  // Evict oldest first, always keeping the canvas just rendered.
+  for (const [k, c] of pageCache) {
+    if (pageCachePixels <= MAX_CACHED_PIXELS || k === key) break;
+    pageCache.delete(k);
+    pageCachePixels -= c.width * c.height;
+  }
+}
 
 // Which document pageCache currently holds renders for. Saving an edited deck
 // (a plugin's presio.deck.save) swaps in a new PDFDocumentProxy;
@@ -169,7 +200,7 @@ export async function renderPage(
 
   // A different document invalidates every cached canvas.
   if (pageCachePdf !== pdf) {
-    pageCache.clear();
+    clearCache();
     pageCachePdf = pdf;
   }
 
@@ -189,7 +220,7 @@ export async function renderPage(
   scale = Math.max(0.25, Math.ceil(scale * 4) / 4);
 
   const key = `${pageNum}-${scale}`;
-  const cached = pageCache.get(key);
+  const cached = cacheGet(key);
   if (cached) return copyCanvas(cached);
 
   const viewport = page.getViewport({ scale });
@@ -203,11 +234,47 @@ export async function renderPage(
     viewport,
   }).promise;
 
-  pageCache.set(key, canvas);
+  cachePut(key, canvas);
   return copyCanvas(canvas);
 }
 
 export function clearCache() {
   pageCache.clear();
+  pageCachePixels = 0;
   pageCachePdf = null;
+}
+
+/**
+ * Render a page into `container`, filling it (object-fit: contain). Returns a
+ * cancel function: renders resolve out of order (cache hits are near-instant,
+ * fresh pages aren't), so an effect that has moved on to another page cancels
+ * the old render rather than let it land over the new one.
+ *
+ * With `replace: false` the page goes in only if the container is still empty
+ * (thumbnails, which a swapped document clears first). A failed render —
+ * typically a document destroyed mid-render by a deck swap — is logged, not
+ * thrown: the next render replaces it.
+ */
+export function renderPageInto(
+  container: HTMLElement,
+  pdf: PDFDocumentProxy,
+  pageNum: number,
+  opts: RenderOptions & { replace?: boolean } = {}
+): () => void {
+  const { replace = true, ...renderOpts } = opts;
+  let cancelled = false;
+  renderPage(pdf, pageNum, renderOpts).then(
+    (canvas) => {
+      if (cancelled) return;
+      if (!replace && container.childElementCount > 0) return;
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
+      canvas.style.objectFit = "contain";
+      container.replaceChildren(canvas);
+    },
+    (err) => {
+      if (!cancelled) console.warn(`Couldn't render page ${pageNum}:`, err);
+    }
+  );
+  return () => { cancelled = true; };
 }

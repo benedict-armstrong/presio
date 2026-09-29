@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { renderPage } from "@/lib/pdf";
+import { renderPageInto } from "@/lib/pdf";
 import { useRenderTargetWidth } from "@/hooks/useRenderTargetWidth";
 import type { Deck } from "@/lib/deck";
 import { SlideLayers } from "@/components/plugins/SlideLayers";
@@ -26,21 +26,9 @@ export function NextSlideCard({
     if (!containerRef.current || !width) return;
     const container = containerRef.current;
     if (currentSlide < totalSlides) {
-      // Renders resolve out of order (cache hits are near-instant); drop any
-      // that finish after the effect has moved to another slide.
-      let stale = false;
       // Same rule as the current slide: render at the container's real pixel
       // size so the preview isn't an upscaled fixed-size canvas on HiDPI.
-      const targetWidth = width;
-      renderPage(pdf, currentSlide + 1, { targetWidth }).then((canvas) => {
-        if (stale) return;
-        container.innerHTML = "";
-        canvas.style.width = "100%";
-        canvas.style.height = "100%";
-        canvas.style.objectFit = "contain";
-        container.appendChild(canvas);
-      });
-      return () => { stale = true; };
+      return renderPageInto(container, pdf, currentSlide + 1, { targetWidth: width });
     } else {
       container.innerHTML =
         '<div class="flex items-center justify-center h-full text-muted-foreground text-sm">End of presentation</div>';

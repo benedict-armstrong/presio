@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useSearchParams, useNavigate, useLocation, Link } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { loadPdf, loadPdfData, freshPdfUrl, loadLatestPdf, renderPage, clearCache, destroyPdf } from "@/lib/pdf";
+import { loadPdf, loadPdfData, freshPdfUrl, loadLatestPdf, renderPageInto, clearCache, destroyPdf } from "@/lib/pdf";
 import { loadDeck, type Deck } from "@/lib/deck";
 import { useRenderTargetWidth } from "@/hooks/useRenderTargetWidth";
 import { lsGetString, lsSetString, deckWatchKey } from "@/lib/storage";
@@ -578,20 +578,9 @@ export default function Presentation() {
   useEffect(() => {
     if (!pdf || !currentCanvasRef.current || !viewWidth) return;
     const container = currentCanvasRef.current;
-    // renderPage resolves out of order (cached pages are near-instant, fresh
-    // ones aren't), so a rapid slide change could leave a stale page on screen
-    // — with plugins' layers already showing the new slide over it. Drop any
-    // render that finishes after the effect has moved on.
-    let stale = false;
-    renderPage(pdf, displaySlide, { targetWidth: viewWidth }).then((canvas) => {
-      if (stale) return;
-      container.innerHTML = "";
-      canvas.style.width = "100%";
-      canvas.style.height = "100%";
-      canvas.style.objectFit = "contain";
-      container.appendChild(canvas);
-    });
-    return () => { stale = true; };
+    // Cancelled on a slide change, so a late render of the old slide can't
+    // land under plugins' layers already showing the new one.
+    return renderPageInto(container, pdf, displaySlide, { targetWidth: viewWidth });
     // deck gates mounting of the view that owns the container, and refs
     // don't trigger effects — re-run once the container actually exists.
   }, [pdf, displaySlide, role, deck, viewWidth]);
