@@ -322,6 +322,11 @@ export class HistoryHub {
     void this.catchUp(plugin);
   }
 
+  /** Whoever orders edits has its copy of a plugin's history loaded: catch up. */
+  receiveLoaded(plugin: string) {
+    void this.catchUp(plugin);
+  }
+
   /** A follower (a local deck's viewer window) asks what it's missing. */
   answerSync(plugin: string, head: { seq: number; hash: string }): SyncReply {
     const h = this.histories.get(plugin);
