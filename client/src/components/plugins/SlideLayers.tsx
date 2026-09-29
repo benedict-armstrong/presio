@@ -5,6 +5,7 @@ import { FULL_PAGE, FULL_VIEW, type Interactive, type SlidePage, type SlideView 
 import type { LoadedPlugin } from "@/lib/plugins/manifest";
 import type { PluginHostState } from "@/lib/plugins/usePluginHost";
 import { PluginFrame } from "./PluginFrame";
+import { usePinchHandoff, useFrameHover, useRegionInput } from "./slideSurfaceInput";
 
 // Plugins' layers over a slide — the part every view of a slide shares.
 //
@@ -80,13 +81,13 @@ export function SlideLayers({
   if (!containerRef) return <div className="absolute inset-0 pointer-events-none">{content(FULL_VIEW)}</div>;
   return (
     <>
-      <PageBox containerRef={containerRef} slide={slide} zoom={zoom}>{content}</PageBox>
+      <LayerBox containerRef={containerRef} slide={slide} zoom={zoom}>{content}</LayerBox>
       {onArea.length > 0 && (
-        <AreaBox containerRef={containerRef} slide={slide} zoom={zoom}>
+        <LayerBox containerRef={containerRef} slide={slide} zoom={zoom} area>
           {(view, page) =>
             onArea.map((plugin) => <SlideSurface key={plugin.hash} host={host} plugin={plugin} view={view} page={page} />)
           }
-        </AreaBox>
+        </LayerBox>
       )}
     </>
   );
@@ -129,79 +130,45 @@ function visiblePart(zoom: LayerZoom | undefined, container: { width: number; he
   return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0), scale: zoom.scale };
 }
 
-/** A box exactly over the page drawn letterboxed in `containerRef`. */
-function PageBox({
+/**
+ * A box for layers over `containerRef`: exactly over the page drawn
+ * letterboxed in it, or (`area`) over all of it, for surfaces that cover the
+ * slide area — told what of it is on screen and where the page is in it.
+ */
+function LayerBox({
   containerRef,
   slide,
   zoom,
+  area = false,
   children,
 }: {
   containerRef: React.RefObject<HTMLElement | null>;
   slide: number;
   zoom?: LayerZoom;
-  children: (view: SlideView) => React.ReactNode;
-}) {
-  const rect = useContainedCanvasRect(containerRef, slide);
-  const container = useContainerBox(containerRef);
-  const view = useMemo(() => visiblePart(zoom, container, rect), [zoom, container, rect]);
-  if (rect.width === 0) return null;
-  return (
-    <div
-      className="absolute z-[5] pointer-events-none"
-      style={{ left: container.left + rect.left, top: container.top + rect.top, width: rect.width, height: rect.height }}
-    >
-      {children(view)}
-    </div>
-  );
-}
-
-/** A box over all of `containerRef`, for surfaces that cover the slide area:
- *  told what of it is on screen and where the page is in it. */
-function AreaBox({
-  containerRef,
-  slide,
-  zoom,
-  children,
-}: {
-  containerRef: React.RefObject<HTMLElement | null>;
-  slide: number;
-  zoom?: LayerZoom;
+  area?: boolean;
   children: (view: SlideView, page: SlidePage) => React.ReactNode;
 }) {
   const rect = useContainedCanvasRect(containerRef, slide);
   const container = useContainerBox(containerRef);
-  const view = useMemo(() => visiblePart(zoom, container, { left: 0, top: 0, width: container.width, height: container.height }), [zoom, container]);
+  const whole = (c: { width: number; height: number }) => ({ left: 0, top: 0, width: c.width, height: c.height });
+  const box = area ? whole(container) : rect;
+  const view = useMemo(() => visiblePart(zoom, container, area ? whole(container) : rect), [zoom, container, rect, area]);
   const page = useMemo<SlidePage>(
     () =>
-      container.width && container.height
+      area && container.width && container.height
         ? { x: rect.left / container.width, y: rect.top / container.height, w: rect.width / container.width, h: rect.height / container.height }
         : FULL_PAGE,
-    [rect, container]
+    [area, rect, container]
   );
-  if (rect.width === 0 || container.width === 0) return null;
+  if (rect.width === 0 || (area && container.width === 0)) return null;
   return (
     <div
       className="absolute z-[5] pointer-events-none"
-      style={{ left: container.left, top: container.top, width: container.width, height: container.height }}
+      style={{ left: container.left + box.left, top: container.top + box.top, width: box.width, height: box.height }}
     >
       {children(view, page)}
     </div>
   );
-}
-
-type Region = { x: number; y: number; w: number; h: number };
-
-const inside = (regions: Region[], fx: number, fy: number) =>
-  regions.some((r) => fx >= r.x && fx <= r.x + r.w && fy >= r.y && fy <= r.y + r.h);
-
-/** Whether nothing covers the frame at this point (a dialog, a menu): only
- *  then is a tap there meant for it. */
-function onTop(frame: HTMLIFrameElement, x: number, y: number): boolean {
-  const before = frame.style.pointerEvents;
-  frame.style.pointerEvents = "auto";
-  const hit = document.elementFromPoint(x, y);
-  frame.style.pointerEvents = before;
-  return hit === frame;
 }
 
 /**
@@ -214,268 +181,17 @@ function onTop(frame: HTMLIFrameElement, x: number, y: number): boolean {
  * that land in a frame taking input are handed on to the slide's pinch-zoom
  * once a second one comes down.
  */
-/** "pen" mode: touches this soon after the pen lifts are still the hand. */
-const PALM_QUIET_MS = 250;
-/** "pen" mode: what in a plugin's frame a finger works, rather than the slide. */
-const PLUGIN_CONTROL = "button, a, input, select, textarea, [role='button'], [data-control]";
-
 function SlideSurface({ host, plugin, view, page }: { host: PluginHost; plugin: LoadedPlugin; view: SlideView; page: SlidePage }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [interactive, setInteractive] = useState<Interactive>(false);
-  const [hot, setHot] = useState(false);
-  const [hovered, setHovered] = useState(false);
   const [readyCount, setReadyCount] = useState(0);
   const regions = useMemo(() => (Array.isArray(interactive) ? interactive : null), [interactive]);
   const presenter = host.context.role === "presenter";
 
-  // Whether a mouse is over the page (presio.ui.onHover): over the frame when
-  // it takes input, over what's under it when it doesn't. The presenter's
-  // only — it's for their own controls.
-  useEffect(() => {
-    const frame = frameRef.current;
-    if (!presenter || !frame) return;
-    let leaving: ReturnType<typeof setTimeout> | null = null;
-    const settle = (over: boolean) => {
-      if (leaving) clearTimeout(leaving);
-      leaving = null;
-      setHovered(over);
-    };
-    const onMove = (e: PointerEvent) => {
-      if (e.pointerType !== "mouse") return;
-      const box = frame.getBoundingClientRect();
-      settle(e.clientX >= box.left && e.clientX <= box.right && e.clientY >= box.top && e.clientY <= box.bottom);
-    };
-    const onOut = (e: PointerEvent) => {
-      if (e.pointerType === "mouse" && !e.relatedTarget) settle(false);
-    };
-    // Leaving the frame looks the same whether the mouse went to the page
-    // around it or out of the window; the page's own pointermove says which.
-    const onInnerMove = (e: PointerEvent) => {
-      if (e.pointerType === "mouse") settle(true);
-    };
-    const onInnerLeave = () => {
-      if (leaving) clearTimeout(leaving);
-      leaving = setTimeout(() => setHovered(false), 80);
-    };
-    const inner = frame.contentWindow;
-    window.addEventListener("pointermove", onMove, true);
-    document.addEventListener("pointerout", onOut);
-    inner?.addEventListener("pointermove", onInnerMove);
-    inner?.document.documentElement.addEventListener("pointerleave", onInnerLeave);
-    return () => {
-      if (leaving) clearTimeout(leaving);
-      window.removeEventListener("pointermove", onMove, true);
-      document.removeEventListener("pointerout", onOut);
-      inner?.removeEventListener("pointermove", onInnerMove);
-      inner?.document.documentElement.removeEventListener("pointerleave", onInnerLeave);
-    };
-  }, [presenter, readyCount]);
-
-  // Touches the frame took, passed on to the page once two are down: the
-  // pinch-zoom (useSlidePinchZoom) listens above the frame, where input that
-  // lands inside it never arrives. One finger stays the plugin's — except in
-  // "pen" mode, where every finger is passed on from the start (to pan, pinch
-  // and turn the page) and only a pen's input is the plugin's. There, a touch
-  // while the pen is down, or just after, is a hand resting on the screen:
-  // it's never passed on, and a pen landing ends what fingers had begun.
+  const hovered = useFrameHover(frameRef, presenter, readyCount);
   const penOnly = interactive === "pen";
-  const penOnlyRef = useRef(penOnly);
-  useEffect(() => {
-    penOnlyRef.current = penOnly;
-    const frame = frameRef.current;
-    // For the page's own touch handling (useSlideTapNav, useSlidePinchZoom):
-    // a finger double-tap here may be the plugin's, so taps wait for it.
-    if (penOnly) frame?.setAttribute("data-pen-input", "");
-    else frame?.removeAttribute("data-pen-input");
-  }, [penOnly]);
-  useEffect(() => {
-    const frame = frameRef.current;
-    const inner = frame?.contentWindow;
-    if (!presenter || !frame || !inner) return;
-    const down = new Map<number, PointerEvent>();
-    let forwarding = false;
-    let pens = 0;
-    let penAt = -Infinity;
-    const forward = (type: string, e: PointerEvent) => {
-      const box = frame.getBoundingClientRect();
-      const scale = frame.clientWidth ? box.width / frame.clientWidth : 1;
-      const x = box.left + e.clientX * scale;
-      const y = box.top + e.clientY * scale;
-      // To what the touch would have landed on without the frame (the slide,
-      // which turns the page on a tap), else to the frame's box; both bubble
-      // up to the pinch-zoom.
-      const layer = frame.parentElement;
-      const stack = document.elementsFromPoint(x, y);
-      const at = stack.indexOf(frame);
-      const under = at < 0 ? null : stack.slice(at + 1).find((el) => !layer?.contains(el));
-      (under ?? layer)?.dispatchEvent(
-        new PointerEvent(type, {
-          pointerId: e.pointerId,
-          pointerType: "touch",
-          isPrimary: e.isPrimary,
-          clientX: x,
-          clientY: y,
-          bubbles: true,
-          cancelable: true,
-        })
-      );
-    };
-    const onDown = (e: PointerEvent) => {
-      if (e.pointerType === "pen") {
-        pens++;
-        penAt = performance.now();
-        if (penOnlyRef.current && forwarding) for (const d of down.values()) forward("pointercancel", d);
-        if (penOnlyRef.current) {
-          down.clear();
-          forwarding = false;
-        }
-        return;
-      }
-      if (e.pointerType !== "touch") return;
-      if (penOnlyRef.current && (pens > 0 || performance.now() - penAt < PALM_QUIET_MS)) return;
-      // The plugin's own controls (its buttons, a handle to drag) take a
-      // finger even in "pen" mode.
-      if (penOnlyRef.current && down.size === 0 && e.target instanceof Element && e.target.closest(PLUGIN_CONTROL)) return;
-      down.set(e.pointerId, e);
-      if (forwarding) forward("pointerdown", e);
-      else if (down.size >= 2 || penOnlyRef.current) {
-        forwarding = true;
-        for (const d of down.values()) forward("pointerdown", d);
-      }
-    };
-    const onMove = (e: PointerEvent) => {
-      if (!down.has(e.pointerId)) return;
-      down.set(e.pointerId, e);
-      if (forwarding) forward("pointermove", e);
-    };
-    const onEnd = (e: PointerEvent) => {
-      if (e.pointerType === "pen") {
-        pens = Math.max(0, pens - 1);
-        penAt = performance.now();
-        return;
-      }
-      if (!down.delete(e.pointerId)) return;
-      if (forwarding) forward(e.type, e);
-      if (!down.size) forwarding = false;
-    };
-    inner.addEventListener("pointerdown", onDown, true);
-    inner.addEventListener("pointermove", onMove, true);
-    inner.addEventListener("pointerup", onEnd, true);
-    inner.addEventListener("pointercancel", onEnd, true);
-    return () => {
-      inner.removeEventListener("pointerdown", onDown, true);
-      inner.removeEventListener("pointermove", onMove, true);
-      inner.removeEventListener("pointerup", onEnd, true);
-      inner.removeEventListener("pointercancel", onEnd, true);
-    };
-  }, [presenter, readyCount]);
-
-  useEffect(() => {
-    const frame = frameRef.current;
-    if (!regions || !frame) return;
-    const fraction = (clientX: number, clientY: number) => {
-      const box = frame.getBoundingClientRect();
-      return [(clientX - box.left) / box.width, (clientY - box.top) / box.height] as const;
-    };
-    const elementAt = (fx: number, fy: number) =>
-      frame.contentDocument?.elementFromPoint(fx * frame.clientWidth, fy * frame.clientHeight);
-    // Outside the frame's own input: where the pointer is over the page.
-    const onMove = (e: PointerEvent) => {
-      if (e.pointerType !== "mouse") return;
-      setHot(inside(regions, ...fraction(e.clientX, e.clientY)));
-    };
-    // A touch on one of the areas is the plugin's, so the slide under it
-    // mustn't take it too (as a tap to turn the page). It has no hover to
-    // make the frame take input first, so its pointer events are forwarded
-    // into the frame instead — all to the element it began on, as a touch's
-    // are — and a tap arrives as a click (below). A second finger ends it:
-    // two are for pinching.
-    let touch: { id: number; target: Element } | null = null;
-    const forward = (type: string, e: PointerEvent, target: Element) => {
-      const inner = frame.contentWindow as (Window & typeof globalThis) | null;
-      if (!inner) return;
-      const [fx, fy] = fraction(e.clientX, e.clientY);
-      target.dispatchEvent(
-        new inner.PointerEvent(type, {
-          pointerId: e.pointerId,
-          pointerType: e.pointerType,
-          isPrimary: e.isPrimary,
-          button: e.button,
-          buttons: e.buttons,
-          clientX: fx * frame.clientWidth,
-          clientY: fy * frame.clientHeight,
-          bubbles: true,
-          cancelable: true,
-          view: inner,
-        })
-      );
-    };
-    const onDown = (e: PointerEvent) => {
-      if (e.pointerType === "mouse") return;
-      if (touch) {
-        if (e.pointerId !== touch.id) {
-          forward("pointercancel", e, touch.target);
-          touch = null;
-        }
-        return;
-      }
-      const [fx, fy] = fraction(e.clientX, e.clientY);
-      if (!inside(regions, fx, fy) || !onTop(frame, e.clientX, e.clientY)) return;
-      e.stopPropagation();
-      const target = elementAt(fx, fy);
-      if (!target || !e.isPrimary) return;
-      touch = { id: e.pointerId, target };
-      forward("pointerdown", e, target);
-    };
-    const onTouchMove = (e: PointerEvent) => {
-      if (!touch || e.pointerId !== touch.id) return;
-      e.stopPropagation();
-      forward("pointermove", e, touch.target);
-    };
-    const onTouchEnd = (e: PointerEvent) => {
-      if (!touch || e.pointerId !== touch.id) return;
-      e.stopPropagation();
-      forward(e.type, e, touch.target);
-      touch = null;
-    };
-    const onClick = (e: MouseEvent) => {
-      const [fx, fy] = fraction(e.clientX, e.clientY);
-      if (!inside(regions, fx, fy) || !onTop(frame, e.clientX, e.clientY)) return;
-      const target = elementAt(fx, fy);
-      if (!target) return;
-      e.preventDefault();
-      e.stopPropagation();
-      // Dispatched rather than .click(): the point may be on an icon's SVG,
-      // which has no click() of its own; the event bubbles to its button.
-      target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: frame.contentWindow }));
-    };
-    // Inside it, while it's taking input (same origin, so its window is ours
-    // to listen to): leaving the areas hands input back to the slide.
-    const inner = frame.contentWindow;
-    const onInnerMove = (e: PointerEvent) => {
-      setHot(inside(regions, e.clientX / frame.clientWidth, e.clientY / frame.clientHeight));
-    };
-    const onInnerLeave = () => setHot(false);
-    window.addEventListener("pointermove", onMove, true);
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("pointermove", onTouchMove, true);
-    window.addEventListener("pointerup", onTouchEnd, true);
-    window.addEventListener("pointercancel", onTouchEnd, true);
-    window.addEventListener("click", onClick, true);
-    inner?.addEventListener("pointermove", onInnerMove);
-    inner?.document.documentElement.addEventListener("pointerleave", onInnerLeave);
-    return () => {
-      window.removeEventListener("pointermove", onMove, true);
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("pointermove", onTouchMove, true);
-      window.removeEventListener("pointerup", onTouchEnd, true);
-      window.removeEventListener("pointercancel", onTouchEnd, true);
-      window.removeEventListener("click", onClick, true);
-      inner?.removeEventListener("pointermove", onInnerMove);
-      inner?.document.documentElement.removeEventListener("pointerleave", onInnerLeave);
-    };
-    // readyCount: the plugin's document replaces the frame's, so re-listen.
-  }, [regions, readyCount]);
+  usePinchHandoff(frameRef, presenter, penOnly, readyCount);
+  const [hot, setHot] = useRegionInput(frameRef, regions, readyCount);
 
   const takesInput = interactive === true || penOnly || (!!regions && hot);
   return (
