@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import { countPages } from "./pdfDoc.js";
 import { DEFAULT_DECK_NAME, normalizeDeckName } from "./upload.js";
 import { safeEqual } from "../auth.js";
-import type { SocketState } from "../socket.js";
+import type { SocketState } from "../socket/index.js";
 import { announceDeckUpdate, clampSlide, replaceHostedDeck } from "./hostedDeck.js";
 import { loadSession } from "./sessionAccess.js";
 import { generatePassphrase, insertSession, ownedExpiry } from "./sessionRows.js";

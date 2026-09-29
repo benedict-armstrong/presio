@@ -3,7 +3,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Server } from "socket.io";
-import { clearSessionState, type SocketState } from "../socket.js";
+import { clearSessionState, type SocketState } from "../socket/index.js";
 
 /**
  * End sessions: remove their PDFs, mark them expired (the rows are kept as a

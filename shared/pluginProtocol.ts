@@ -1,5 +1,5 @@
 // The plugin wire protocol's limits, shapes and helpers, as both the client
-// (lib/plugins/) and the server (validation.ts, socket.ts) apply them.
+// (lib/plugins/) and the server (validation.ts, socket/plugins.ts) apply them.
 //
 // The server never runs plugin code or looks inside plugin messages: it relays
 // them between the presenter and the audience, keeps the presenter's

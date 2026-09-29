@@ -4,7 +4,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Server } from "socket.io";
-import { forgetDeckRetained, setRoomTotalSlides, type SocketState } from "../socket.js";
+import { forgetDeckRetained, setRoomTotalSlides, type SocketState } from "../socket/index.js";
 import type { SessionRow } from "./sessionAccess.js";
 
 /** Keep the presenter near where they were in a deck with `totalSlides` pages. */

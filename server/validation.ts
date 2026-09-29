@@ -48,7 +48,7 @@ export function isValidTotalSlides(value: unknown): value is number {
 
 // A slide number is valid when it's a positive integer within the deck. When
 // `total` is unknown (non-number) only the lower bound is enforced.
-export function isValidSlideNumber(slideNumber: unknown, total: unknown): boolean {
+export function isValidSlideNumber(slideNumber: unknown, total: unknown): slideNumber is number {
   if (!Number.isInteger(slideNumber) || (slideNumber as number) < 1) return false;
   if (typeof total === "number" && (slideNumber as number) > total) return false;
   return true;
@@ -76,7 +76,7 @@ export function asRecord(raw: unknown): Record<string, unknown> {
 }
 
 /** A plugin message's fields, when it's an object naming a valid plugin id. */
-function pluginMessage(raw: unknown): (Record<string, unknown> & { plugin: string }) | null {
+export function pluginMessage(raw: unknown): (Record<string, unknown> & { plugin: string }) | null {
   if (typeof raw !== "object" || raw === null) return null;
   const e = raw as Record<string, unknown>;
   return typeof e.plugin === "string" && PLUGIN_ID_RE.test(e.plugin) ? (e as Record<string, unknown> & { plugin: string }) : null;
