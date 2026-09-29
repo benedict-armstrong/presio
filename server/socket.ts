@@ -51,14 +51,17 @@ export interface SocketState {
   history: HistoryStore;
 }
 
-export function createSocketState(): SocketState {
+/** Fresh state; `bucket` is where plugin histories are kept (history.ts). */
+export function createSocketState(bucket?: HistoryBucket): SocketState {
+  const history = new HistoryStore();
+  if (bucket) history.setBucket(bucket);
   return {
     controllers: new Map(),
     blankedSessions: new Set(),
     publishedPlugins: new Map(),
     pluginRetained: new Map(),
     pluginSettings: new Map(),
-    history: new HistoryStore(),
+    history,
   };
 }
 
@@ -143,7 +146,6 @@ export function registerSocketHandlers(
   state: SocketState
 ) {
   const { controllers, blankedSessions, publishedPlugins, pluginRetained, pluginSettings, history } = state;
-  history.setBucket(supabase.storage.from("presentations") as unknown as HistoryBucket);
 
   // What a joining (or re-joining) socket needs to mount the session's
   // plugins: which ones run and where each loads from (by URL and hash; the

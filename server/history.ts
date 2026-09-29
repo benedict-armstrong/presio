@@ -20,6 +20,7 @@
 // removed when the session ends or expires.
 
 import { createHash } from "crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { jsonBytes, MAX_PLUGINS_PER_SESSION, PLUGIN_ID_RE, SHA256_RE } from "../shared/pluginProtocol.js";
 import { MAX_BLOB_BYTES, MAX_SESSION_BLOB_BYTES } from "../shared/limits.js";
 import {
@@ -85,6 +86,9 @@ interface SavedHistory {
   plugins: Record<string, { base: HistoryBase; entries: HistoryEntry[] }>;
   blobs: Record<string, number>;
 }
+
+/** The deployment's Storage bucket, as histories use it. */
+export const historyBucket = (supabase: SupabaseClient) => supabase.storage.from("presentations") as unknown as HistoryBucket;
 
 const logPath = (sessionId: string) => `history/${sessionId}/log.json`;
 const blobPath = (sessionId: string, sha: string) => `history/${sessionId}/blobs/${sha}`;

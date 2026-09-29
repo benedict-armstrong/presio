@@ -10,10 +10,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAllowedOrigins, buildCspDirectives, PLUGIN_FRAME_CSP } from "./security.js";
 import { canonicalBaseUrl, originPair } from "./lib/baseUrl.js";
 import { localBlobsDir } from "./local/paths.js";
-import { isLocalMode } from "./local/mode.js";
+import { isDevOrLocal } from "./local/mode.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerHistoryRoutes } from "./routes/history.js";
-import type { HistoryBucket } from "./history.js";
 import { registerNewsletterRoutes } from "./routes/newsletter.js";
 import { registerCheckRoute } from "./routes/check.js";
 import { registerLanAddressRoute } from "./routes/lanAddress.js";
@@ -42,12 +41,9 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   app.set("trust proxy", process.env.TRUST_PROXY === "false" ? false : 1);
 
   const allowedOrigins = getAllowedOrigins();
-  // Development and local/LAN use have no fixed origin to configure ahead of
-  // time — the client can be reached as localhost, a LAN IP, or a hostname
-  // (e.g. `npm run dev` viewed from a phone/tablet on the same network), none
-  // of which are known at startup. Accept any origin unless ALLOWED_ORIGIN was
-  // set explicitly (which still takes priority).
-  const devOrLocal = process.env.NODE_ENV === "development" || isLocalMode;
+  // Accept any origin in development and local mode (see isDevOrLocal),
+  // unless ALLOWED_ORIGIN was set explicitly (which still takes priority).
+  const devOrLocal = isDevOrLocal();
   const corsOrigin: cors.CorsOptions["origin"] =
     !allowedOrigins.length && devOrLocal
       ? true
@@ -141,10 +137,7 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   registerAgentDocRoutes(app);
 
   registerSessionRoutes(app, { supabase, io, socketState });
-  if (socketState) {
-    socketState.history.setBucket(supabase.storage.from("presentations") as unknown as HistoryBucket);
-    registerHistoryRoutes(app, { supabase, history: socketState.history });
-  }
+  if (socketState) registerHistoryRoutes(app, { supabase, history: socketState.history });
   registerNewsletterRoutes(app, supabase);
   registerCheckRoute(app);
   // Local/dev only: lets share surfaces resolve this machine's LAN address

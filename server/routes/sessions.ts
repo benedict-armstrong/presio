@@ -1,13 +1,12 @@
 import type express from "express";
-import type { Server } from "socket.io";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { nanoid } from "nanoid";
 import { countPages } from "../lib/pdfDoc.js";
 import { DEFAULT_DECK_NAME, isPdfUpload, normalizeDeckName, singleField, uploadField } from "../lib/upload.js";
 import { isValidHttpsUrl, isValidTotalSlides } from "../validation.js";
 import { requireUser, resolveOptionalUserId, safeEqual } from "../auth.js";
 import { isLocalMode } from "../local/mode.js";
-import { clearSessionState, type SocketState } from "../socket.js";
+import type { AppDeps } from "../app.js";
+import { endSessions } from "../lib/sessionLifecycle.js";
 import { announceDeckUpdate, clampSlide, replaceHostedDeck } from "../lib/hostedDeck.js";
 import { baseUrl } from "../lib/baseUrl.js";
 import { fetchRemotePdfMeta } from "../lib/remotePdf.js";
@@ -15,18 +14,12 @@ import { createPresentHandoff, handoffTokenFrom, updatePresentDeck } from "../li
 import { authorizeController, loadSession } from "../lib/sessionAccess.js";
 import { generatePassphrase, insertSession, ownedExpiry } from "../lib/sessionRows.js";
 
-export interface RouteDeps {
-  supabase: SupabaseClient;
-  io: Server;
-  socketState?: SocketState;
-}
-
 // How many synced presentations a single user may have live at once. Sessions
 // expire (and are marked 'expired' on end), so this caps concurrent —
 // not lifetime — presentations.
 export const MAX_CONCURRENT_PRESENTATIONS = 3;
 
-export function registerSessionRoutes(app: express.Express, { supabase, io, socketState }: RouteDeps) {
+export function registerSessionRoutes(app: express.Express, { supabase, io, socketState }: AppDeps) {
   /**
    * POST /api/present — upload a PDF; get a URL that opens a local presentation
    * (skips share). The PDF is staged briefly, then moved into the browser.
@@ -818,19 +811,7 @@ export function registerSessionRoutes(app: express.Express, { supabase, io, sock
       return;
     }
 
-    if (data.pdf_path) {
-      await supabase.storage.from("presentations").remove([data.pdf_path]);
-    }
-    // Mark the session expired rather than deleting it — the row is retained.
-    await supabase.from("sessions").update({ status: "expired" }).eq("id", data.id);
-
-    // Disconnect all sockets in this session's room
-    const sockets = await io.in(data.id).fetchSockets();
-    for (const s of sockets) {
-      s.emit("session_ended");
-      s.disconnect(true);
-    }
-    if (socketState) clearSessionState(socketState, data.id);
+    await endSessions(supabase, io, socketState, [{ id: data.id, pdf_path: data.pdf_path }]);
 
     res.json({ ok: true });
   });
