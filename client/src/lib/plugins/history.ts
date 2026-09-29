@@ -17,22 +17,20 @@
 
 import { sha256Hex } from "@/lib/analytics";
 import * as db from "./historyDb";
+import { MAX_BLOB_BYTES } from "@shared/limits";
+import { jsonBytes } from "@shared/pluginProtocol";
+import {
+  EMPTY_BASE,
+  entryPreimage,
+  headOf,
+  MAX_HISTORY_OP_BYTES,
+  syncReply,
+  type HistoryBase,
+  type HistoryEntry,
+  type SyncReply,
+} from "@shared/historyCore";
 
-export interface HistoryEntry {
-  seq: number;
-  id: string;
-  by: string;
-  at: number;
-  op: unknown;
-  hash: string;
-}
-
-export interface HistoryBase {
-  seq: number;
-  hash: string;
-  /** The snapshot blob the log starts from, or null for the plugin's init(). */
-  snapshot: string | null;
-}
+export type { HistoryBase, HistoryEntry, SyncReply };
 
 export interface PendingOp {
   id: string;
@@ -49,12 +47,6 @@ export interface HistoryLog {
    *  different document, and starts a fresh history. */
   pages: number | null;
 }
-
-export type SyncReply =
-  | { kind: "empty" }
-  | { kind: "current" }
-  | { kind: "tail"; entries: HistoryEntry[] }
-  | { kind: "reset"; base: HistoryBase; entries: HistoryEntry[] };
 
 /** What goes to a plugin's frames. */
 export type HistoryFrameMessage =
@@ -88,11 +80,6 @@ export interface HistoryLink {
   fetchBlob?(sha: string): Promise<Blob | null>;
 }
 
-export const EMPTY_BASE: HistoryBase = { seq: 0, hash: "", snapshot: null };
-
-export const MAX_BLOB_BYTES = 5 * 1024 * 1024;
-/** One op, as JSON: the size of a plugin message. */
-export const MAX_OP_BYTES = 16 * 1024;
 // When the presenter's device asks a plugin for a snapshot, so the log can
 // start there: this many entries, or this much of them, since the last one.
 const SNAPSHOT_ENTRIES = 200;
@@ -102,7 +89,7 @@ const SNAPSHOT_BYTES = 256 * 1024;
 const SAVE_DELAY_MS = 0;
 
 export function entryHash(prev: string, id: string, op: unknown): Promise<string> {
-  return sha256Hex(new TextEncoder().encode(`${prev}\n${id}\n${JSON.stringify(op)}`).buffer as ArrayBuffer);
+  return sha256Hex(new TextEncoder().encode(entryPreimage(prev, id, op)).buffer as ArrayBuffer);
 }
 
 export async function blobSha(blob: Blob): Promise<string> {
@@ -244,14 +231,12 @@ export class HistoryHub {
    */
   commit(plugin: string, id: string, op: unknown): string | null {
     if (!this.opts.presenter) return "Only the presenter can change the history";
-    let size: number;
-    try {
-      size = JSON.stringify(op)?.length ?? 0;
-    } catch {
-      return "An op has to be JSON";
-    }
+    // Measured as the server measures it (UTF-8), or it could pass here and
+    // be refused there.
+    const size = jsonBytes(op);
+    if (size === Infinity) return "An op has to be JSON";
     if (op === undefined || op === null || !size) return "An op can't be empty";
-    if (size > MAX_OP_BYTES) return `An op is at most ${MAX_OP_BYTES / 1024} KB of JSON`;
+    if (size > MAX_HISTORY_OP_BYTES) return `An op is at most ${MAX_HISTORY_OP_BYTES / 1024} KB of JSON`;
     const h = this.history(plugin);
     if (h.log.pending.some((p) => p.id === id) || h.log.entries.some((e) => e.id === id)) return "That op id is taken";
     const pending: PendingOp = { id, by: this.device, op };
@@ -341,12 +326,7 @@ export class HistoryHub {
   answerSync(plugin: string, head: { seq: number; hash: string }): SyncReply {
     const h = this.histories.get(plugin);
     if (!h?.ready || isEmpty(h.log)) return { kind: "empty" };
-    const { base, entries } = h.log;
-    const top = headOf(h.log);
-    if (head.seq === top.seq && head.hash === top.hash) return { kind: "current" };
-    const known = (head.seq === base.seq && head.hash === base.hash) || entries.some((e) => e.seq === head.seq && e.hash === head.hash);
-    if (known) return { kind: "tail", entries: entries.filter((e) => e.seq > head.seq) };
-    return { kind: "reset", base, entries };
+    return syncReply(h.log, head);
   }
 
   // --- Internals ---
@@ -573,11 +553,6 @@ export class HistoryHub {
     const done = isEmpty(h.log) && !h.log.pending.length ? db.deleteLog(this.opts.deck, plugin) : db.saveLog(this.opts.deck, plugin, h.log);
     void done.catch((e) => console.warn(`Couldn't save plugin "${plugin}"'s history:`, e));
   }
-}
-
-function headOf(log: HistoryLog): { seq: number; hash: string } {
-  const last = log.entries[log.entries.length - 1];
-  return last ? { seq: last.seq, hash: last.hash } : { seq: log.base.seq, hash: log.base.hash };
 }
 
 function isEmpty(log: HistoryLog): boolean {

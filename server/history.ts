@@ -20,32 +20,18 @@
 // removed when the session ends or expires.
 
 import { createHash } from "crypto";
-import { PLUGIN_ID_RE } from "../shared/pluginProtocol.js";
-
-export interface HistoryEntry {
-  seq: number;
-  /** The committing device's id for the op: resends are recognised by it. */
-  id: string;
-  /** The device that committed it (per-device undo). */
-  by: string;
-  /** Server time it was ordered at (ms). */
-  at: number;
-  op: unknown;
-  hash: string;
-}
-
-export interface HistoryBase {
-  seq: number;
-  hash: string;
-  /** SHA-256 of the snapshot blob the log starts from, or null for none. */
-  snapshot: string | null;
-}
-
-export type HistorySyncReply =
-  | { kind: "empty" }
-  | { kind: "current" }
-  | { kind: "tail"; entries: HistoryEntry[] }
-  | { kind: "reset"; base: HistoryBase; entries: HistoryEntry[] };
+import { jsonBytes, MAX_PLUGINS_PER_SESSION, PLUGIN_ID_RE, SHA256_RE } from "../shared/pluginProtocol.js";
+import { MAX_BLOB_BYTES, MAX_SESSION_BLOB_BYTES } from "../shared/limits.js";
+import {
+  EMPTY_BASE,
+  entryPreimage,
+  headOf,
+  MAX_HISTORY_OP_BYTES,
+  syncReply,
+  type HistoryBase,
+  type HistoryEntry,
+  type SyncReply,
+} from "../shared/historyCore.js";
 
 /** A commit, as a device sends it. */
 export interface HistoryCommit {
@@ -62,25 +48,17 @@ export interface HistoryBucket {
   remove(paths: string[]): Promise<unknown>;
 }
 
-// One op: the size of a plugin message.
-export const MAX_HISTORY_OP_BYTES = 16 * 1024;
 // The entries kept after a plugin's base. A plugin whose log grows past this
 // has to take snapshots (presio.history's `snapshot` option).
 export const MAX_HISTORY_TAIL_BYTES = 4 * 1024 * 1024;
-export const MAX_BLOB_BYTES = 5 * 1024 * 1024;
-export const MAX_SESSION_BLOB_BYTES = 50 * 1024 * 1024;
-export const MAX_HISTORY_PLUGINS = 8;
 // Ids remembered per plugin to recognise a resent commit (a device that lost
 // its connection before hearing back resends what's still pending).
 const RECENT_IDS = 1024;
 const PERSIST_DELAY_MS = 1000;
 
-export const EMPTY_HASH = "";
-export const SHA256_RE = /^[0-9a-f]{64}$/;
-
 /** The hash of an entry: chained onto the one before it. */
 export function entryHash(prev: string, id: string, op: unknown): string {
-  return createHash("sha256").update(`${prev}\n${id}\n${JSON.stringify(op)}`).digest("hex");
+  return createHash("sha256").update(entryPreimage(prev, id, op)).digest("hex");
 }
 
 export function sha256(bytes: Uint8Array): string {
@@ -181,18 +159,9 @@ export class HistoryStore {
   }
 
   /** What a device with this head is missing. */
-  async sync(sessionId: string, plugin: string, head: { seq: number; hash: string }): Promise<HistorySyncReply> {
+  async sync(sessionId: string, plugin: string, head: { seq: number; hash: string }): Promise<SyncReply> {
     const h = (await this.session(sessionId)).plugins.get(plugin);
-    if (!h) return { kind: "empty" };
-    const last = h.entries[h.entries.length - 1];
-    const top = last ? { seq: last.seq, hash: last.hash } : h.base;
-    if (head.seq === top.seq && head.hash === top.hash) return { kind: "current" };
-    // On this line of history, and not from before the base: just the rest.
-    const known =
-      (head.seq === h.base.seq && head.hash === h.base.hash) ||
-      h.entries.some((e) => e.seq === head.seq && e.hash === head.hash);
-    if (known) return { kind: "tail", entries: h.entries.filter((e) => e.seq > head.seq) };
-    return { kind: "reset", base: h.base, entries: h.entries };
+    return h ? syncReply(h, head) : { kind: "empty" };
   }
 
   /**
@@ -203,13 +172,12 @@ export class HistoryStore {
     const s = await this.session(sessionId);
     let h = s.plugins.get(c.plugin);
     if (!h) {
-      if (s.plugins.size >= MAX_HISTORY_PLUGINS) throw new HistoryError("Too many plugins keep a history in this session");
-      h = { base: { seq: 0, hash: EMPTY_HASH, snapshot: null }, entries: [], bytes: 0, recent: [] };
+      if (s.plugins.size >= MAX_PLUGINS_PER_SESSION) throw new HistoryError("Too many plugins keep a history in this session");
+      h = { base: EMPTY_BASE, entries: [], bytes: 0, recent: [] };
       s.plugins.set(c.plugin, h);
     }
     if (h.recent.includes(c.id)) return null;
-    const last = h.entries[h.entries.length - 1];
-    const prev = last ? { seq: last.seq, hash: last.hash } : h.base;
+    const prev = headOf(h);
     const entry: HistoryEntry = {
       seq: prev.seq + 1,
       id: c.id,
@@ -239,7 +207,7 @@ export class HistoryStore {
     const s = await this.session(sessionId);
     const existing = s.plugins.get(plugin);
     if (existing && (existing.entries.length || existing.base.seq > 0)) return false;
-    if (!s.plugins.has(plugin) && s.plugins.size >= MAX_HISTORY_PLUGINS) return false;
+    if (!s.plugins.has(plugin) && s.plugins.size >= MAX_PLUGINS_PER_SESSION) return false;
     const bytes = await this.getBlob(sessionId, seedSha);
     if (!bytes) return false;
     let raw: unknown;
@@ -341,10 +309,6 @@ export class HistoryStore {
     const paths = [logPath(sessionId), ...[...(s?.blobs.keys() ?? [])].map((sha) => blobPath(sessionId, sha))];
     await this.bucket.remove(paths);
   }
-}
-
-function jsonBytes(value: unknown): number {
-  return Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
 }
 
 const ENTRY_ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;

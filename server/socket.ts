@@ -15,10 +15,11 @@ import {
   MAX_PLUGINS_PER_SESSION,
   PLUGIN_ID_RE,
   retainKey,
+  SHA256_RE,
   type PublishedPlugin,
   type Retain,
 } from "../shared/pluginProtocol.js";
-import { HistoryError, HistoryStore, parseBase, sanitizeHead, sanitizeHistoryCommit, SHA256_RE, type HistoryBucket } from "./history.js";
+import { HistoryError, HistoryStore, parseBase, sanitizeHead, sanitizeHistoryCommit, type HistoryBucket } from "./history.js";
 
 // A presenter plugin message kept for viewers who join later (the plugin's
 // current "state of the world": which poll is open, whether the join code is

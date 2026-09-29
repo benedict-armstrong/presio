@@ -1,7 +1,9 @@
 import express from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { safeEqual } from "../auth.js";
-import { HistoryError, MAX_BLOB_BYTES, SHA256_RE, type HistoryStore } from "../history.js";
+import { HistoryError, type HistoryStore } from "../history.js";
+import { MAX_BLOB_BYTES } from "../../shared/limits.js";
+import { SHA256_RE } from "../../shared/pluginProtocol.js";
 
 // Blobs for plugin histories (presio.history): content-addressed bytes too big
 // for a plugin message — snapshots, images. They travel over HTTP, not the
