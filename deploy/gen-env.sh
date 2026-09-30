@@ -25,12 +25,6 @@ OUT="${1:-../.env}"
 # calling the old host don't hard-fail after a move.
 : "${SUPABASE_DOMAIN_ALT:=}"
 : "${ANALYTICS_DOMAIN:=https://analytics.presio.xyz}"
-# Optional former analytics domain, kept routed so a service-worker-precached
-# client still beaconing the old host keeps being counted after a move.
-: "${ANALYTICS_DOMAIN_ALT:=}"
-# Uptime Kuma dashboard, and an optional former hostname for it.
-: "${UPTIME_DOMAIN:=https://uptime.presio.xyz}"
-: "${UPTIME_DOMAIN_ALT:=}"
 : "${GITHUB_CLIENT_ID:=REPLACE_ME}"
 : "${GITHUB_SECRET:=REPLACE_ME}"
 : "${GITHUB_ENABLED:=true}"
@@ -64,8 +58,6 @@ PG_META_CRYPTO_KEY=$(rand 16)
 MINIO_ROOT_PASSWORD=$(rand 24)
 S3_PROTOCOL_ACCESS_KEY_ID=$(rand 16)
 S3_PROTOCOL_ACCESS_KEY_SECRET=$(rand 32)
-UMAMI_DB_PASSWORD=$(rand 32)
-UMAMI_APP_SECRET=$(rand 32)
 
 override() {  # echo a replacement value for $1, or return 1 if no override
   case "$1" in
@@ -103,12 +95,6 @@ override() {  # echo a replacement value for $1, or return 1 if no override
     S3_PROTOCOL_ACCESS_KEY_SECRET) echo "$S3_PROTOCOL_ACCESS_KEY_SECRET" ;;
     GITHUB_CLIENT_ID)         echo "$GITHUB_CLIENT_ID" ;;
     GITHUB_SECRET)            echo "$GITHUB_SECRET" ;;
-    UMAMI_HOST)               hostonly "$ANALYTICS_DOMAIN" ;;
-    UMAMI_HOST_ALT)           [ -n "$ANALYTICS_DOMAIN_ALT" ] && hostonly "$ANALYTICS_DOMAIN_ALT" || echo "" ;;
-    UPTIME_HOST)              hostonly "$UPTIME_DOMAIN" ;;
-    UPTIME_HOST_ALT)          [ -n "$UPTIME_DOMAIN_ALT" ] && hostonly "$UPTIME_DOMAIN_ALT" || echo "" ;;
-    UMAMI_DB_PASSWORD)        echo "$UMAMI_DB_PASSWORD" ;;
-    UMAMI_APP_SECRET)         echo "$UMAMI_APP_SECRET" ;;
     *) return 1 ;;
   esac
 }

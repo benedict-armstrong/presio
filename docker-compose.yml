@@ -748,83 +748,11 @@ services:
       - "traefik.http.routers.presio.tls=true"
       - "traefik.http.services.presio.loadbalancer.server.port=3001"
 
-  # One-shot: create the umami database and user in the shared Postgres instance.
-  # Uses `|| true` so each statement is idempotent on re-runs.
-  umami-db-init:
-    container_name: presio-umami-db-init
-    image: postgres:17-alpine
-    restart: "no"
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        psql -h db -p "${POSTGRES_PORT}" -U postgres -c "CREATE ROLE umami WITH LOGIN PASSWORD '${UMAMI_DB_PASSWORD}';" || true
-        psql -h db -p "${POSTGRES_PORT}" -U postgres -c "CREATE DATABASE umami;" || true
-        psql -h db -p "${POSTGRES_PORT}" -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE umami TO umami;" || true
-        psql -h db -p "${POSTGRES_PORT}" -U postgres -d umami -c "GRANT ALL ON SCHEMA public TO umami;" || true
-
-  # Umami web analytics — self-hosted, privacy-friendly.
-  # After first boot: visit https://${UMAMI_HOST}, log in (admin / umami),
-  # change the password, add a website, then paste the tracking script into
-  # client/index.html using the generated website ID.
-  #
-  # UMAMI_HOST_ALT keeps a previous analytics hostname routed after a move.
-  # This one is not cosmetic: the tracking script beacons back to the origin it
-  # was loaded FROM, and the built client is precached by the service worker —
-  # so a visitor still running a pre-move bundle keeps calling the old host for
-  # as long as that cache lives. Without the second matcher those hits are
-  # silently dropped rather than recorded.
-  umami:
-    container_name: presio-umami
-    image: ghcr.io/umami-software/umami:postgresql-latest
-    restart: unless-stopped
-    networks:
-      default:
-      web:
-    depends_on:
-      umami-db-init:
-        condition: service_completed_successfully
-    environment:
-      DATABASE_URL: postgresql://umami:${UMAMI_DB_PASSWORD}@db:${POSTGRES_PORT}/umami
-      APP_SECRET: ${UMAMI_APP_SECRET}
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=web"
-      - "traefik.http.routers.umami.rule=Host(`${UMAMI_HOST}`) || Host(`${UMAMI_HOST_ALT:-${UMAMI_HOST}}`)"
-      - "traefik.http.routers.umami.entrypoints=websecure"
-      - "traefik.http.routers.umami.tls=true"
-      - "traefik.http.services.umami.loadbalancer.server.port=3000"
-
-  # Uptime Kuma — self-hosted uptime monitoring + status dashboard.
-  # After first boot: visit https://${UPTIME_HOST}, create the admin account,
-  # then add an HTTP(s) monitor pointing at https://${APP_HOST}/healthz, and an
-  # HTTP(s) - Keyword monitor on http://presio-cert-expiry:8080/cgi-bin/check
-  # with the keyword `cert-expiry: OK` (see the cert-expiry service below).
-  #
-  # UPTIME_HOST_ALT keeps a previous dashboard hostname routed after a move, so
-  # bookmarks and any external status link keep resolving. Same optional
-  # defaulting as the routers above.
-  uptime-kuma:
-    container_name: presio-uptime-kuma
-    image: louislam/uptime-kuma:1
-    restart: unless-stopped
-    networks:
-      default:
-      web:
-    volumes:
-      - uptime-kuma-data:/app/data
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=web"
-      - "traefik.http.routers.uptime.rule=Host(`${UPTIME_HOST}`) || Host(`${UPTIME_HOST_ALT:-${UPTIME_HOST}}`)"
-      - "traefik.http.routers.uptime.entrypoints=websecure"
-      - "traefik.http.routers.uptime.tls=true"
-      - "traefik.http.services.uptime.loadbalancer.server.port=3001"
+  # Umami (analytics) and Uptime Kuma (monitoring) are not part of this stack.
+  # They run host-wide, shared by every app behind the proxy, in a stack of
+  # their own next to it (~/ops on the presio host); Traefik routes any
+  # analytics.* and uptime.* hostname there. This stack only needs
+  # ANALYTICS_URL, so its CSP admits the tracker. See deploy/README.md.
 
   # Origin certificate expiry check, polled by Uptime Kuma.
   #
@@ -837,8 +765,12 @@ services:
   # green, because the zone was on SSL mode `full`, which does not verify the
   # origin. See presio#64.
   #
+  # Poll it from Uptime Kuma with an HTTP(s) - Keyword monitor on
+  # http://presio-cert-expiry:8080/cgi-bin/check, keyword `cert-expiry: OK`;
+  # Kuma reaches it over the shared `web` network.
+  #
   # Asks Traefik for each hostname in turn and reports the shortest remaining
-  # validity. Add the Kuma monitor described above to act on it. Runnable by
+  # validity. Runnable by
   # hand: `docker compose exec cert-expiry /srv/check.sh`.
   cert-expiry:
     container_name: presio-cert-expiry
@@ -850,7 +782,7 @@ services:
       # Reached over the `web` network, so this checks the real handshake
       # without depending on public DNS or leaving the host.
       CERT_EXPIRY_ORIGIN: traefik:443
-      CERT_EXPIRY_HOSTS: "${APP_HOST},${APP_HOST_ALT:-},${SUPABASE_HOST},${SUPABASE_HOST_ALT:-},${UMAMI_HOST},${UPTIME_HOST}"
+      CERT_EXPIRY_HOSTS: "${APP_HOST},${APP_HOST_ALT:-},${SUPABASE_HOST},${SUPABASE_HOST_ALT:-}"
       # Cloudflare Origin CA certificates run 15 years, so 30 days is a long
       # warning. Raise it if your certificates are shorter-lived.
       CERT_EXPIRY_MIN_DAYS: "30"
@@ -869,4 +801,3 @@ volumes:
   db-config:
   deno-cache:
   minio-data:
-  uptime-kuma-data:
