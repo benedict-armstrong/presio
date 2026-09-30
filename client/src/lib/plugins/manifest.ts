@@ -8,6 +8,8 @@
 
 import { RESERVED_SETTING_SECTIONS, sanitizeSettingValue, type SettingSpec } from "@/lib/settings";
 import type { KeyBinding } from "@/lib/keymap";
+import { PLUGIN_ID_RE } from "@shared/pluginProtocol";
+import { asRecord } from "./sanitize";
 
 /** Where a plugin runs. The same HTML runs in each; presio.surface says which. */
 export type PluginSurface =
@@ -58,7 +60,7 @@ export interface ButtonContribution {
   id: string;
   label: string;
   /** One of PLUGIN_ICONS; buttons without one are text-only. */
-  icon?: string;
+  icon?: PluginIcon;
   tooltip?: string;
   location: ButtonLocation;
   /** Ask for a file first, of these types (an <input accept> value): the
@@ -108,6 +110,7 @@ export const PLUGIN_ICONS = [
   "qr-code", "bar-chart", "message", "users", "timer", "bell", "star", "sparkles", "hand", "check", "eye", "megaphone", "pen",
   "download", "upload",
 ] as const;
+export type PluginIcon = (typeof PLUGIN_ICONS)[number];
 
 /** A plugin ready to mount: its manifest and HTML. */
 export interface LoadedPlugin {
@@ -122,16 +125,10 @@ export interface LoadedPlugin {
   hash: string;
 }
 
-/** An untrusted value as an object to read fields from ({} when it isn't one). */
-export function asRecord(value: unknown): Record<string, unknown> {
-  return (typeof value === "object" && value !== null ? value : {}) as Record<string, unknown>;
-}
-
 const SURFACES: PluginSurface[] = ["background", "tile", "viewer", "slide"];
 const BUTTON_LOCATIONS: ButtonLocation[] = ["controller.toolbar", "controller.currentSlide", "settings"];
 const NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 const PERMISSIONS: PluginPermission[] = ["deck", "editDeck", "history"];
-const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** Validate a parsed presio-plugin.json, throwing a readable error. */
 export function parseManifest(raw: unknown): PluginManifest {
@@ -146,7 +143,7 @@ export function parseManifest(raw: unknown): PluginManifest {
     return v;
   };
   const id = str("id", 64)!;
-  if (!ID_RE.test(id)) throw new Error('presio-plugin.json: "id" must be lowercase letters, digits and dashes');
+  if (!PLUGIN_ID_RE.test(id)) throw new Error('presio-plugin.json: "id" must be lowercase letters, digits and dashes');
   if (RESERVED_SETTING_SECTIONS.has(id)) throw new Error(`presio-plugin.json: "${id}" is reserved by Presio`);
   const list = <T extends string>(key: string, allowed?: readonly T[]): T[] => {
     const v = m[key] ?? [];
@@ -213,7 +210,7 @@ function parseContributes(raw: unknown): PluginManifest["contributes"] {
       buttons.push({
         id: btn.id as string,
         label: btn.label as string,
-        icon: btn.icon as string | undefined,
+        icon: btn.icon as PluginIcon | undefined,
         tooltip: btn.tooltip as string | undefined,
         location: btn.location as ButtonLocation,
         accept: btn.accept as string | undefined,

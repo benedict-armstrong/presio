@@ -3,7 +3,16 @@ import { useParams, useSearchParams, useNavigate, Link } from "react-router-dom"
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { idbPut } from "@/lib/localStore";
-import { setSessionAuth } from "@/lib/utils";
+import { setSessionAuth } from "@/lib/sessionAuth";
+import { sessionPath } from "@/lib/joinUrl";
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
 
 // Deep link from POST /api/present: /start/:id?t=<token>
 // Pulls the staged PDF into IndexedDB (local session), clears the server copy,
@@ -26,7 +35,8 @@ export default function Start() {
           const body = await res.json().catch(() => ({}));
           throw new Error(typeof body.error === "string" ? body.error : "Failed to download presentation");
         }
-        const filename = res.headers.get("X-Filename") || "presentation";
+        // Percent-encoded by the server: header values can't carry non-Latin-1.
+        const filename = safeDecode(res.headers.get("X-Filename") || "") || "presentation";
         const totalSlides = parseInt(res.headers.get("X-Total-Slides") || "0", 10);
         const blob = await res.blob();
         if (!totalSlides) throw new Error("Invalid presentation metadata");
@@ -46,7 +56,7 @@ export default function Start() {
           method: "POST",
           headers: { "x-controller-token": token },
         });
-        if (!cancelled) navigate(`/s/${id}?role=controller`, { replace: true });
+        if (!cancelled) navigate(sessionPath(id, "controller"), { replace: true });
       } catch (e: unknown) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : "Failed to start presentation");
       }

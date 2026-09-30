@@ -46,3 +46,6 @@ export function useInstalledPlugins(errors: Record<string, string>): InstalledPl
 export function pluginLabel({ entry, manifest }: InstalledPlugin): string {
   return manifest ? manifest.name : describePluginUrl(entry.url);
 }
+
+/** The controller Settings page for an installed plugin, by its URL. */
+export const pluginPageId = (url: string) => `plugin:${url}`;

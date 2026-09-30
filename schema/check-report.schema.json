@@ -51,7 +51,7 @@
         "slide":    { "type": "integer", "minimum": 1, "description": "PDF page number parsed from filename." },
         "validity": { "$ref": "#/$defs/validity" },
         "issues":   { "type": "array", "items": { "$ref": "#/$defs/issue" } },
-        "text":     { "type": "string", "description": "Rendered notes text (notes attachments only)." },
+        "text":     { "type": "string", "description": "Rendered notes, as markdown (notes attachments only)." },
         "data":     { "description": "Parsed JSON content (notes and media-json attachments)." }
       }
     },

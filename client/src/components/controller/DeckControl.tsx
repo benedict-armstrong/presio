@@ -29,6 +29,23 @@ import type { DeckWatchMode, DeckWatchStatus } from "@/lib/deckWatcher";
 // Watching is local-deck only; a synced deck has no file on this machine to
 // watch, and passing `mode: null` renders just the filename.
 
+/** What the deck control offers besides a replace: live reload of a watched
+ *  file, and a republish of a URL-backed deck. */
+export interface DeckUpdates {
+  /** null when this deck can't be watched (synced deck, or no File System
+   *  Access API) — the filename still shows and still swaps the deck. */
+  mode: DeckWatchMode | null;
+  status: DeckWatchStatus | null;
+  onSetMode: (mode: DeckWatchMode) => void;
+  onApply: () => void;
+  onResume: () => void;
+  /** A URL-backed deck's source PDF was republished. Reported by the
+   *  republish poller rather than the file watcher, but it means the same
+   *  thing to the presenter, so it reads as the same button. */
+  remoteUpdate: boolean;
+  onRemoteApply: () => void;
+}
+
 const MODES: { value: DeckWatchMode; label: string; hint: string }[] = [
   { value: "off", label: "Off", hint: "Ignore changes to the file" },
   { value: "prompt", label: "Watch and ask", hint: "Offer each recompile before it goes up" },
@@ -110,24 +127,12 @@ export function DeckControl({
   onResume,
   onApply,
   onRemoteApply,
-}: {
+}: DeckUpdates & {
   filename: string;
-  /** null when this deck can't be watched (synced deck, or no File System
-   *  Access API) — the filename still shows and still swaps the deck. */
-  mode: DeckWatchMode | null;
-  status: DeckWatchStatus | null;
-  /** A URL-backed deck's source PDF was republished. Reported by the server-side
-   *  poller rather than the file watcher, but it means the same thing to the
-   *  presenter, so it reads as the same button. */
-  remoteUpdate?: boolean;
   onReplace: () => void;
   /** A PDF was dropped on the filename. The handle rides along where the
    *  platform offers one, so a dropped deck stays watchable. */
   onDropDeck?: (file: File, handle?: FileSystemFileHandle) => void;
-  onSetMode: (mode: DeckWatchMode) => void;
-  onResume: () => void;
-  onApply: () => void;
-  onRemoteApply?: () => void;
 }) {
   // Dragging a recompiled PDF onto the deck name is the same swap as clicking
   // it, minus the picker. Only armed when a drop handler is wired.

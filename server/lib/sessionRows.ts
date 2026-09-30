@@ -1,5 +1,5 @@
 // Shared helpers for creating `sessions` rows. Both entry points that mint a
-// session — the reserve routes in routes/sessions.ts and the agent handoff in
+// session — the routes in routes/sessions/ and the agent handoff in
 // lib/presentHandoff.ts — need the same code/passphrase alphabets, the same
 // owned-session TTL, and the same collision-retrying insert. They used to carry
 // verbatim copies of all four with a "keep in sync" comment; this is that
@@ -25,7 +25,7 @@ export const ownedExpiry = () => new Date(Date.now() + OWNED_SESSION_TTL_MS).toI
 
 // Postgres unique-violation SQLSTATE (mirrored by local/queryBuilder.ts for
 // SQLite) — the signal that the generated code collided and we should retry.
-const UNIQUE_VIOLATION = "23505";
+export const UNIQUE_VIOLATION = "23505";
 
 /**
  * Insert a session row, retrying with a fresh code on collision. Expired rows

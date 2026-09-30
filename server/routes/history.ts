@@ -1,7 +1,10 @@
 import express from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { safeEqual } from "../auth.js";
-import { HistoryError, MAX_BLOB_BYTES, SHA256_RE, type HistoryStore } from "../history.js";
+import { authorizeController, loadSession } from "../lib/sessionAccess.js";
+import { HistoryError, type HistoryStore } from "../history.js";
+import { MAX_BLOB_BYTES } from "../../shared/limits.js";
+import { SHA256_RE } from "../../shared/pluginProtocol.js";
+import { SESSION_ID_RE } from "../../shared/session.js";
 
 // Blobs for plugin histories (presio.history): content-addressed bytes too big
 // for a plugin message — snapshots, images. They travel over HTTP, not the
@@ -10,8 +13,6 @@ import { HistoryError, MAX_BLOB_BYTES, SHA256_RE, type HistoryStore } from "../h
 // The controller uploads (its token, like every presenter-side write); anyone
 // with the session's code may download, as they may its PDF. A blob's URL is
 // its hash, so it never changes and caches forever.
-
-const SESSION_ID_RE = /^[A-Z0-9]{6}$/;
 
 export function registerHistoryRoutes(app: express.Express, { supabase, history }: { supabase: SupabaseClient; history: HistoryStore }) {
   app.put(
@@ -23,12 +24,12 @@ export function registerHistoryRoutes(app: express.Express, { supabase, history 
         res.status(400).json({ error: "Bad blob address" });
         return;
       }
-      const { data } = await supabase.from("sessions").select("controller_token").eq("id", id).neq("status", "expired").single();
+      const data = await loadSession(supabase, id, "controller_token");
       if (!data) {
         res.status(404).json({ error: "Session not found" });
         return;
       }
-      if (!safeEqual(req.get("x-controller-token") || "", data.controller_token)) {
+      if (!(await authorizeController(supabase, req, data))) {
         res.status(403).json({ error: "Not authorized" });
         return;
       }

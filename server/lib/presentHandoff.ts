@@ -1,10 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Server } from "socket.io";
 import { nanoid } from "nanoid";
-import { openPdf, closePdf } from "./pdfDoc.js";
-import { isValidTotalSlides, MAX_TOTAL_SLIDES } from "../validation.js";
+import { countPages } from "./pdfDoc.js";
+import { DEFAULT_DECK_NAME, normalizeDeckName } from "./upload.js";
 import { safeEqual } from "../auth.js";
-import { forgetDeckRetained, type SocketState } from "../socket.js";
+import type { SocketState } from "../socket/index.js";
+import { announceDeckUpdate, clampSlide, replaceHostedDeck } from "./hostedDeck.js";
+import { loadSession } from "./sessionAccess.js";
 import { generatePassphrase, insertSession, ownedExpiry } from "./sessionRows.js";
 
 export const PRESENT_NEXT =
@@ -19,19 +21,11 @@ export async function createPresentHandoff(
   supabase: SupabaseClient,
   opts: { buffer: Buffer; originalName: string; userId: string | null; baseUrl: string }
 ): Promise<PresentResult> {
-  let totalSlides: number;
-  try {
-    const doc = await openPdf({ data: new Uint8Array(opts.buffer) });
-    totalSlides = doc.numPages;
-    void closePdf(doc);
-  } catch {
-    return { ok: false, status: 422, error: "Could not parse PDF" };
-  }
-  if (!isValidTotalSlides(totalSlides)) {
-    return { ok: false, status: 400, error: `PDF exceeds the ${MAX_TOTAL_SLIDES}-page limit` };
-  }
+  const pages = await countPages(opts.buffer);
+  if (!pages.ok) return pages;
+  const { totalSlides } = pages;
 
-  const filename = opts.originalName.replace(/\.pdf$/i, "") || "presentation";
+  const filename = normalizeDeckName(opts.originalName) || DEFAULT_DECK_NAME;
   const controllerToken = nanoid(24);
   const passphrase = generatePassphrase();
   const pdfPath = `handoff/${nanoid(32)}.pdf`;
@@ -114,41 +108,24 @@ export async function updatePresentDeck(
     socketState?: SocketState;
   }
 ): Promise<PresentUpdateResult> {
-  const { data: row, error } = await supabase
-    .from("sessions")
-    .select("id, local, pdf_path, filename, current_slide, controller_token")
-    .eq("id", opts.sessionId)
-    .neq("status", "expired")
-    // `status` is only reconciled by the hourly sweeper in index.ts, so a row
-    // past its expiry can still read as active. Check the timestamp too, or an
-    // update revives a presentation the API documents as gone.
-    .gt("expires_at", new Date().toISOString())
-    .single();
-  if (error || !row) {
+  const row = await loadSession(supabase, opts.sessionId, "id, local, pdf_path, filename, current_slide, controller_token, expires_at");
+  // `status` is only reconciled by the hourly sweeper in index.ts, so a row
+  // past its expiry can still read as active. Check the timestamp too, or an
+  // update revives a presentation the API documents as gone.
+  if (!row || !(Date.parse(row.expires_at) > Date.now())) {
     return { ok: false, status: 404, error: "Presentation not found or expired" };
   }
   if (!safeEqual(opts.token, row.controller_token)) {
     return { ok: false, status: 403, error: "Not authorized" };
   }
 
-  let totalSlides: number;
-  try {
-    const doc = await openPdf({ data: new Uint8Array(opts.buffer) });
-    totalSlides = doc.numPages;
-    void closePdf(doc);
-  } catch {
-    return { ok: false, status: 422, error: "Could not parse PDF" };
-  }
-  if (!isValidTotalSlides(totalSlides)) {
-    return { ok: false, status: 400, error: `PDF exceeds the ${MAX_TOTAL_SLIDES}-page limit` };
-  }
+  const pages = await countPages(opts.buffer);
+  if (!pages.ok) return pages;
+  const { totalSlides } = pages;
 
   // An empty name means "keep the current title" rather than resetting it.
-  const rawName = (opts.originalName ?? "").trim().replace(/\.pdf$/i, "");
-  const filename = rawName || row.filename || "presentation";
-  // Keep the presenter near where they were; drawings keyed by slide number
-  // beyond the new count become stale just as with the notes replace path.
-  const clampedSlide = Math.min(Math.max(row.current_slide ?? 1, 1), totalSlides);
+  const rawName = normalizeDeckName(opts.originalName);
+  const filename = rawName || row.filename || DEFAULT_DECK_NAME;
 
   if (row.local) {
     // Handoff may already be complete (the browser cleared the server copy),
@@ -163,7 +140,7 @@ export async function updatePresentDeck(
     }
     const { error: updateError } = await supabase
       .from("sessions")
-      .update({ pdf_path: pdfPath, total_slides: totalSlides, current_slide: clampedSlide, filename })
+      .update({ pdf_path: pdfPath, total_slides: totalSlides, current_slide: clampSlide(row.current_slide, totalSlides), filename })
       .eq("id", row.id);
     if (updateError) {
       return { ok: false, status: 500, error: "Failed to update presentation" };
@@ -175,27 +152,11 @@ export async function updatePresentDeck(
   if (!row.pdf_path) {
     return { ok: false, status: 400, error: "This presentation's PDF is not hosted on the server" };
   }
-  const { error: uploadError } = await supabase.storage
-    .from("presentations")
-    .upload(row.pdf_path, opts.buffer, { contentType: "application/pdf", upsert: true });
-  if (uploadError) {
-    return { ok: false, status: 500, error: "Failed to save PDF" };
-  }
-  const { error: updateError } = await supabase
-    .from("sessions")
-    .update({
-      total_slides: totalSlides,
-      current_slide: clampedSlide,
-      ...(rawName ? { filename } : {}),
-    })
-    .eq("id", row.id);
-  if (updateError) {
-    return { ok: false, status: 500, error: "Failed to update presentation" };
-  }
+  const replaced = await replaceHostedDeck(supabase, row, { buffer: opts.buffer, totalSlides, filename: rawName });
+  if (!replaced.ok) return replaced;
 
   // Everyone in the room reloads the new bytes live, as with any other replacement.
-  if (opts.socketState) forgetDeckRetained(opts.socketState, String(row.id));
-  opts.io?.to(row.id).emit("deck_updated", { filename, totalSlides });
+  announceDeckUpdate(opts.io, opts.socketState, row.id, { filename, totalSlides });
 
   return {
     ok: true,

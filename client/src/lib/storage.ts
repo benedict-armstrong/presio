@@ -6,6 +6,8 @@
 // hand-rolled `try { JSON.parse(localStorage.getItem(...)) } catch {}` dance
 // that was duplicated across the app.
 
+import { SESSION_ID_RE } from "@shared/session";
+
 /** Static localStorage keys. Per-session keys (plugin state, session auth) are built
  *  from an id, so they're kept as factory functions rather than constants. */
 export const STORAGE_KEYS = {
@@ -38,6 +40,11 @@ export const pluginStateKey = (id: string) => `presio_plugin_state_${id}`;
 /** The presenter's retained plugin messages for one session (lib/plugins/host.ts). */
 export const pluginRetainedKey = (id: string) => `presio_plugin_retained_${id}`;
 export const sessionKey = (id: string) => `session_${id}`;
+/** The session a sessionKey() is for, or null for any other key. */
+export function sessionIdFromKey(key: string): string | null {
+  const id = key.startsWith("session_") ? key.slice("session_".length) : "";
+  return SESSION_ID_RE.test(id) ? id : null;
+}
 /** Live-reload preference for a local deck: "off" | "prompt" | "auto". A device
  *  preference (the file being watched is on this machine), not session state. */
 export const deckWatchKey = (id: string) => `presio_deck_watch_${id}`;

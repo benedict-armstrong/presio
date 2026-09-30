@@ -10,16 +10,16 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAllowedOrigins, buildCspDirectives, PLUGIN_FRAME_CSP } from "./security.js";
 import { canonicalBaseUrl, originPair } from "./lib/baseUrl.js";
 import { localBlobsDir } from "./local/paths.js";
-import { isLocalMode } from "./local/mode.js";
-import { registerSessionRoutes } from "./routes/sessions.js";
+import { isDevOrLocal } from "./local/mode.js";
+import { registerSessionRoutes } from "./routes/sessions/index.js";
+import { registerPresentRoute } from "./routes/present.js";
 import { registerHistoryRoutes } from "./routes/history.js";
-import type { HistoryBucket } from "./history.js";
 import { registerNewsletterRoutes } from "./routes/newsletter.js";
 import { registerCheckRoute } from "./routes/check.js";
 import { registerLanAddressRoute } from "./routes/lanAddress.js";
-import { registerAgentDocRoutes } from "./routes/agentDocs.js";
+import { MARKDOWN_MIRRORS, registerAgentDocRoutes } from "./routes/agentDocs.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
-import type { SocketState } from "./socket.js";
+import type { SocketState } from "./socket/index.js";
 import { APP_VERSION } from "./version.js";
 
 export interface AppDeps {
@@ -42,12 +42,9 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   app.set("trust proxy", process.env.TRUST_PROXY === "false" ? false : 1);
 
   const allowedOrigins = getAllowedOrigins();
-  // Development and local/LAN use have no fixed origin to configure ahead of
-  // time — the client can be reached as localhost, a LAN IP, or a hostname
-  // (e.g. `npm run dev` viewed from a phone/tablet on the same network), none
-  // of which are known at startup. Accept any origin unless ALLOWED_ORIGIN was
-  // set explicitly (which still takes priority).
-  const devOrLocal = process.env.NODE_ENV === "development" || isLocalMode;
+  // Accept any origin in development and local mode (see isDevOrLocal),
+  // unless ALLOWED_ORIGIN was set explicitly (which still takes priority).
+  const devOrLocal = isDevOrLocal();
   const corsOrigin: cors.CorsOptions["origin"] =
     !allowedOrigins.length && devOrLocal
       ? true
@@ -100,7 +97,7 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   // Note this is not brute-force protection either way: the shared-control
   // passphrase is 8 characters over a 32-symbol alphabet (~2^40), and live
   // presenting (slide changes, laser, drawing) runs over Socket.IO rather than
-  // HTTP, so it never passed through the limiter at all — see socket.ts.
+  // HTTP, so it never passed through the limiter at all — see socket/guards.ts.
 
   // The MCP tools (present_pdf / check_pdf) take the PDF base64-encoded inside
   // the JSON-RPC body, so /mcp needs a body limit in the same league as the
@@ -140,11 +137,9 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   // swallowed by index.html.
   registerAgentDocRoutes(app);
 
+  registerPresentRoute(app, { supabase, io, socketState });
   registerSessionRoutes(app, { supabase, io, socketState });
-  if (socketState) {
-    socketState.history.setBucket(supabase.storage.from("presentations") as unknown as HistoryBucket);
-    registerHistoryRoutes(app, { supabase, history: socketState.history });
-  }
+  if (socketState) registerHistoryRoutes(app, { supabase, history: socketState.history });
   registerNewsletterRoutes(app, supabase);
   registerCheckRoute(app);
   // Local/dev only: lets share surfaces resolve this machine's LAN address
@@ -171,7 +166,7 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   const clientDist = path.join(__dirname, "../client/dist");
 
   // JSON schemas for the sidecar format — served at /schema/*.json
-  app.use("/schema", express.static(path.join(__dirname, "../../schema"), { index: false }));
+  app.use("/schema", express.static(path.join(__dirname, "../schema"), { index: false }));
 
   // Local mode's blob store (server/local/blobStore.ts) writes PDFs here and
   // hands back relative /files/... URLs. In Supabase mode this directory
@@ -203,12 +198,6 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
     })
   );
 
-  // Pages with a markdown mirror advertise it via rel="alternate".
-  const MD_MIRRORS: Record<string, string> = {
-    "/": "/index.md",
-    "/check": "/check.md",
-  };
-
   // Serve the SPA shell with a per-request canonical URL and og:url so every
   // route carries correct metadata without the client rendering it.
   let indexHtml: string | undefined;
@@ -237,8 +226,9 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
     tags += `\n  <meta name="presio-app-origin" content="${attr(origins.app)}" />`;
     if (origins.viewer) tags += `\n  <meta name="presio-viewer-origin" content="${attr(origins.viewer)}" />`;
     if (origins.onViewer) res.setHeader("X-Robots-Tag", "noindex");
-    const mirror = MD_MIRRORS[req.path];
-    if (mirror) tags += `\n  <link rel="alternate" type="text/markdown" href="${base}${mirror}" />`;
+    // Pages with a markdown mirror advertise it via rel="alternate".
+    const mirror = Object.hasOwn(MARKDOWN_MIRRORS, req.path) ? MARKDOWN_MIRRORS[req.path] : undefined;
+    if (mirror) tags += `\n  <link rel="alternate" type="text/markdown" href="${base}/${mirror}" />`;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(indexHtml.replace("</head>", `${tags}\n</head>`));
   });
@@ -246,6 +236,21 @@ export function createApp({ supabase, io, socketState }: AppDeps): express.Expre
   // Report unhandled route errors to Sentry. No-op when Sentry isn't
   // initialized (no DSN), and must come after all routes.
   Sentry.setupExpressErrorHandler(app);
+
+  // Anything a route throws (Express 5 forwards async rejections here) ends as
+  // JSON, never Express's default HTML page: every caller of these paths is a
+  // client that parses the body. Routes answer the errors they expect
+  // themselves; this is for the ones they don't.
+  app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error(`${req.method} ${req.path} failed:`, err);
+    // Too late for a status: let Express close the connection.
+    if (res.headersSent) return next(err);
+    if (req.path === "/mcp") {
+      res.status(500).json({ jsonrpc: "2.0", error: { code: -32603, message: "Internal server error" }, id: null });
+      return;
+    }
+    res.status(500).json({ error: "Internal server error" });
+  });
 
   return app;
 }

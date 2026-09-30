@@ -1,5 +1,6 @@
 // Convert the Typst content AST emitted by the `presio` package's
-// `#speaker-notes[...]` into markdown that `marked` can render.
+// `#speaker-notes[...]` into markdown that `marked` can render. The app, the
+// checker and /api/check all render notes with it, so they agree.
 
 type Node = { func?: string; [k: string]: unknown };
 

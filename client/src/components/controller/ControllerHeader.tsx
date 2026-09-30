@@ -1,10 +1,9 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import type { DeckWatchMode, DeckWatchStatus } from "@/lib/deckWatcher";
 import { PresioLogo } from "@/components/PresioLogo";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
-import { DeckControl } from "@/components/controller/DeckControl";
+import { DeckControl, type DeckUpdates } from "@/components/controller/DeckControl";
 
 // Shared top bar for both the desktop and mobile controller. The right-hand
 // `actions` slot is where the two surfaces differ: a button toolbar on desktop,
@@ -15,15 +14,9 @@ export function ControllerHeader({
   blanked = false,
   compact = false,
   filename = "",
-  deckWatchMode = null,
-  deckWatchStatus,
+  deckUpdates,
   onReplaceDeck,
   onDropDeck,
-  onDeckWatchModeChange,
-  onDeckWatchApply,
-  onDeckWatchResume,
-  remoteDeckUpdate = false,
-  onRemoteDeckApply,
   actions,
 }: {
   id: string;
@@ -32,37 +25,17 @@ export function ControllerHeader({
   /** The deck on screen. Shown (and clickable, to swap it) whenever the
    * controller passes a replace handler. */
   filename?: string;
-  /** Live-reload preference, or null when this deck can't be watched (a synced
-   * deck, or a browser without the File System Access API). */
-  deckWatchMode?: DeckWatchMode | null;
-  /** Deck file watching status (lib/deckWatcher). */
-  deckWatchStatus?: DeckWatchStatus | null;
+  /** Live reload and republishes, offered through the deck control. */
+  deckUpdates?: DeckUpdates;
   onReplaceDeck?: () => void;
   /** A PDF dropped onto the deck name — same swap, without the picker. */
   onDropDeck?: (file: File, handle?: FileSystemFileHandle) => void;
-  onDeckWatchModeChange?: (mode: DeckWatchMode) => void;
-  onDeckWatchApply?: () => void;
-  onDeckWatchResume?: () => void;
-  /** A URL-backed deck's source PDF was republished — offer the new version. */
-  remoteDeckUpdate?: boolean;
-  onRemoteDeckApply?: () => void;
   /** Tighter spacing + bare code (no "Code:" label) for the mobile header. */
   compact?: boolean;
   actions?: ReactNode;
 }) {
-  const deck = onReplaceDeck && onDeckWatchModeChange && onDeckWatchApply && onDeckWatchResume && (
-    <DeckControl
-      filename={filename}
-      mode={deckWatchMode}
-      status={deckWatchStatus ?? null}
-      remoteUpdate={remoteDeckUpdate}
-      onReplace={onReplaceDeck}
-      onDropDeck={onDropDeck}
-      onSetMode={onDeckWatchModeChange}
-      onApply={onDeckWatchApply}
-      onResume={onDeckWatchResume}
-      onRemoteApply={onRemoteDeckApply}
-    />
+  const deck = onReplaceDeck && deckUpdates && (
+    <DeckControl {...deckUpdates} filename={filename} onReplace={onReplaceDeck} onDropDeck={onDropDeck} />
   );
 
   return (

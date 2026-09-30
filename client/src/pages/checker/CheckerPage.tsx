@@ -5,14 +5,17 @@ import { loadPdfData, renderPage, destroyPdf } from "@/lib/pdf";
 import { setSlideNotes } from "@/lib/notesAttach";
 import { removeAttachments } from "@/lib/removeAttachments";
 import { inspectAttachments, type DeckReport } from "@/lib/inspectAttachments";
-import { idbPut } from "@/lib/localStore";
-import { newLocalDeckId } from "@/lib/localId";
+import { createLocalDeck, ingestPdfBytes } from "@/lib/deckImport";
 import { PresioLogo } from "@/components/PresioLogo";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ValidityBadge, ValidityDot } from "./ValidityBadge";
 import { PageDetailModal } from "./PageDetailModal";
 import "@/lib/pdf"; // ensure worker is configured
 import { saveFile } from "@/lib/saveFile";
+import { sharePath } from "@/lib/joinUrl";
+
+/** Thumbnails rendered at once. */
+const THUMB_CONCURRENCY = 4;
 
 type PageModalState = { page: number; tab: "notes" | "media" } | null;
 
@@ -33,9 +36,17 @@ export default function CheckerPage() {
   const [deletedMedia, setDeletedMedia] = useState<Set<string>>(new Set());
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const pdfBytesRef = useRef<Uint8Array | null>(null);
+  // Bumped per loaded (or cleared) file, so a previous file's late work
+  // (its report, its thumbnails) never lands in the new one's view.
+  const loadGen = useRef(0);
 
   useEffect(() => {
-    return () => { destroyPdf(pdfRef.current); };
+    return () => {
+      // Not a DOM ref: bumping it is the point, so any in-flight load stops.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      loadGen.current++;
+      destroyPdf(pdfRef.current);
+    };
   }, []);
 
   const loadFile = useCallback(async (file: File) => {
@@ -43,6 +54,7 @@ export default function CheckerPage() {
       setError("Please upload a PDF file.");
       return;
     }
+    const gen = ++loadGen.current;
     setError("");
     setLoading(true);
     setReport(null);
@@ -58,23 +70,35 @@ export default function CheckerPage() {
       // pdf.js transfers the ArrayBuffer to its worker (detaching it), so pass
       // a copy — the original stored in pdfBytesRef stays intact for download.
       const pdf = await loadPdfData(bytes.slice());
+      if (gen !== loadGen.current) {
+        destroyPdf(pdf);
+        return;
+      }
       pdfRef.current = pdf;
 
       const deck = await inspectAttachments(pdf);
+      if (gen !== loadGen.current) return;
       setReport(deck);
       setFilename(file.name);
 
-      for (let p = 1; p <= pdf.numPages; p++) {
-        renderPage(pdf, p, { targetWidth: 400 })
-          .then((canvas) => {
-            setThumbs((prev) => new Map(prev).set(p, canvas));
-          })
-          .catch(() => { /* ignore */ });
-      }
+      // A few pages at a time, in order, and only while this file is current.
+      let next = 1;
+      const renderNext = async (): Promise<void> => {
+        while (next <= pdf.numPages && gen === loadGen.current) {
+          const p = next++;
+          try {
+            const canvas = await renderPage(pdf, p, { targetWidth: 400 });
+            if (gen === loadGen.current) setThumbs((prev) => new Map(prev).set(p, canvas));
+          } catch {
+            // A page that won't render just keeps its placeholder.
+          }
+        }
+      };
+      for (let i = 0; i < THUMB_CONCURRENCY; i++) void renderNext();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load PDF");
+      if (gen === loadGen.current) setError(e instanceof Error ? e.message : "Failed to load PDF");
     } finally {
-      setLoading(false);
+      if (gen === loadGen.current) setLoading(false);
     }
   }, []);
 
@@ -127,7 +151,7 @@ export default function CheckerPage() {
 
   const hasEdits =
     report !== null &&
-    (report.pages.some((pr) => isPageEdited(pr.page, pr.notes?.previewText)) ||
+    (report.pages.some((pr) => isPageEdited(pr.page, pr.notes?.notes)) ||
       deletedMedia.size > 0);
 
   // Block browser tab close / refresh when there are unsaved edits.
@@ -138,18 +162,25 @@ export default function CheckerPage() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasEdits]);
 
+  // The loaded PDF with the pending notes edits and attachment deletions
+  // written into it.
+  async function editedBytes(original: Uint8Array, deck: DeckReport): Promise<Uint8Array> {
+    let bytes = original;
+    for (const pr of deck.pages) {
+      if (!isPageEdited(pr.page, pr.notes?.notes)) continue;
+      bytes = await setSlideNotes(bytes, pr.page, editedNotes.get(pr.page) ?? "");
+    }
+    if (deletedMedia.size > 0) {
+      bytes = await removeAttachments(bytes, [...deletedMedia]);
+    }
+    return bytes;
+  }
+
   async function downloadWithEdits() {
     if (!pdfBytesRef.current || !report) return;
     setDownloading(true);
     try {
-      let bytes = pdfBytesRef.current;
-      for (const pr of report.pages) {
-        if (!isPageEdited(pr.page, pr.notes?.previewText)) continue;
-        bytes = await setSlideNotes(bytes, pr.page, editedNotes.get(pr.page) ?? "");
-      }
-      if (deletedMedia.size > 0) {
-        bytes = await removeAttachments(bytes, [...deletedMedia]);
-      }
+      const bytes = await editedBytes(pdfBytesRef.current, report);
       saveFile(new Blob([bytes.slice()], { type: "application/pdf" }), filename ?? "presentation.pdf");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Download failed");
@@ -159,6 +190,7 @@ export default function CheckerPage() {
   }
 
   const reset = useCallback(() => {
+    loadGen.current++;
     destroyPdf(pdfRef.current);
     pdfRef.current = null;
     pdfBytesRef.current = null;
@@ -176,24 +208,12 @@ export default function CheckerPage() {
     if (!pdfBytesRef.current || !report || !filename) return;
     setPresenting(true);
     try {
-      // Apply pending edits/deletions to get the final bytes.
-      let bytes = pdfBytesRef.current;
-      for (const pr of report.pages) {
-        if (!isPageEdited(pr.page, pr.notes?.previewText)) continue;
-        bytes = await setSlideNotes(bytes, pr.page, editedNotes.get(pr.page) ?? "");
-      }
-      if (deletedMedia.size > 0) {
-        bytes = await removeAttachments(bytes, [...deletedMedia]);
-      }
-
-      const name = filename.replace(/\.pdf$/i, "");
+      const bytes = await editedBytes(pdfBytesRef.current, report);
       // Same as the home screen's import: the deck is stored under an id minted
       // here and never leaves the browser, so this works with no connection.
       // Its join code is created only if the presenter later shares it.
-      const id = newLocalDeckId();
-
-      await idbPut({ id, filename: name, totalSlides: report.pageCount, blob: new Blob([bytes.slice()], { type: "application/pdf" }), createdAt: Date.now() });
-      navigate(`/s/${id}/share`);
+      const id = await createLocalDeck(await ingestPdfBytes(bytes.slice().buffer, filename));
+      navigate(sharePath(id));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to open presentation");
       setPresenting(false);
@@ -346,7 +366,7 @@ export default function CheckerPage() {
               <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
                 {report.pages.map((pr) => {
                   const thumb = thumbs.get(pr.page);
-                  const notesEdited = isPageEdited(pr.page, pr.notes?.previewText);
+                  const notesEdited = isPageEdited(pr.page, pr.notes?.notes);
                   const showNotes = pr.notes !== null || notesEdited;
 
                   return (
@@ -486,10 +506,10 @@ export default function CheckerPage() {
           initialNotesValue={
             editedNotes.has(pageModal.page)
               ? (editedNotes.get(pageModal.page) ?? "")
-              : (activePageReport.notes?.previewText ?? "")
+              : (activePageReport.notes?.notes ?? "")
           }
           onNotesChange={handleNotesChange}
-          isNotesEdited={isPageEdited(pageModal.page, activePageReport.notes?.previewText)}
+          isNotesEdited={isPageEdited(pageModal.page, activePageReport.notes?.notes)}
           deletedMedia={deletedMedia}
           onToggleDeleteMedia={toggleDeleteMedia}
           binaries={report?.binaries ?? new Map()}

@@ -33,6 +33,10 @@ export interface Stroke {
 }
 
 export const REFERENCE_WIDTH = 960;
+// The widths a stroke may have, in the same pixels.
+const MIN_WIDTH = 0.2;
+const MAX_WIDTH = 96;
+const clampWidth = (w: number) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w));
 export const HIGHLIGHTER_OPACITY = 0.35;
 /** A stroke longer than this goes on as a new one, so any stroke fits in an op. */
 export const MAX_STROKE_POINTS = 2000;
@@ -93,19 +97,11 @@ export function fromWire(raw: unknown): Stroke | null {
   if (typeof raw.w !== "number" || !Number.isFinite(raw.w) || raw.w <= 0) return null;
   const points = decodePoints(raw.d);
   if (!points || !points.length) return null;
-  return { id: raw.i, tool: raw.t === "h" ? "highlighter" : "pen", color: raw.c, width: Math.min(raw.w, 96), points };
+  return { id: raw.i, tool: raw.t === "h" ? "highlighter" : "pen", color: raw.c, width: Math.min(raw.w, MAX_WIDTH), points };
 }
 
-/** The live messages' header for a stroke being drawn ("b"). */
-export interface Begin {
-  i: string;
-  s: number;
-  t: "p" | "h";
-  c: string;
-  w: number;
-  d: string;
-}
-
+/** The live messages' header for a stroke being drawn ("b"): a WireStroke
+ *  and the slide it's on (s). */
 export function parseBegin(raw: unknown): (Stroke & { slide: number }) | null {
   if (!isRecord(raw) || typeof raw.s !== "number" || !Number.isInteger(raw.s)) return null;
   const stroke = fromWire(raw);
@@ -149,12 +145,21 @@ const EMPTY: DrawingState = { slides: new Map() };
 // Strokes decoded once: the frame applies pending ops again every time the
 // ordered state moves, and the canvas only draws what's new when the strokes
 // it already has are the same objects.
+// Least recently used first, and capped: a long talk's strokes come and go.
+const MAX_DECODED = 20_000;
 const decoded = new Map<string, { d: string; stroke: Stroke }>();
 function strokeOf(k: WireStroke): Stroke | null {
   const hit = decoded.get(k.i);
-  if (hit && hit.d === k.d) return hit.stroke;
+  decoded.delete(k.i);
+  if (hit && hit.d === k.d) {
+    decoded.set(k.i, hit);
+    return hit.stroke;
+  }
   const stroke = fromWire(k);
-  if (stroke) decoded.set(k.i, { d: k.d, stroke });
+  if (stroke) {
+    decoded.set(k.i, { d: k.d, stroke });
+    if (decoded.size > MAX_DECODED) decoded.delete(decoded.keys().next().value!);
+  }
   return stroke;
 }
 
@@ -225,7 +230,7 @@ function validTransform(m: unknown): Transform | null {
 export function transformStroke(s: Stroke, [k, dx, dy, ox, oy]: Transform): Stroke {
   return {
     ...s,
-    width: Math.min(96, Math.max(0.2, s.width * k)),
+    width: clampWidth(s.width * k),
     points: s.points.map((n, i) => (i % 2 === 0 ? ox + (n - ox) * k + dx : oy + (n - oy) * k + dy)),
   };
 }
@@ -451,7 +456,7 @@ export function parseFile(text: string, totalSlides: number): Map<number, Stroke
       const points = s.points;
       if (!Array.isArray(points) || points.length < 2 || points.length % 2 !== 0) return [];
       if (!points.every((n) => typeof n === "number" && Number.isFinite(n))) return [];
-      const width = Math.min(96, Math.max(0.2, s.size * REFERENCE_WIDTH));
+      const width = clampWidth(s.size * REFERENCE_WIDTH);
       return splitLong({ id: newId(), tool: s.tool, color: s.color, width, points: points.map((n) => Math.min(1, Math.max(0, n))) });
     });
     if (strokes.length) out.set(slide, strokes);

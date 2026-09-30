@@ -172,7 +172,7 @@ presio.settings.onChange(settings => {})
 presio.storage.get(key)                    // presenter: this plugin's state for this session
 presio.storage.set(key, value)             // JSON, 16 KB per plugin; set(key) removes
 presio.storage.all
-presio.storage.onChange(storage => {})     // another surface of this plugin changed it
+presio.storage.onChange(storage => {})     // another surface changed it, or a set() was refused
 
 presio.onButton(id, (id, file) => {})      // a contributed button was pressed; with "accept",
                                            // file is { name, type, bytes: Uint8Array }
@@ -242,9 +242,9 @@ Messaging:
   code is showing"), not one-off events. A retained `null` payload forgets
   the type. `{ retain: "deck" }` is the same but belongs to the deck on
   screen: replacing the deck forgets it everywhere. Split big state over many
-  types (the drawing plugin keeps each slide's strokes in a few): a plugin may
-  keep up to 1024 retained types and 2 MB of them; past that, messages still
-  go out live but aren't kept.
+  types, or keep it in `presio.history` (below) when it is the deck's own
+  edits: a plugin may keep up to 1024 retained types and 2 MB of them; past
+  that, messages still go out live but aren't kept.
 - `{ volatile: true }` lets a message be dropped instead of queued when a
   connection is backed up — for a stream where only the latest value counts
   (a laser position).
@@ -351,7 +351,7 @@ samples stamped with `presio.clock.now()` that viewers follow, posters as
 `presio.layers`, keybindings, and an `onExport` handler. Drawing
 ([manifest](BASE/plugins/drawing/presio-plugin.json)) is the pen, highlighter
 and laser: a `slide` surface that takes input while a tool is active and only
-its palette otherwise, strokes streamed as they're drawn and kept as
-per-slide `retain: "deck"` chunks, a volatile laser, previews as
+its palette otherwise, strokes streamed as they're drawn and kept in the
+deck's edit history (`presio.history`, with undo and redo), a volatile laser, previews as
 `presio.layers`, a header button and keybindings, and an `onExport` handler
 that bakes the strokes into the PDF as vectors.

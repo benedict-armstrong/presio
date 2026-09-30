@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useMediaQuery } from "./useMediaQuery";
 
 // True when the app is running from an installed PWA rather than a browser tab.
 // The manifest sets display: standalone, so installed launches report
@@ -16,15 +16,6 @@ export function isStandalone(): boolean {
 }
 
 export function useIsStandalone(): boolean {
-  const [standalone, setStandalone] = useState(isStandalone);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(display-mode: standalone)");
-    const update = () => setStandalone(isStandalone());
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
-
-  return standalone;
+  const displayStandalone = useMediaQuery("(display-mode: standalone)");
+  return displayStandalone || isStandalone();
 }

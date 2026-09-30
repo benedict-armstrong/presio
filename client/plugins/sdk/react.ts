@@ -23,7 +23,8 @@ export function usePresio(): Presio {
 
 /**
  * One presio.storage value, and a setter that re-renders straight away:
- * storage.onChange only reports other surfaces' changes, not this one's own.
+ * storage.onChange only reports other surfaces' changes, not this one's own
+ * (except a refused write, which it corrects).
  */
 export function useStorage<T>(key: string): [T | undefined, (value: T | undefined) => void] {
   const [value, setValue] = useState(() => presio.storage.get(key) as T | undefined);

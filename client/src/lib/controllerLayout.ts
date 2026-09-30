@@ -220,8 +220,7 @@ function prune(
   if (node == null) return null;
 
   if (isSplitNode(node)) {
-    // Keep each surviving child's share by pruning both arrays in step;
-    // normalizeMosaicTree collapses a split left with a single child.
+    // Keep each surviving child's share by pruning both arrays in step.
     const kept: MosaicNode<string>[] = [];
     const shares: number[] = [];
     node.children.forEach((child, i) => {

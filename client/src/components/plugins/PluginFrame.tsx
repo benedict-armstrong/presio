@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLatestRef } from "@/hooks/useLatestRef";
-import type { FrameLink, Interactive, PluginHost, SlidePage, SlideView } from "@/lib/plugins/host";
+import type { PluginHost } from "@/lib/plugins/host";
+import type { FrameLink, Interactive, SlidePage, SlideView } from "@/lib/plugins/protocol";
 import type { LoadedPlugin, PluginSurface } from "@/lib/plugins/manifest";
 import { cn } from "@/lib/utils";
 

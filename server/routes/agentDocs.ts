@@ -48,6 +48,12 @@ function prefersMarkdown(req: express.Request): boolean {
 // HTML metadata checks). The full machine-readable index is sitemap.md.
 const HTML_PAGE_PATHS = ["/", "/check"];
 
+/** HTML pages with a markdown mirror, and the content file it serves. */
+export const MARKDOWN_MIRRORS: Record<string, string> = {
+  "/": "index.md",
+  "/check": "check.md",
+};
+
 const SITEMAP_PATHS = [
   "/",
   "/check",
@@ -68,15 +74,12 @@ const SITEMAP_PATHS = [
 ];
 
 export function registerAgentDocRoutes(app: express.Express) {
-  app.get("/llms.txt", (req, res) => {
-    const type = prefersMarkdown(req) ? "text/markdown" : "text/plain";
-    sendText(res, type, withBase(readContent("llms.txt"), canonicalBaseUrl(req)));
-  });
-
-  app.get("/llms-full.txt", (req, res) => {
-    const type = prefersMarkdown(req) ? "text/markdown" : "text/plain";
-    sendText(res, type, withBase(readContent("llms-full.txt"), canonicalBaseUrl(req)));
-  });
+  for (const name of ["llms.txt", "llms-full.txt"] as const) {
+    app.get(`/${name}`, (req, res) => {
+      const type = prefersMarkdown(req) ? "text/markdown" : "text/plain";
+      sendText(res, type, withBase(readContent(name), canonicalBaseUrl(req)));
+    });
+  }
 
   for (const name of ["AGENTS.md", "api.md", "index.md", "check.md", "glossary.md", "plugins.md"] as const) {
     app.get(`/${name}`, (req, res) => {
@@ -89,7 +92,8 @@ export function registerAgentDocRoutes(app: express.Express) {
   // root is "/.md" — alias it to index.md so they don't get the SPA shell.
   app.get("/.md", (req, res) => {
     const base = canonicalBaseUrl(req);
-    sendText(res, "text/markdown", withBase(readContent("index.md"), base), `${base}/index.md`);
+    const file = MARKDOWN_MIRRORS["/"];
+    sendText(res, "text/markdown", withBase(readContent(file), base), `${base}/${file}`);
   });
 
   app.get("/openapi.json", (req, res) => {
@@ -152,10 +156,7 @@ export function registerAgentDocRoutes(app: express.Express) {
   });
 
   // Content negotiation: Prefer markdown mirrors when Accept says so.
-  for (const [route, file] of [
-    ["/", "index.md"],
-    ["/check", "check.md"],
-  ] as const) {
+  for (const [route, file] of Object.entries(MARKDOWN_MIRRORS)) {
     app.get(route, (req, res, next) => {
       if (!prefersMarkdown(req)) return next();
       const base = canonicalBaseUrl(req);

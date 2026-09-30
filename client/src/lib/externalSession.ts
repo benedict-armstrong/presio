@@ -1,5 +1,5 @@
 import { openPdf, destroyPdf } from "./pdf";
-import { setSessionAuth } from "@/lib/utils";
+import { setSessionAuth } from "@/lib/sessionAuth";
 import "@/lib/pdf"; // ensure the pdf.js worker is configured
 
 const LOAD_ERROR =

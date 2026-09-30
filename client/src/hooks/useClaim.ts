@@ -3,11 +3,11 @@ import { idbGet, idbDelete } from "@/lib/localStore";
 import { isLocalDeckId } from "@/lib/localId";
 import { supabase } from "@/lib/supabaseClient";
 import { authEnabled } from "@/lib/authMode";
-import { useAuth } from "@/lib/useAuth";
-import { getSessionAuth, setSessionAuth } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
+import { getSessionAuth, setSessionAuth } from "@/lib/sessionAuth";
 import { lsRemove, sessionKey, rekeySessionStorage } from "@/lib/storage";
 import { rekeyHistories } from "@/lib/plugins/historyDb";
-import { MAX_PDF_BYTES, MAX_PDF_MB } from "@/lib/limits";
+import { MAX_PDF_BYTES, MAX_PDF_MB } from "@shared/limits";
 
 // Shares a deck that until now lived only in this browser: the PDF is uploaded
 // and the session becomes a normal synced one. Two shapes of local deck exist,

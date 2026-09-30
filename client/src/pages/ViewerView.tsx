@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { RotateCw, EllipsisVertical } from "lucide-react";
-import { getSessionAuth, setSessionAuth } from "@/lib/utils";
+import { getSessionAuth, setSessionAuth } from "@/lib/sessionAuth";
 import { appOrigin, onViewerOrigin, TAKEOVER_PARAM } from "@/lib/origins";
+import { isEditableTarget } from "@/lib/keymap";
 import { Button } from "@/components/ui/button";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import { SessionQRCode } from "@/components/SessionQRCode";
@@ -14,6 +15,7 @@ import { ViewerHint } from "@/components/ViewerHint";
 import { ViewerPluginLayer } from "@/components/plugins/ViewerPluginLayer";
 import { SlideLayers } from "@/components/plugins/SlideLayers";
 import type { PluginHostState } from "@/lib/plugins/usePluginHost";
+import { sessionPath } from "@/lib/joinUrl";
 
 export function ViewerView({
   id,
@@ -82,6 +84,8 @@ export function ViewerView({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // The passphrase field lives on this page too.
+      if (isEditableTarget(e.target)) return;
       if (e.key === "f" || e.key === "F") {
         if (document.fullscreenElement) document.exitFullscreen();
         else document.documentElement.requestFullscreen();
@@ -115,7 +119,7 @@ export function ViewerView({
         controllerToken: data.controllerToken,
         passphrase: data.passphrase,
       });
-      navigate(`/s/${id}?role=controller`, { replace: true });
+      navigate(sessionPath(id, "controller"), { replace: true });
     } catch (e: unknown) {
       setAuthError(e instanceof Error ? e.message : "Authentication failed");
     } finally {
@@ -207,13 +211,13 @@ export function ViewerView({
                 // origin (lib/origins.ts): ask for the passphrase on the app
                 // origin instead.
                 if (onViewerOrigin) {
-                  window.location.assign(`${appOrigin}/s/${id}?role=viewer&${TAKEOVER_PARAM}=1`);
+                  window.location.assign(`${appOrigin}${sessionPath(id, "viewer")}&${TAKEOVER_PARAM}=1`);
                   return;
                 }
                 // Local sessions are same-device; no passphrase gate needed.
                 const { controllerToken } = getSessionAuth(id);
                 if (local || controllerToken) {
-                  navigate(`/s/${id}?role=controller`, { replace: true });
+                  navigate(sessionPath(id, "controller"), { replace: true });
                 } else {
                   setMenuOpen(false);
                   setAuthOpen(true);
