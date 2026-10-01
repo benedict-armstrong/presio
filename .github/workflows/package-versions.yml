@@ -91,7 +91,7 @@ jobs:
 
       - name: Open the bump PR
         if: steps.check.outputs.behind == 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           # Falls back to the default token, but then the PR gets no CI run:
           # GITHUB_TOKEN pushes do not trigger other workflows (see the same
