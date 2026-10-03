@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.1.0](https://github.com/benedict-armstrong/presio/compare/v2.0.0...v2.1.0) (2026-10-03)
+
+
+### Features
+
+* **deploy:** retire the Let's Encrypt resolver and monitor origin certs ([#122](https://github.com/benedict-armstrong/presio/issues/122)) ([fe8d86a](https://github.com/benedict-armstrong/presio/commit/fe8d86a5115da1597942d5c1e364a609ddc11d75)), closes [#64](https://github.com/benedict-armstrong/presio/issues/64)
+* **drawing:** Apple Pencil support and PR 125's tools on the plugin system ([#135](https://github.com/benedict-armstrong/presio/issues/135)) ([8656053](https://github.com/benedict-armstrong/presio/commit/865605309e7a9ca12945c0b87be3473b2b63bec8))
+* plugins ([#130](https://github.com/benedict-armstrong/presio/issues/130)) ([85c629b](https://github.com/benedict-armstrong/presio/commit/85c629b0963db61e4f19437715423cc41e1ed965))
+* **plugins:** presio.history, a per-deck edit history, with the drawing plugin on it ([#131](https://github.com/benedict-armstrong/presio/issues/131)) ([3fc1551](https://github.com/benedict-armstrong/presio/commit/3fc1551b7e1e943282a47724fc98992ee781fab6))
+
+
+### Bug Fixes
+
+* **client:** polyfill Uint8Array.toHex inside the pdf.js worker ([#146](https://github.com/benedict-armstrong/presio/issues/146)) ([51e3fb9](https://github.com/benedict-armstrong/presio/commit/51e3fb986eb1043f46739a0cdd801c20a2f280ad)), closes [#144](https://github.com/benedict-armstrong/presio/issues/144)
+* **share:** disable Sync for PDFs over the upload limit ([#134](https://github.com/benedict-armstrong/presio/issues/134)) ([4f786c5](https://github.com/benedict-armstrong/presio/commit/4f786c51dc7763d444883522c46f6a245ed58246))
+
 ## [2.0.0](https://github.com/benedict-armstrong/presio/compare/v1.1.0...v2.0.0) (2026-09-21)
 
 
