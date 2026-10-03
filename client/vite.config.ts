@@ -76,6 +76,12 @@ function devOrigins(): Plugin {
 
 export default defineConfig({
   plugins: [react(), builtinPlugins(), devOrigins(), precacheServiceWorker()],
+  build: {
+    // Keep in step with "browserslist" in package.json (read by
+    // eslint-plugin-compat and scripts/check-compat.mjs). This lowers syntax
+    // only; missing APIs are polyfilled in src/polyfills.ts.
+    target: ["chrome109", "edge109", "firefox115", "safari16.4"],
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
