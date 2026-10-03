@@ -1,5 +1,6 @@
 import type { Deck } from "@/lib/deck";
-import { Menu, X, QrCode, RefreshCw, Settings, ExternalLink, Share2, KeyRound, MonitorPlay, Power } from "lucide-react";
+import type { PluginHost } from "@/lib/plugins/host";
+import { Menu, X, RefreshCw, Settings, ExternalLink, Share2, KeyRound, MonitorPlay, Power } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { DownloadButton } from "@/components/DownloadButton";
@@ -16,11 +17,9 @@ export function ControllerMenu({
   onOpen,
   onClose,
   deck,
+  pluginHost,
   canSharePassphrase,
-  canShowCode,
-  showingCode,
   onShare,
-  onToggleCode,
   onShowPassphrase,
   onSwitchToViewer,
   onReplaceClick,
@@ -32,14 +31,12 @@ export function ControllerMenu({
   onOpen: () => void;
   onClose: () => void;
   deck: Deck;
+  /** Plugins that transform the downloaded PDF. */
+  pluginHost?: PluginHost;
   /** Whether shared control can be handed out (synced sessions only — a local
    *  deck is same-device, so there is nobody remote to grant control to). */
   canSharePassphrase: boolean;
-  /** Whether the "show join code on viewers" toggle applies (synced sessions only). */
-  canShowCode: boolean;
-  showingCode: boolean;
   onShare: () => void;
-  onToggleCode: () => void;
   onShowPassphrase: () => void;
   /** Take over presenting in this tab (phone: there is no second window). */
   onSwitchToViewer?: () => void;
@@ -79,12 +76,6 @@ export function ControllerMenu({
                 <Share2 size={16} className="mr-2" />
                 Share
               </Button>
-              {canShowCode && (
-                <Button variant="ghost" className="justify-start" onClick={act(onToggleCode)}>
-                  <QrCode size={16} className="mr-2" />
-                  {showingCode ? "Hide Join Code" : "Show Join Code"}
-                </Button>
-              )}
               {canSharePassphrase && (
                 <Button variant="ghost" className="justify-start" onClick={act(onShowPassphrase)}>
                   <KeyRound size={16} className="mr-2" />
@@ -107,7 +98,7 @@ export function ControllerMenu({
                 <RefreshCw size={16} className="mr-2" />
                 Replace PDF…
               </Button>
-              <DownloadButton deck={deck} size="default" block />
+              <DownloadButton deck={deck} plugins={pluginHost} size="default" block />
               {onSettings && (
                 <Button variant="ghost" className="justify-start" onClick={act(onSettings)}>
                   <Settings size={16} className="mr-2" />

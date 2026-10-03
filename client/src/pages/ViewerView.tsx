@@ -2,19 +2,18 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { RotateCw, EllipsisVertical } from "lucide-react";
 import { getSessionAuth, setSessionAuth } from "@/lib/utils";
+import { appOrigin, onViewerOrigin, TAKEOVER_PARAM } from "@/lib/origins";
 import { Button } from "@/components/ui/button";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
-import { QRCodeSVG } from "qrcode.react";
 import { SessionQRCode } from "@/components/SessionQRCode";
-import { useJoinUrl } from "@/lib/joinUrl";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
-import { MediaOverlay, type MediaState, type MediaTimeSync } from "@/components/MediaOverlay";
-import { AnnotationOverlay } from "@/components/AnnotationOverlay";
 import { LinkOverlay } from "@/components/LinkOverlay";
-import type { LaserPoint, Stroke } from "@/lib/annotations";
 import type { Deck } from "@/lib/deck";
 import { DownloadButton } from "@/components/DownloadButton";
 import { ViewerHint } from "@/components/ViewerHint";
+import { ViewerPluginLayer } from "@/components/plugins/ViewerPluginLayer";
+import { SlideLayers } from "@/components/plugins/SlideLayers";
+import type { PluginHostState } from "@/lib/plugins/usePluginHost";
 
 export function ViewerView({
   id,
@@ -22,44 +21,30 @@ export function ViewerView({
   deck,
   canvasRef,
   blanked,
-  mediaState,
-  mediaTime,
-  muted,
   currentSlide,
-  showCode,
   outOfSync,
   onViewerGoTo,
   onResync,
-  laser,
-  strokes,
-  draft,
+  plugins,
 }: {
   id: string;
   local: boolean;
   deck: Deck;
   canvasRef: React.RefObject<HTMLDivElement | null>;
   blanked: boolean;
-  mediaState: MediaState;
-  mediaTime: MediaTimeSync | null;
-  muted: boolean;
   currentSlide: number;
-  showCode: boolean;
   outOfSync: boolean;
   onViewerGoTo: (slide: number) => void;
   onResync: () => void;
-  laser: LaserPoint | null;
-  strokes: readonly Stroke[];
-  draft: Stroke | null;
+  plugins: PluginHostState;
 }) {
   const { totalSlides } = deck;
-  const mediaPlacements = deck.mediaBySlide.get(currentSlide) ?? [];
-  // The big "scan to join" overlay is often on a projector driven from the
-  // presenter's own machine over localhost, so it needs the LAN address too.
-  const scanToJoin = useJoinUrl(id, "viewer");
   const navigate = useNavigate();
   const [cursorVisible, setCursorVisible] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [authOpen, setAuthOpen] = useState(false);
+  // Opened straight away when a viewer on the viewer origin handed over here
+  // to take control (see the menu below).
+  const [authOpen, setAuthOpen] = useState(() => new URLSearchParams(window.location.search).has(TAKEOVER_PARAM));
   const [passphrase, setPassphrase] = useState("");
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
@@ -147,17 +132,9 @@ export function ViewerView({
       style={{ cursor: cursorVisible ? "default" : "none" }}
     >
       <div ref={canvasRef} data-testid="viewer-slide" data-slide={currentSlide} className="w-full h-full relative" />
-      <MediaOverlay
-        canvasContainerRef={canvasRef}
-        placements={mediaPlacements}
-        mediaState={mediaState}
-        autostart
-        timeSync={mediaTime}
-        muted={muted}
-        role="viewer"
-      />
-
-      <AnnotationOverlay containerRef={canvasRef} remoteLaser={laser} strokes={strokes} remoteDraft={draft} />
+      {/* Plugins' live layers on the slide (media, drawings, …): on the page,
+          over its links (which they let through), under the blank cover. */}
+      <SlideLayers plugins={plugins} slide={currentSlide} mode="live" containerRef={canvasRef} />
 
       {/* Internal links move this viewer only, and only when it is allowed to
           navigate independently — a local viewer mirrors the controller, so it
@@ -183,26 +160,7 @@ export function ViewerView({
         </div>
       )}
 
-      {showCode && !local && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6 bg-black/95">
-          <p className="text-white/70 text-lg select-none">
-            {scanToJoin.shareable ? "Scan to join this presentation" : "Join this presentation"}
-          </p>
-          {/* Projected on a big screen, so a QR pointing at loopback would send
-              every phone in the room back to itself. Show the code instead. */}
-          {scanToJoin.shareable && (
-            <div className="rounded-lg bg-white p-4">
-              <QRCodeSVG value={scanToJoin.url} size={260} />
-            </div>
-          )}
-          <div className="text-center space-y-1">
-            <p className="text-white/50 text-sm select-none">Session code</p>
-            <p className="text-white text-4xl font-bold tracking-widest font-mono select-all">
-              {id}
-            </p>
-          </div>
-        </div>
-      )}
+      <ViewerPluginLayer host={plugins.host} plugins={plugins.plugins} />
 
       <div className="absolute top-4 left-4 flex items-center gap-2">
         {outOfSync ? (
@@ -245,6 +203,13 @@ export function ViewerView({
               className="w-full"
               variant="outline"
               onClick={() => {
+                // The controller token must never be stored on the viewer
+                // origin (lib/origins.ts): ask for the passphrase on the app
+                // origin instead.
+                if (onViewerOrigin) {
+                  window.location.assign(`${appOrigin}/s/${id}?role=viewer&${TAKEOVER_PARAM}=1`);
+                  return;
+                }
                 // Local sessions are same-device; no passphrase gate needed.
                 const { controllerToken } = getSessionAuth(id);
                 if (local || controllerToken) {
@@ -257,7 +222,7 @@ export function ViewerView({
             >
               Switch to Controller
             </Button>
-            <DownloadButton deck={deck} variant="outline" size="default" block />
+            <DownloadButton deck={deck} plugins={plugins.host} variant="outline" size="default" block />
             <Button
               className="w-full"
               variant="outline"

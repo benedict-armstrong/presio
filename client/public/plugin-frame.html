@@ -1,0 +1,524 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- The page every plugin runs in. Plugins are trusted code the presenter
+     installed, so this frame is for a stable API and containment, not
+     security: the server replaces the app's CSP with a permissive one here
+     (PLUGIN_FRAME_CSP in server/security.ts). -->
+<script>
+// The host posts one "presio:boot" message carrying a MessagePort, the
+// plugin's HTML and the starting context. This installs `window.presio` on
+// top of that port and then replaces this document with the plugin's.
+// document.open() keeps the global object (so `presio` survives) but drops
+// window event listeners, which is why everything after boot talks over the
+// port rather than window.onmessage.
+(function () {
+  window.addEventListener("message", function onBoot(e) {
+    if (e.source !== window.parent) return;
+    var d = e.data;
+    if (!d || d.type !== "presio:boot" || !e.ports || !e.ports[0]) return;
+    window.removeEventListener("message", onBoot);
+    boot(e.ports[0], d);
+  });
+
+  function boot(port, d) {
+    var ctx = d.context;
+    var slideListeners = [];
+    var messageListeners = [];
+    var contextListeners = [];
+    var settingsListeners = [];
+    var storageListeners = [];
+    var deckListeners = [];
+    var viewListeners = [];
+    var pageListeners = [];
+    var hoverListeners = [];
+    var buttonListeners = {};
+    var commandListeners = {};
+    var menuListeners = {};
+    var exporter = null;
+    // presio.history, once opened: this frame's copy of the plugin's state.
+    var history = null;
+    // Messages that arrive before the plugin subscribes (retained state is
+    // replayed right after boot) wait here instead of being dropped.
+    var pending = [];
+    var requests = {};
+    var nextRequest = 1;
+
+    function post(m) { port.postMessage(m); }
+    function withBase(html, baseUrl) {
+      if (!baseUrl || /<base[\s>]/i.test(html)) return html;
+      var tag = '<base href="' + baseUrl.replace(/"/g, "&quot;") + '">';
+      var head = /<head[^>]*>/i.exec(html);
+      return head ? html.replace(head[0], head[0] + tag) : tag + html;
+    }
+    function request(kind, args) {
+      var id = nextRequest++;
+      return new Promise(function (resolve, reject) {
+        requests[id] = { resolve: resolve, reject: reject };
+        post({ type: "request", id: id, kind: kind, args: args || null });
+      });
+    }
+    // Call each listener with the arguments after `list`; one that throws
+    // doesn't stop the rest.
+    function each(list) {
+      var args = Array.prototype.slice.call(arguments, 1);
+      list.slice().forEach(function (cb) {
+        try { cb.apply(null, args); } catch (err) { console.error(err); }
+      });
+    }
+    function subscribe(list, cb) {
+      list.push(cb);
+      return function () {
+        var i = list.indexOf(cb);
+        if (i >= 0) list.splice(i, 1);
+      };
+    }
+    // Listeners by id (a button, a command): map[id] is that id's list.
+    function subscribeTo(map, id, cb) {
+      map[id] = map[id] || [];
+      return subscribe(map[id], cb);
+    }
+
+    port.onmessage = function (e) {
+      var m = e.data;
+      if (m.type === "slide") {
+        ctx.slide = m.slide;
+        each(slideListeners, ctx.slide);
+      } else if (m.type === "context") {
+        ctx = m.context;
+        each(contextListeners, api);
+      } else if (m.type === "settings") {
+        ctx.settings = m.settings;
+        each(settingsListeners, ctx.settings);
+      } else if (m.type === "storage") {
+        ctx.storage = m.storage;
+        each(storageListeners, Object.assign({}, ctx.storage));
+      } else if (m.type === "shortcuts") {
+        ctx.shortcuts = m.shortcuts;
+        each(contextListeners, api);
+      } else if (m.type === "clock") {
+        ctx.clockOffset = m.offset;
+      } else if (m.type === "deck") {
+        each(deckListeners, m.kind || "replace");
+      } else if (m.type === "view") {
+        ctx.view = m.view;
+        each(viewListeners, ctx.view);
+      } else if (m.type === "page") {
+        ctx.page = m.page;
+        each(pageListeners, ctx.page);
+      } else if (m.type === "hover") {
+        ctx.hovered = m.hovered;
+        each(hoverListeners, ctx.hovered);
+      } else if (m.type === "button") {
+        each(buttonListeners[m.id] || [], m.id, m.file);
+      } else if (m.type === "menu") {
+        each(menuListeners[m.id] || [], m.item, m.id);
+      } else if (m.type === "command") {
+        each(commandListeners[m.id] || [], m.id);
+      } else if (m.type === "export") {
+        runExport(m);
+      } else if (m.type === "history") {
+        if (history) history.receive(m);
+      } else if (m.type === "message") {
+        if (messageListeners.length) each(messageListeners, m.message);
+        else pending.push(m.message);
+      } else if (m.type === "reply") {
+        var r = requests[m.id];
+        delete requests[m.id];
+        if (!r) return;
+        if (m.error) r.reject(new Error(m.error));
+        else r.resolve(m.result);
+      }
+    };
+
+    // The presenter is downloading the deck: pass it through this plugin's
+    // export handler, if it has one.
+    function runExport(m) {
+      var handler = exporter;
+      Promise.resolve()
+        .then(function () { return handler ? handler(m.bytes, { mode: m.mode }) : m.bytes; })
+        .then(
+          function (bytes) {
+            if (!(bytes instanceof Uint8Array)) throw new Error("onExport handlers resolve to a Uint8Array");
+            post({ type: "exported", id: m.id, bytes: bytes });
+          },
+          function (err) {
+            console.error(err);
+            post({ type: "exported", id: m.id, error: String((err && err.message) || err) });
+          }
+        );
+    }
+
+    // presio.history: the plugin's ordered edits, the same on every device.
+    // State is init() (or the snapshot the log starts from, restored), then
+    // every ordered entry applied in turn — "confirmed" — and, on top, this
+    // device's ops still waiting for their place — "pending" — so a commit
+    // shows at once.
+    function openHistory(spec) {
+      if (!spec || typeof spec.init !== "function" || typeof spec.apply !== "function") {
+        throw new Error("presio.history.open() needs init() and apply(state, op, entry)");
+      }
+      var confirmed = spec.init();
+      var confirmedSeq = 0;
+      var entries = [];
+      var pending = [];
+      // Committed here but not yet in anything the host sent back: kept on
+      // top until it is, so the op never blinks out.
+      var local = [];
+      var device = null;
+      var ready = false;
+      var view = confirmed;
+      var changeListeners = [];
+      var errorListeners = [];
+      var readyWaiters = [];
+      var counter = 0;
+
+      function ops() {
+        var ids = {};
+        pending.forEach(function (p) { ids[p.id] = true; });
+        return pending.concat(local.filter(function (p) { return !ids[p.id]; }));
+      }
+      function recompute(change) {
+        view = ops().reduce(function (s, p) {
+          return spec.apply(s, p.op, { id: p.id, by: p.by, pending: true });
+        }, confirmed);
+        each(changeListeners, view, change);
+      }
+      function settle(ids) {
+        local = local.filter(function (p) { return !ids[p.id]; });
+      }
+      function applyEntry(e) {
+        confirmed = spec.apply(confirmed, e.op, { id: e.id, by: e.by, at: e.at, seq: e.seq, pending: false });
+        confirmedSeq = e.seq;
+        entries.push(e);
+      }
+
+      var h = {
+        /** The state: ordered entries, then this device's pending ops. */
+        get state() { return view; },
+        /** Only the ordered entries' state (what every device agrees on). */
+        get confirmed() { return confirmed; },
+        /** false until the history has loaded (state is init() until then). */
+        get ready() { return ready; },
+        whenReady: function () {
+          return ready ? Promise.resolve(h) : new Promise(function (resolve) { readyWaiters.push(resolve); });
+        },
+        /** This browser's id: entries' `by`. */
+        get device() { return device; },
+        /**
+         * Presenter: add an op. Shown here at once (pending), then ordered —
+         * by the server for a shared deck — and applied on every device.
+         * JSON, at most 16 KB. Returns its id.
+         */
+        commit: function (op) {
+          var id = device ? device.slice(0, 8) : "op";
+          id += "-" + Date.now().toString(36) + "-" + (counter++).toString(36) + Math.random().toString(36).slice(2, 6);
+          local.push({ id: id, by: device, op: op });
+          post({ type: "history", kind: "commit", id: id, op: op });
+          recompute({ kind: "pending" });
+          return id;
+        },
+        /**
+         * This device's ops, newest first — ordered ones and pending ones —
+         * for undo: [{ id, op, seq (null while pending) }].
+         */
+        mine: function () {
+          var out = [];
+          entries.forEach(function (e) { if (e.by === device) out.push({ id: e.id, op: e.op, seq: e.seq }); });
+          ops().forEach(function (p) { out.push({ id: p.id, op: p.op, seq: null }); });
+          return out.reverse();
+        },
+        /** cb(state, { kind: "state" | "entry" | "pending", entry? }) */
+        onChange: function (cb) { return subscribe(changeListeners, cb); },
+        /** cb(id, message): an op was refused (it's dropped from pending). */
+        onError: function (cb) { return subscribe(errorListeners, cb); },
+      };
+      // What the host tells this frame about the history.
+      function receive(m) {
+        if (m.kind === "state") {
+          device = m.device;
+          confirmed = spec.init();
+          if (m.base.snapshot && m.snapshot !== null) confirmed = spec.restore ? spec.restore(m.snapshot) : m.snapshot;
+          confirmedSeq = m.base.seq;
+          entries = [];
+          m.entries.forEach(applyEntry);
+          pending = m.pending;
+          var ids = {};
+          pending.forEach(function (p) { ids[p.id] = true; });
+          m.entries.forEach(function (e) { ids[e.id] = true; });
+          settle(ids);
+          var wasReady = ready;
+          ready = true;
+          recompute({ kind: "state" });
+          if (!wasReady) {
+            var waiters = readyWaiters;
+            readyWaiters = [];
+            waiters.forEach(function (resolve) { resolve(h); });
+          }
+        } else if (m.kind === "entry") {
+          if (m.entry.seq !== confirmedSeq + 1) return;
+          applyEntry(m.entry);
+          pending = m.pending;
+          var done = {};
+          done[m.entry.id] = true;
+          pending.forEach(function (p) { done[p.id] = true; });
+          settle(done);
+          recompute({ kind: "entry", entry: m.entry });
+        } else if (m.kind === "pending") {
+          pending = m.pending;
+          var seen = {};
+          pending.forEach(function (p) { seen[p.id] = true; });
+          settle(seen);
+          recompute({ kind: "pending" });
+        } else if (m.kind === "error") {
+          local = local.filter(function (p) { return p.id !== m.id; });
+          each(errorListeners, m.id, m.error);
+          recompute({ kind: "pending" });
+        } else if (m.kind === "snapshot") {
+          var data = null;
+          try { data = spec.snapshot ? spec.snapshot(confirmed) : null; } catch (err) { console.error(err); }
+          post({ type: "history", kind: "snapshot", id: m.id, seq: confirmedSeq, data: data === null ? undefined : data });
+        }
+      }
+      history = { handle: h, receive: receive };
+      post({ type: "history", kind: "open", snapshots: typeof spec.snapshot === "function" });
+      return h;
+    }
+
+    var api = {
+      get pluginId() { return ctx.pluginId; },
+      /** The plugin's own folder (where presio-plugin.json is), absolute. */
+      get baseUrl() { return ctx.baseUrl; },
+      /** "background" (hidden, presenter's device), "tile" (presenter's
+       *  dashboard card), "viewer" (full screen on every viewer) or "slide"
+       *  (over the slide itself, on the presenter's current slide and every
+       *  viewer — sized to the page, so fractions of it are page positions,
+       *  or to the slide area around it with "slideSurface": "area"). */
+      get surface() { return ctx.surface; },
+      /** "presenter" or "audience": who is holding this device. */
+      get role() { return ctx.role; },
+      /** "light" or "dark": the app theme, for surfaces drawn inside its chrome. */
+      get theme() { return ctx.theme; },
+      /** { id, local, joinUrl } — joinUrl is null when the deck isn't shared. */
+      get session() { return ctx.session; },
+      slide: {
+        get current() { return ctx.slide.current; },
+        get total() { return ctx.slide.total; },
+        onChange: function (cb) { return subscribe(slideListeners, cb); },
+      },
+      /** Called with the whole API whenever session or role info changes, or
+       *  the presenter's shortcuts do. */
+      onContextChange: function (cb) { return subscribe(contextListeners, cb); },
+      /** The key the presenter has for one of this plugin's keybindings'
+       *  commands ("E", "⌘Z"), or null when it has none. */
+      shortcut: function (command) { return (ctx.shortcuts && ctx.shortcuts[command]) || null; },
+      /**
+       * Message this plugin's other instances. From the presenter it reaches
+       * every device; from the audience, only the presenter. `retain: true`
+       * (presenter only) keeps the latest message of this type for devices
+       * that join later, and across a reload of the presenter's page — use it
+       * for state, not events; a retained null payload forgets the type.
+       * `retain: "deck"` is the same, but only for the deck on screen:
+       * replacing the deck forgets it everywhere.
+       * `volatile: true` may be dropped rather than queued when the connection
+       * is busy or down — for a stream where only the latest value matters.
+       */
+      send: function (type, payload, opts) {
+        post({
+          type: "send",
+          msgType: type,
+          payload: payload === undefined ? null : payload,
+          retain: opts && opts.retain === "deck" ? "deck" : !!(opts && opts.retain),
+          volatile: !!(opts && opts.volatile),
+        });
+      },
+      /** cb({ type, payload, from: "presenter" | "audience", sender? }) */
+      onMessage: function (cb) {
+        var off = subscribe(messageListeners, cb);
+        var queued = pending;
+        pending = [];
+        queued.forEach(function (m) { each([cb], m); });
+        return off;
+      },
+      /**
+       * The plugin's settings (declared in contributes.settings), as the
+       * presenter set them — viewers see the presenter's values.
+       */
+      settings: {
+        get: function (name) { return ctx.settings[name]; },
+        get all() { return Object.assign({}, ctx.settings); },
+        /** Presenter: change one of this plugin's settings, as the presenter
+         *  could in Settings. Resolves once it's stored. */
+        set: function (name, value) { return request("setSetting", { name: name, value: value }); },
+        onChange: function (cb) { return subscribe(settingsListeners, cb); },
+      },
+      /**
+       * Presenter only: small JSON values kept on this device for this
+       * session. They survive a reload and are shared with this plugin's
+       * other surfaces here; they never leave the device. `set(key)` with no
+       * value removes one.
+       */
+      storage: {
+        get: function (key) { return ctx.storage[key]; },
+        get all() { return Object.assign({}, ctx.storage); },
+        set: function (key, value) {
+          if (value === undefined) delete ctx.storage[key];
+          else ctx.storage[key] = value;
+          post({ type: "storage", key: key, value: value });
+        },
+        /** Another surface of this plugin changed a value. */
+        onChange: function (cb) { return subscribe(storageListeners, cb); },
+      },
+      /** A contributed button (contributes.buttons) was pressed. Delivered to
+       *  the background surface, or the tile when there is none. cb(id, file):
+       *  a button with "accept" arrives with the file the presenter picked,
+       *  { name, type, bytes: Uint8Array }. */
+      onButton: function (id, cb) { return subscribeTo(buttonListeners, id, cb); },
+      /** An item was picked from a button's menu (presio.ui.setButton's
+       *  `menu`). Delivered like button presses. cb(itemId, buttonId). */
+      onMenu: function (id, cb) { return subscribeTo(menuListeners, id, cb); },
+      /** A contributed keybinding (contributes.keybindings) was pressed, by
+       *  its command id. Delivered like buttons: to the background surface,
+       *  or the tile when there is none. */
+      onCommand: function (id, cb) { return subscribeTo(commandListeners, id, cb); },
+      deck: {
+        /** [{ filename, bytes: Uint8Array }] — needs the "deck" permission. */
+        attachments: function () { return request("attachments"); },
+        /** The PDF itself, as a Uint8Array — needs the "deck" permission. */
+        bytes: function () { return request("deckBytes"); },
+        /** Each page's size in PDF points, [{ width, height }] in page order,
+         *  for turning point positions into page fractions — needs "deck". */
+        pages: function () { return request("pages"); },
+        /** Presenter: replace the deck with an edited PDF (same pages), saved
+         *  wherever the deck lives — needs the "editDeck" permission. */
+        save: function (bytes) { return request("saveDeck", { bytes: bytes }); },
+        /** The deck was swapped. cb(kind): "edit" when the same pages were
+         *  edited in place (notes saved into it), "replace" when it's a
+         *  different document (replaced, recompiled, republished). */
+        onChange: function (cb) { return subscribe(deckListeners, cb); },
+        /**
+         * Transform the PDF this device downloads (bake in what this plugin
+         * shows live). handler(bytes, { mode }) resolves to the new bytes; one
+         * handler per plugin per device — the presenter's background surface
+         * (or tile) is used first. Returns a function that removes it.
+         */
+        onExport: function (handler) {
+          exporter = handler;
+          post({ type: "exporter", on: true });
+          return function () {
+            if (exporter !== handler) return;
+            exporter = null;
+            post({ type: "exporter", on: false });
+          };
+        },
+      },
+      /**
+       * Static layers: positioned images this plugin puts on slides, drawn by
+       * Presio in every view of them (thumbnails, the next-slide preview) —
+       * the still form of what a "slide" surface does live. Positions are
+       * fractions of the page. Per device, replacing the slide's previous set.
+       */
+      layers: {
+        /** items: [{ x, y, w, h, image, fit? ("cover" | "contain") }] */
+        set: function (slide, items) { post({ type: "layers", slide: slide, items: items || [] }); },
+        clear: function () { post({ type: "layers", clear: true }); },
+      },
+      /**
+       * The plugin's edit history for this deck — needs the "history"
+       * permission. open({ init, apply, snapshot?, restore? }), once per
+       * frame: apply(state, op, entry) returns the next state without
+       * changing the one it's given. Every device applies the same ordered
+       * ops, so every copy comes out the same; the presenter's device keeps
+       * it (per deck) across sessions.
+       */
+      history: {
+        open: function (spec) { return history ? history.handle : openHistory(spec); },
+      },
+      /**
+       * Content-addressed bytes (images, anything too big for an op) — needs
+       * "history". put(Blob | Uint8Array | ArrayBuffer) (presenter, at most
+       * 5 MB) resolves to its hash; put the hash in an op. get(hash) resolves
+       * to a Blob (or null), fetched only when asked for — fetch what's on
+       * screen, not everything.
+       */
+      blobs: {
+        put: function (data) { return request("blobPut", { data: data }); },
+        get: function (sha) { return request("blobGet", { sha: sha }); },
+      },
+      /** The server's clock, shared by every device in the session (ms). */
+      clock: {
+        now: function () { return Date.now() + (ctx.clockOffset || 0); },
+      },
+      ui: {
+        /**
+         * "slide" surface: whether it takes pointer input. false (the
+         * default) lets everything through to the slide; true takes all of
+         * it; a list of { x, y, w, h } fractions of the surface (page
+         * fractions, unless it covers the slide area) takes only those areas;
+         * "pen" takes a pen's and a mouse's, and leaves fingers to Presio
+         * (they pan, pinch and turn the page, and this frame still sees them).
+         */
+        setInteractive: function (value) { post({ type: "interactive", value: value }); },
+        /**
+         * "slide" surface: the part of it on screen, as fractions of it, and
+         * the zoom it's shown at — the presenter can pinch in on their
+         * current slide. { x, y, w, h, scale }; all of it at 1 elsewhere.
+         */
+        get view() { return ctx.view; },
+        onViewChange: function (cb) { return subscribe(viewListeners, cb); },
+        /**
+         * "slide" surface: where the page is within it, { x, y, w, h } as
+         * fractions of it. The whole of it, unless the manifest asks for the
+         * slide area ("slideSurface": "area"): then the page sits inside,
+         * with letterbox bars around it when the shapes differ.
+         */
+        get page() { return ctx.page || { x: 0, y: 0, w: 1, h: 1 }; },
+        onPageChange: function (cb) { return subscribe(pageListeners, cb); },
+        /** "slide" surface: whether a mouse is over the slide (never true for
+         *  touch), wherever the frame takes input or not. */
+        get hovered() { return !!ctx.hovered; },
+        onHover: function (cb) { return subscribe(hoverListeners, cb); },
+        /** Viewer surface: show or hide this plugin's full-screen layer. */
+        setVisible: function (visible) { post({ type: "visible", visible: !!visible }); },
+        /** Presenter: update a contributed button — { active, label, disabled,
+         *  menu }. Each call replaces the last. `menu` adds a small menu
+         *  beside it: a list of { id, label, checked?, disabled? },
+         *  { heading } and { separator: true }; picks go to presio.onMenu. */
+        setButton: function (id, state) { post({ type: "button", id: id, state: state || {} }); },
+      },
+    };
+    Object.defineProperty(window, "presio", { value: api });
+
+    document.open();
+    // Relative URLs in the plugin (its scripts, styles, images) are its own:
+    // resolve them against its folder, not against this page.
+    document.write(withBase(d.html, ctx.baseUrl));
+    document.close();
+    // Keys pressed while this frame has focus (after a click on one of its
+    // buttons) are the page's shortcuts all the same: replay the ones the
+    // plugin didn't handle, and that weren't typed into a field, on the page
+    // (same origin), and if the page acts on one — Space for the next slide —
+    // keep it from also pressing the focused button here. Added after the
+    // plugin's own listeners, so it can preventDefault() first.
+    window.addEventListener("keydown", function (e) {
+      var t = e.target;
+      if (e.defaultPrevented || e.isComposing) return;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      try {
+        var page = window.parent;
+        var replay = new page.KeyboardEvent("keydown", {
+          key: e.key, code: e.code, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey,
+          shiftKey: e.shiftKey, repeat: e.repeat, bubbles: true, cancelable: true,
+        });
+        page.dispatchEvent(replay);
+        if (replay.defaultPrevented) e.preventDefault();
+      } catch (err) { /* not embedded by Presio's page */ }
+    });
+    post({ type: "ready" });
+  }
+})();
+</script>
+</head>
+<body></body>
+</html>

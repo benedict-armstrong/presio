@@ -58,6 +58,7 @@ const SITEMAP_PATHS = [
   "/AGENTS.md",
   "/api.md",
   "/glossary.md",
+  "/plugins.md",
   "/openapi.json",
   "/robots.txt",
   "/sitemap.xml",
@@ -77,7 +78,7 @@ export function registerAgentDocRoutes(app: express.Express) {
     sendText(res, type, withBase(readContent("llms-full.txt"), canonicalBaseUrl(req)));
   });
 
-  for (const name of ["AGENTS.md", "api.md", "index.md", "check.md", "glossary.md"] as const) {
+  for (const name of ["AGENTS.md", "api.md", "index.md", "check.md", "glossary.md", "plugins.md"] as const) {
     app.get(`/${name}`, (req, res) => {
       const base = canonicalBaseUrl(req);
       sendText(res, "text/markdown", withBase(readContent(name), base), `${base}/${name}`);

@@ -92,6 +92,7 @@ export default function Share() {
           <div className="text-center space-y-4">
             {showOverlay ? (
               <ShareEmptyState
+                id={id!}
                 loggedIn={loggedIn}
                 syncing={syncing}
                 syncError={syncError}

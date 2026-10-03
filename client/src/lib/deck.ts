@@ -1,16 +1,15 @@
 // One bundle for everything about the loaded presentation: the pdf.js document
-// plus what we extract from it (speaker notes, media placements, whether it
-// carries attachments) and the presenter's live drawings. Views and cards take
-// this single object instead of a fistful of loose pdf/url/filename props.
+// plus what we extract from it (links, whether it carries attachments). Views
+// and cards take this single object instead of a fistful of loose
+// pdf/url/filename props.
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { extractSpeakerNotes, hasAttachments, loadMediaPlacements, type MediaPlacement } from "./pdf";
+import { hasAttachments } from "./pdf";
 import { loadLinks, type PdfLink } from "./pdfLinks";
-import type { AnnotationsBySlide } from "./annotations";
 
 /** Everything derived from the PDF itself — stable until the file changes
- *  (e.g. when edited speaker notes are written back). */
-export interface DeckInfo {
+ *  (e.g. when a plugin saves an edited deck). */
+export interface Deck {
   pdf: PDFDocumentProxy;
   /** Source of the PDF bytes: server URL, or an object URL for local sessions. */
   url: string;
@@ -18,49 +17,28 @@ export interface DeckInfo {
   totalSlides: number;
   /** True when the PDF carries embedded-file attachments (presio sidecars). */
   hasAttachments: boolean;
-  /** Speaker notes per slide (no entry = no notes). */
-  notes: Map<number, string>;
-  /** Media placements per slide. */
-  mediaBySlide: Map<number, MediaPlacement[]>;
   /** Link annotations per slide (no entry = no links). */
   linksBySlide: Map<number, PdfLink[]>;
 }
 
-/** DeckInfo plus the live layer drawn on top during the session. */
-export interface Deck extends DeckInfo {
-  annotations: AnnotationsBySlide;
-}
-
 /** Extract everything the app needs from a freshly loaded PDF. Never rejects —
- *  notes, media and attachments are best-effort extras. */
-export async function loadDeckInfo(
+ *  links and attachments are best-effort extras. */
+export async function loadDeck(
   pdf: PDFDocumentProxy,
   url: string,
   filename: string
-): Promise<DeckInfo> {
+): Promise<Deck> {
   const totalSlides = pdf.numPages;
-  const [attachments, mediaBySlide, linksBySlide, noteTexts] = await Promise.all([
+  const [attachments, linksBySlide] = await Promise.all([
     hasAttachments(pdf).catch(() => false),
-    loadMediaPlacements(pdf).catch(() => new Map<number, MediaPlacement[]>()),
     loadLinks(pdf).catch(() => new Map<number, PdfLink[]>()),
-    Promise.all(
-      Array.from({ length: totalSlides }, (_, i) =>
-        extractSpeakerNotes(pdf, i + 1).catch(() => "")
-      )
-    ),
   ]);
-  const notes = new Map<number, string>();
-  noteTexts.forEach((text, i) => {
-    if (text) notes.set(i + 1, text);
-  });
   return {
     pdf,
     url,
     filename,
     totalSlides,
     hasAttachments: attachments,
-    notes,
-    mediaBySlide,
     linksBySlide,
   };
 }

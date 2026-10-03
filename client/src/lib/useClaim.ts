@@ -6,6 +6,8 @@ import { authEnabled } from "@/lib/authMode";
 import { useAuth } from "@/lib/useAuth";
 import { getSessionAuth, setSessionAuth } from "@/lib/utils";
 import { lsRemove, sessionKey, rekeySessionStorage } from "@/lib/storage";
+import { rekeyHistories } from "@/lib/plugins/historyDb";
+import { MAX_PDF_BYTES, MAX_PDF_MB } from "@/lib/limits";
 
 // Shares a deck that until now lived only in this browser: the PDF is uploaded
 // and the session becomes a normal synced one. Two shapes of local deck exist,
@@ -65,6 +67,7 @@ export function useClaim(id: string) {
 
       const rec = await idbGet(id);
       if (!rec) throw new Error("Local copy not found on this device");
+      if (rec.blob.size > MAX_PDF_BYTES) throw new Error(`This PDF is over the ${MAX_PDF_MB} MB upload limit`);
       const form = new FormData();
       form.append("pdf", rec.blob, `${rec.filename}.pdf`);
       if (registering) form.append("filename", rec.filename);
@@ -87,6 +90,7 @@ export function useClaim(id: string) {
         // Re-key: everything keyed by the old id has to follow it, or the
         // presenter loses their drawings the moment they share.
         rekeySessionStorage(id, newId);
+        await rekeyHistories(id, newId).catch((e) => console.warn("Couldn't move the deck's plugin histories:", e));
         lsRemove(sessionKey(id));
         // A viewer window may already be open on the old id. Its record is
         // about to disappear, so tell it — over the channel it is still

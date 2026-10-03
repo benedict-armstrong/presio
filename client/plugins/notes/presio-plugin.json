@@ -1,0 +1,22 @@
+{
+  "id": "notes",
+  "name": "Speaker Notes",
+  "version": "1.0.0",
+  "author": "Presio",
+  "description": "Your speaker notes for the current slide, read from the PDF, on your dashboard only. Click them to edit; edits are saved into the deck.",
+  "main": "index.html",
+  "surfaces": ["tile"],
+  "activation": ["always"],
+  "permissions": ["deck", "editDeck"],
+  "contributes": {
+    "settings": {
+      "fontScale": {
+        "type": "number",
+        "default": 1,
+        "minimum": 0.75,
+        "maximum": 2.5,
+        "description": "Notes text size, as a multiple of the default."
+      }
+    }
+  }
+}

@@ -4,31 +4,57 @@ import { safeEqual } from "./auth.js";
 import {
   isValidSlideNumber,
   isValidTotalSlides,
-  sanitizeLaserPoint,
-  sanitizeStroke,
-  sanitizeAnnotations,
-  MAX_STROKES_PER_SLIDE,
-  type AnnotationsBySlide,
+  jsonSize,
+  sanitizePluginEvent,
+  sanitizePublishedPlugin,
+  sanitizePluginSettings,
+  sanitizePluginLoadFailure,
+  MAX_PLUGINS_PER_SESSION,
+  MAX_RETAINED_PER_PLUGIN,
+  MAX_RETAINED_BYTES_PER_PLUGIN,
+  PLUGIN_ID_RE,
+  type PublishedPlugin,
+  type Retain,
 } from "./validation.js";
+import { HistoryError, HistoryStore, parseBase, sanitizeHead, sanitizeHistoryCommit, SHA256_RE, type HistoryBucket } from "./history.js";
+
+// A presenter plugin message kept for viewers who join later (the plugin's
+// current "state of the world": which poll is open, whether the join code is
+// up, what's drawn on each slide).
+interface RetainedPluginEvent {
+  plugin: string;
+  type: string;
+  payload: unknown;
+  /** true for the session, "deck" until the deck is replaced. */
+  retain: Exclude<Retain, false>;
+  /** The payload's size as JSON, for the per-plugin budget. */
+  size: number;
+}
 
 export interface SocketState {
   // Which socket is the controller for each session.
   controllers: Map<string, string>;
   // Blanked state per session (transient, no DB persistence).
   blankedSessions: Set<string>;
-  // Sessions currently showing the join code / QR on all viewers (transient).
-  codeSessions: Set<string>;
-  // Committed drawings per session (in-memory; the controller re-seeds them
-  // after a server restart from its own persisted copy).
-  annotations: Map<string, AnnotationsBySlide>;
+  // The plugins the controller published for viewers to run (where to load
+  // each and its hash), per session.
+  publishedPlugins: Map<string, Map<string, PublishedPlugin>>;
+  // Retained presenter plugin messages per session, keyed plugin + type.
+  pluginRetained: Map<string, Map<string, RetainedPluginEvent>>;
+  // The presenter's settings for each plugin, which viewers run with.
+  pluginSettings: Map<string, Map<string, Record<string, unknown>>>;
+  // Plugins' edit histories (presio.history) and their blobs, per session.
+  history: HistoryStore;
 }
 
 export function createSocketState(): SocketState {
   return {
     controllers: new Map(),
     blankedSessions: new Set(),
-    codeSessions: new Set(),
-    annotations: new Map(),
+    publishedPlugins: new Map(),
+    pluginRetained: new Map(),
+    pluginSettings: new Map(),
+    history: new HistoryStore(),
   };
 }
 
@@ -36,8 +62,21 @@ export function createSocketState(): SocketState {
 export function clearSessionState(state: SocketState, sessionId: string) {
   state.controllers.delete(sessionId);
   state.blankedSessions.delete(sessionId);
-  state.codeSessions.delete(sessionId);
-  state.annotations.delete(sessionId);
+  state.publishedPlugins.delete(sessionId);
+  state.pluginRetained.delete(sessionId);
+  state.pluginSettings.delete(sessionId);
+  void state.history.drop(sessionId).catch((err) => console.warn(`Couldn't drop the history of session ${sessionId}:`, err));
+}
+
+// The session's deck was replaced: forget what plugins retained for the old
+// one (retain: "deck" — e.g. drawings, keyed by slide number). The presenter's
+// page does the same when it swaps the deck in.
+export function forgetDeckRetained(state: SocketState, sessionId: string) {
+  const retained = state.pluginRetained.get(sessionId);
+  if (!retained) return;
+  for (const [key, event] of retained) {
+    if (event.retain === "deck") retained.delete(key);
+  }
 }
 
 // Shape of a join code, used as a free pre-filter before touching the DB.
@@ -51,9 +90,10 @@ const SESSION_ID_RE = /^[A-Z0-9]{6}$/;
 // Only join_session is throttled, and deliberately so. Every other event is
 // wrapped in controllerOnly(), meaning the socket already proved the controller
 // token to reach it — and those are exactly the events that are legitimately
-// high-frequency: slide_change, laser_move (pointer-rate), stroke_progress,
-// media_time. Presenting a long deck, or scrubbing back and forth through
-// hundreds of slides, must never be rate limited, so it isn't.
+// high-frequency: slide_change and the presenter's plugin_event (a drawing's
+// strokes and laser at pointer rate, the media plugin's time sync). Presenting
+// a long deck, or scrubbing back and forth through hundreds of slides, must
+// never be rate limited, so it isn't.
 //
 // join_session is the exception because it is unauthenticated, queries the DB
 // on every call, and its reply reveals whether a 6-character code exists —
@@ -67,33 +107,83 @@ const SESSION_ID_RE = /^[A-Z0-9]{6}$/;
 const JOIN_BURST = 20;
 const JOIN_REFILL_PER_SEC = 1;
 
-interface JoinBucket { tokens: number; last: number }
+interface TokenBucket { tokens: number; last: number }
 
-function allowJoin(socket: Socket): boolean {
+/** Take a token from the socket's bucket under `key`, refilled at `refillPerSec` up to `burst`. */
+function takeToken(socket: Socket, key: "joinBucket" | "pluginBucket", burst: number, refillPerSec: number): boolean {
   const now = Date.now();
-  const bucket: JoinBucket = socket.data.joinBucket ?? { tokens: JOIN_BURST, last: now };
-  bucket.tokens = Math.min(JOIN_BURST, bucket.tokens + ((now - bucket.last) / 1000) * JOIN_REFILL_PER_SEC);
+  const bucket: TokenBucket = socket.data[key] ?? { tokens: burst, last: now };
+  bucket.tokens = Math.min(burst, bucket.tokens + ((now - bucket.last) / 1000) * refillPerSec);
   bucket.last = now;
-  socket.data.joinBucket = bucket;
+  socket.data[key] = bucket;
   if (bucket.tokens < 1) return false;
   bucket.tokens -= 1;
   return true;
 }
+
+const allowJoin = (socket: Socket) => takeToken(socket, "joinBucket", JOIN_BURST, JOIN_REFILL_PER_SEC);
+
+// Viewers may message the presenter's plugins (a vote, a question), which makes
+// plugin_event the one audience-writable event. It carries no DB cost, but an
+// unthrottled phone could still flood the presenter, so it gets a bucket like
+// join_session's — generous enough for any human tapping buttons.
+const AUDIENCE_PLUGIN_BURST = 20;
+const AUDIENCE_PLUGIN_REFILL_PER_SEC = 5;
+
+const allowAudiencePluginEvent = (socket: Socket) =>
+  takeToken(socket, "pluginBucket", AUDIENCE_PLUGIN_BURST, AUDIENCE_PLUGIN_REFILL_PER_SEC);
 
 export function registerSocketHandlers(
   io: Server,
   supabase: SupabaseClient,
   state: SocketState
 ) {
-  const { controllers, blankedSessions, codeSessions, annotations } = state;
+  const { controllers, blankedSessions, publishedPlugins, pluginRetained, pluginSettings, history } = state;
+  history.setBucket(supabase.storage.from("presentations") as unknown as HistoryBucket);
+
+  // What a joining (or re-joining) socket needs to mount the session's
+  // plugins: which ones run and where each loads from (by URL and hash; the
+  // viewer fetches them itself), the presenter's settings for each, and the
+  // retained messages.
+  const pluginsState = (sessionId: string) => ({
+    plugins: [...(publishedPlugins.get(sessionId)?.values() ?? [])],
+    settings: Object.fromEntries(pluginSettings.get(sessionId) ?? []),
+    retained: [...(pluginRetained.get(sessionId)?.values() ?? [])].map(({ plugin, type, payload, retain }) => ({ plugin, type, payload, retain })),
+  });
 
   // Tail of each session's in-flight current_slide write, so overlapping
   // updates land in emit order (see slide_change).
   const pendingSlideWrites = new Map<string, Promise<void>>();
 
+  // Keep (or, for a null payload, forget) a presenter's retained message,
+  // within its plugin's budget: MAX_RETAINED_PER_PLUGIN types, and
+  // MAX_RETAINED_BYTES_PER_PLUGIN of payload. Over budget it's still relayed
+  // live, just not kept for late joiners.
+  const retain = (sessionId: string, event: RetainedPluginEvent) => {
+    const retained = pluginRetained.get(sessionId) ?? new Map<string, RetainedPluginEvent>();
+    const key = `${event.plugin}\u0000${event.type}`;
+    if (event.payload === null) {
+      retained.delete(key);
+      return;
+    }
+    const plugins = new Set<string>();
+    let count = 0;
+    let bytes = 0;
+    for (const [k, e] of retained) {
+      plugins.add(e.plugin);
+      if (e.plugin !== event.plugin || k === key) continue;
+      count++;
+      bytes += e.size;
+    }
+    if (!plugins.has(event.plugin) && plugins.size >= MAX_PLUGINS_PER_SESSION) return;
+    if (count >= MAX_RETAINED_PER_PLUGIN || bytes + event.size > MAX_RETAINED_BYTES_PER_PLUGIN) return;
+    retained.set(key, event);
+    pluginRetained.set(sessionId, retained);
+  };
+
   // Wrap an event handler so it only runs for the session's registered
   // controller, passing the resolved sessionId through. Mutating events
-  // (slide/blank/media) all share this guard.
+  // (slide/blank/sync) all share this guard.
   const controllerOnly = <A extends unknown[]>(
     socket: Socket,
     handler: (sessionId: string, ...args: A) => void
@@ -153,8 +243,8 @@ export function registerSocketHandlers(
         currentSlide: data.current_slide,
         totalSlides: data.total_slides,
         role: grantedRole,
-        annotations: annotations.get(sessionId) ?? {},
       });
+      socket.emit("plugins_state", pluginsState(sessionId));
     });
 
     socket.on("slide_change", controllerOnly(socket, async (sessionId, { slideNumber }: { slideNumber: number }) => {
@@ -210,85 +300,154 @@ export function registerSocketHandlers(
       io.to(sessionId).emit("blank_update", { blanked: blankedSessions.has(sessionId) });
     }));
 
-    socket.on("code_toggle", controllerOnly(socket, (sessionId) => {
-      if (codeSessions.has(sessionId)) {
-        codeSessions.delete(sessionId);
-      } else {
-        codeSessions.add(sessionId);
+    // --- Plugins ---
+
+    // The controller publishes the plugins that have to run on viewers —
+    // where each loads from and its hash, never the plugin itself (viewers
+    // fetch that directly) — replacing whatever it published before.
+    socket.on("plugins_publish", controllerOnly(socket, (sessionId, payload: { plugins?: unknown }) => {
+      if (!Array.isArray(payload?.plugins)) return;
+      const next = new Map<string, PublishedPlugin>();
+      for (const raw of payload.plugins.slice(0, MAX_PLUGINS_PER_SESSION)) {
+        const plugin = sanitizePublishedPlugin(raw);
+        if (plugin) next.set(plugin.manifest.id, plugin);
       }
-      io.to(sessionId).emit("code_update", { showCode: codeSessions.has(sessionId) });
+      publishedPlugins.set(sessionId, next);
+      io.to(sessionId).emit("plugins_state", pluginsState(sessionId));
     }));
 
-    // Laser pointer stream: relay to everyone else in the room. Transient and
-    // high-frequency, so nothing is persisted.
-    socket.on("laser_move", controllerOnly(socket, (sessionId, payload: unknown) => {
-      const pt = sanitizeLaserPoint(payload);
-      if (pt === undefined) return;
-      socket.to(sessionId).emit("laser_update", pt);
+    // The presenter changed a plugin's settings: keep them for joiners and
+    // pass them on to the plugin's viewer instances.
+    socket.on("plugin_settings", controllerOnly(socket, (sessionId, raw: unknown) => {
+      const update = sanitizePluginSettings(raw);
+      if (!update) return;
+      const bySession = pluginSettings.get(sessionId) ?? new Map<string, Record<string, unknown>>();
+      if (!bySession.has(update.plugin) && bySession.size >= MAX_PLUGINS_PER_SESSION) return;
+      bySession.set(update.plugin, update.settings);
+      pluginSettings.set(sessionId, bySession);
+      socket.to(sessionId).emit("plugin_settings", update);
     }));
 
-    // --- Drawing annotations ---
+    // Plugin messages. The presenter's go to everyone else in the room (and
+    // are kept for late joiners when retained); the audience's go to the
+    // presenter only, so one phone can't broadcast to the whole room.
+    socket.on("plugin_event", (raw: unknown) => {
+      const { sessionId } = socket.data;
+      if (!sessionId) return;
+      const event = sanitizePluginEvent(raw);
+      if (!event) return;
+      const { plugin, type, payload } = event;
 
-    // In-progress stroke preview: relay-only, nothing persisted.
-    socket.on("stroke_progress", controllerOnly(socket, (sessionId, payload: { slide?: unknown; stroke?: unknown }) => {
-      if (!isValidSlideNumber(payload?.slide, socket.data.totalSlides)) return;
-      if (payload.stroke === null) {
-        socket.to(sessionId).emit("stroke_progress", { slide: payload.slide, stroke: null });
+      if (controllers.get(sessionId) === socket.id) {
+        if (event.retain) retain(sessionId, { plugin, type, payload, retain: event.retain, size: jsonSize(payload) });
+        // Volatile ones (a laser position) may be dropped for a viewer whose
+        // connection is backed up, rather than queued behind newer ones.
+        const room = event.volatile ? socket.to(sessionId).volatile : socket.to(sessionId);
+        room.emit("plugin_event", { plugin, type, payload, from: "presenter" });
         return;
       }
-      const stroke = sanitizeStroke(payload.stroke);
-      if (!stroke) return;
-      socket.to(sessionId).emit("stroke_progress", { slide: payload.slide, stroke });
+
+      // Audience: only to a plugin the presenter actually published.
+      if (!publishedPlugins.get(sessionId)?.has(plugin)) return;
+      if (!allowAudiencePluginEvent(socket)) return;
+      const controller = controllers.get(sessionId);
+      if (!controller) return;
+      io.to(controller).emit("plugin_event", { plugin, type, payload, from: "audience", sender: socket.id });
+    });
+
+    // A viewer couldn't load one of the published plugins (a presenter's
+    // localhost dev server, a version that changed under its URL): tell the
+    // presenter, who otherwise can't see it. Throttled like the audience's
+    // plugin messages, and only for the version actually published.
+    socket.on("plugin_load_failed", (raw: unknown) => {
+      const { sessionId } = socket.data;
+      if (!sessionId || controllers.get(sessionId) === socket.id) return;
+      const failure = sanitizePluginLoadFailure(raw);
+      if (!failure) return;
+      if (publishedPlugins.get(sessionId)?.get(failure.plugin)?.hash !== failure.hash) return;
+      if (!allowAudiencePluginEvent(socket)) return;
+      const controller = controllers.get(sessionId);
+      if (controller) io.to(controller).emit("plugin_load_failed", { ...failure, sender: socket.id });
+    });
+
+    // --- Plugin histories (presio.history, see history.ts) ---
+
+    // Anyone in the session may catch up on a history: a device sends the
+    // head it has and gets what it's missing. Viewers are throttled like
+    // their plugin messages; they only sync on joining or after a gap.
+    socket.on("history_sync", async (raw: unknown, ack?: (reply: unknown) => void) => {
+      const { sessionId } = socket.data;
+      if (typeof ack !== "function") return;
+      const r = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+      const head = sanitizeHead(r.head);
+      if (!sessionId || typeof r.plugin !== "string" || !PLUGIN_ID_RE.test(r.plugin) || !head) return ack({ error: "Bad request" });
+      if (controllers.get(sessionId) !== socket.id && !allowAudiencePluginEvent(socket)) return ack({ error: "Too many requests" });
+      try {
+        ack(await history.sync(sessionId, r.plugin, head));
+      } catch (err) {
+        console.warn("history_sync failed:", err);
+        ack({ error: "Couldn't read the history" });
+      }
+    });
+
+    // The controller's edits: ordered here, then sent to everyone in the
+    // session, the sender included — that's how it learns the entry's place.
+    socket.on("history_commit", controllerOnly(socket, async (sessionId, raw: unknown, ack?: (reply: unknown) => void) => {
+      const reply = typeof ack === "function" ? ack : () => {};
+      const commit = sanitizeHistoryCommit(raw);
+      if (!commit) return reply({ error: "Bad commit" });
+      try {
+        const entry = await history.commit(sessionId, commit);
+        if (entry) io.to(sessionId).emit("history_entry", { plugin: commit.plugin, entry });
+        reply({ ok: true });
+      } catch (err) {
+        reply({ error: err instanceof HistoryError ? err.message : "Couldn't save the edit" });
+        if (!(err instanceof HistoryError)) console.warn("history_commit failed:", err);
+      }
     }));
 
-    socket.on("stroke_commit", controllerOnly(socket, (sessionId, payload: { slide?: unknown; stroke?: unknown }) => {
-      const slide = payload?.slide as number;
-      if (!isValidSlideNumber(slide, socket.data.totalSlides)) return;
-      const stroke = sanitizeStroke(payload.stroke);
-      if (!stroke) return;
-      const bySlide = annotations.get(sessionId) ?? {};
-      const existing = bySlide[slide] ?? [];
-      if (existing.length >= MAX_STROKES_PER_SLIDE) return;
-      bySlide[slide] = [...existing, stroke];
-      annotations.set(sessionId, bySlide);
-      socket.to(sessionId).emit("stroke_commit", { slide, stroke });
+    // A deck shared with edits already on it: the controller's copy becomes
+    // the session's, from a seed blob it uploaded first.
+    socket.on("history_seed", controllerOnly(socket, async (sessionId, raw: unknown, ack?: (reply: unknown) => void) => {
+      const reply = typeof ack === "function" ? ack : () => {};
+      const r = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+      if (typeof r.plugin !== "string" || !PLUGIN_ID_RE.test(r.plugin) || typeof r.sha !== "string" || !SHA256_RE.test(r.sha)) {
+        return reply({ error: "Bad seed" });
+      }
+      try {
+        const seeded = await history.seed(sessionId, r.plugin, r.sha);
+        if (seeded) socket.to(sessionId).emit("history_reset", { plugin: r.plugin });
+        reply({ ok: seeded });
+      } catch (err) {
+        console.warn("history_seed failed:", err);
+        reply({ ok: false });
+      }
     }));
 
-    socket.on("stroke_undo", controllerOnly(socket, (sessionId, payload: { slide?: unknown }) => {
-      const slide = payload?.slide as number;
-      if (!isValidSlideNumber(slide, socket.data.totalSlides)) return;
-      const bySlide = annotations.get(sessionId);
-      if (bySlide?.[slide]?.length) bySlide[slide] = bySlide[slide].slice(0, -1);
-      socket.to(sessionId).emit("stroke_undo", { slide });
+    // The controller took a snapshot: the log may start from it.
+    socket.on("history_snapshot", controllerOnly(socket, async (sessionId, raw: unknown, ack?: (reply: unknown) => void) => {
+      const reply = typeof ack === "function" ? ack : () => {};
+      const r = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+      const base = parseBase(r.base);
+      if (typeof r.plugin !== "string" || !PLUGIN_ID_RE.test(r.plugin) || !base?.snapshot) return reply({ ok: false });
+      try {
+        reply({ ok: await history.snapshot(sessionId, r.plugin, { seq: base.seq, hash: base.hash, sha: base.snapshot }) });
+      } catch (err) {
+        console.warn("history_snapshot failed:", err);
+        reply({ ok: false });
+      }
     }));
 
-    socket.on("annotations_clear", controllerOnly(socket, (sessionId, payload: { slide?: unknown }) => {
-      const slide = payload?.slide as number;
-      if (!isValidSlideNumber(slide, socket.data.totalSlides)) return;
-      const bySlide = annotations.get(sessionId);
-      if (bySlide) delete bySlide[slide];
-      socket.to(sessionId).emit("annotations_clear", { slide });
-    }));
-
-    // Full replace: the controller reseeding after a server restart, or the
-    // presenter loading a saved drawing file.
-    socket.on("annotations_sync", controllerOnly(socket, (sessionId, payload: unknown) => {
-      const bySlide = sanitizeAnnotations(payload, socket.data.totalSlides);
-      if (!bySlide) return;
-      annotations.set(sessionId, bySlide);
-      socket.to(sessionId).emit("annotations_state", bySlide);
-    }));
-
-    socket.on("media_control", controllerOnly(socket, (sessionId, payload: { id: string; action: "play" | "pause" | "reset" }) => {
-      io.to(sessionId).emit("media_update", { ...payload, seq: Date.now() });
-    }));
-
-    socket.on("audio_change", controllerOnly(socket, (sessionId, payload: { muted: boolean; target: "controller" | "both" | "viewers" }) => {
-      io.to(sessionId).emit("audio_update", { ...payload, seq: Date.now() });
-    }));
-
-    socket.on("media_time", controllerOnly(socket, (sessionId, payload: { id: string; t: number; playing: boolean; sampledAt: number }) => {
-      socket.to(sessionId).emit("media_time_update", { ...payload, seq: Date.now() });
+    // A different deck: start the plugin's history afresh, everywhere.
+    socket.on("history_reset", controllerOnly(socket, async (sessionId, raw: unknown) => {
+      const r = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+      if (typeof r.plugin !== "string" || !PLUGIN_ID_RE.test(r.plugin)) return;
+      try {
+        await history.reset(sessionId, r.plugin);
+        socket.to(sessionId).emit("history_reset", { plugin: r.plugin });
+      } catch (err) {
+        console.warn("history_reset failed:", err);
+      }
     }));
 
     socket.on("time_ping", (clientT1: number, ack?: (data: { serverTime: number; clientT1: number }) => void) => {

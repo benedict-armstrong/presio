@@ -12,6 +12,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { ValidityBadge, ValidityDot } from "./ValidityBadge";
 import { PageDetailModal } from "./PageDetailModal";
 import "@/lib/pdf"; // ensure worker is configured
+import { saveFile } from "@/lib/saveFile";
 
 type PageModalState = { page: number; tab: "notes" | "media" } | null;
 
@@ -149,13 +150,7 @@ export default function CheckerPage() {
       if (deletedMedia.size > 0) {
         bytes = await removeAttachments(bytes, [...deletedMedia]);
       }
-      const blob = new Blob([bytes.slice()], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename ?? "presentation.pdf";
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      saveFile(new Blob([bytes.slice()], { type: "application/pdf" }), filename ?? "presentation.pdf");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Download failed");
     } finally {

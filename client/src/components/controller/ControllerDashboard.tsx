@@ -7,12 +7,14 @@ import "@/pages/controllerMosaic.css";
 
 export interface CardEntry {
   content: ReactNode;
+  /** Header title; built-in cards take theirs from CARD_LABELS. */
+  title?: string;
   action?: ReactNode;
 }
 
 // Desktop body: the draggable/resizable tiling dashboard. Each tile's header is
 // our own toolbar (also the drag handle) with the card title, an optional action
-// (e.g. timer settings), and a hide button.
+// (e.g. the notes text size), and a hide button.
 export function ControllerDashboard({
   value,
   onChange,
@@ -33,10 +35,10 @@ export function ControllerDashboard({
         renderTile={(key, path) => (
           <MosaicWindow<string>
             path={path}
-            title={CARD_LABELS[key]}
+            title={cards[key].title ?? CARD_LABELS[key]}
             renderToolbar={() => (
               <div className="flex items-center justify-between w-full px-3 py-1.5 cursor-move select-none">
-                <span className="text-xs text-muted-foreground font-semibold">{CARD_LABELS[key]}</span>
+                <span className="text-xs text-muted-foreground font-semibold">{cards[key].title ?? CARD_LABELS[key]}</span>
                 <div className="flex items-center gap-1">
                   {cards[key].action}
                   <button

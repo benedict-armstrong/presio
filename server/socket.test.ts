@@ -119,33 +119,3 @@ describe("slide_change authorization", () => {
     expect(await ignored).toBe(true);
   });
 });
-
-describe("code_toggle authorization", () => {
-  it("broadcasts the join-code toggle from the controller to viewers", async () => {
-    const ctrl = connect();
-    const viewer = connect();
-    await join(ctrl, "controller", "ctrl-tok");
-    await join(viewer, "viewer");
-
-    const first = once<{ showCode: boolean }>(viewer, "code_update");
-    ctrl.emit("code_toggle");
-    expect((await first).showCode).toBe(true);
-
-    // Toggling again flips it back off.
-    const second = once<{ showCode: boolean }>(viewer, "code_update");
-    ctrl.emit("code_toggle");
-    expect((await second).showCode).toBe(false);
-  });
-
-  it("ignores a join-code toggle from a non-controller", async () => {
-    const ctrl = connect();
-    const viewer = connect();
-    await join(ctrl, "controller", "ctrl-tok");
-    await join(viewer, "viewer");
-
-    const ignored = notReceived(ctrl, "code_update");
-    viewer.emit("code_toggle");
-    expect(await ignored).toBe(true);
-  });
-});
-

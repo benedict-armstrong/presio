@@ -2,15 +2,17 @@ import { useEffect, useRef } from "react";
 import { renderPage } from "@/lib/pdf";
 import { useRenderTargetWidth } from "@/hooks/useRenderTargetWidth";
 import type { Deck } from "@/lib/deck";
-import { AnnotationOverlay } from "@/components/AnnotationOverlay";
-import { MediaPosterOverlay } from "@/components/MediaPosterOverlay";
+import { SlideLayers } from "@/components/plugins/SlideLayers";
+import type { PluginHostState } from "@/lib/plugins/usePluginHost";
 
 export function NextSlideCard({
   deck,
   currentSlide,
+  plugins,
 }: {
   deck: Deck;
   currentSlide: number;
+  plugins?: PluginHostState;
 }) {
   const { pdf, totalSlides } = deck;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -45,21 +47,12 @@ export function NextSlideCard({
     }
   }, [pdf, currentSlide, totalSlides, width]);
 
-  const nextStrokes = deck.annotations[currentSlide + 1];
-  // An embed bakes only its watch URL into the page, so without a poster this
-  // card shows a raw youtube.com/watch?v=… line where the thumbnail strip
-  // shows the real preview (#94).
-  const nextMedia =
-    currentSlide < totalSlides ? deck.mediaBySlide.get(currentSlide + 1) : undefined;
-
   return (
     <div className="h-full relative rounded overflow-hidden bg-white">
       <div ref={containerRef} className="absolute inset-0" />
-      {!!nextMedia?.length && (
-        <MediaPosterOverlay canvasContainerRef={containerRef} placements={nextMedia} />
-      )}
-      {!!nextStrokes?.length && (
-        <AnnotationOverlay containerRef={containerRef} strokes={nextStrokes} />
+      {/* Plugins' still layers: a video's poster, what's drawn on the slide. */}
+      {plugins && currentSlide < totalSlides && (
+        <SlideLayers plugins={plugins} slide={currentSlide + 1} mode="static" containerRef={containerRef} />
       )}
     </div>
   );

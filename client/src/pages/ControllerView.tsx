@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { cn, getSessionAuth, setSessionAuth } from "@/lib/utils";
-import { Settings, Check, Option, Plus, Share2, ExternalLink, QrCode, Save, FolderOpen, PenLine } from "lucide-react";
+import { Settings, TriangleAlert, Check, Option, Plus, Share2, ExternalLink, User, LayoutGrid, Puzzle, KeyRound, Keyboard, FileJson } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
-import { Separator } from "@/components/ui/separator";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import { CopyField } from "@/components/CopyField";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -23,9 +22,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useClaim } from "@/lib/useClaim";
 import { CurrentSlideCard } from "@/components/controller/CurrentSlideCard";
 import { NextSlideCard } from "@/components/controller/NextSlideCard";
-import { SpeakerNotesCard, NotesSizeAction } from "@/components/controller/SpeakerNotesCard";
 import { ThumbnailsCard } from "@/components/controller/ThumbnailsCard";
-import { TimerCard, TimerAction, TimerSettingsDialog, MobileTimer, type TimerSettings } from "@/components/controller/TimerCard";
 import { ShortcutsEditor } from "@/components/controller/ShortcutsEditor";
 import { ControllerHeader } from "@/components/controller/ControllerHeader";
 import { ControllerNav, SlideCounter } from "@/components/controller/ControllerNav";
@@ -45,11 +42,10 @@ import {
 } from "@/lib/deckWatcher";
 import {
   DEFAULT_KEYMAP,
-  loadKeymap,
-  saveKeymap,
   matchesBinding,
-  type Keymap,
+  pluginBindings,
 } from "@/lib/keymap";
+import { useSetting } from "@/lib/settings";
 import {
   CARD_KEYS,
   CARD_LABELS,
@@ -63,13 +59,20 @@ import {
   loadPreferred,
   addLeaf,
   removeLeaf,
+  restrictLayout,
+  pluginTileKey,
   visibleKeys,
 } from "@/lib/controllerLayout";
-import { lsGet, lsSet, lsGetString, lsSetString, viewerOpenedKey, STORAGE_KEYS } from "@/lib/storage";
+import { lsGetString, lsSetString, viewerOpenedKey } from "@/lib/storage";
 import { type MosaicNode } from "react-mosaic-component";
-import type { MediaState, AudioState } from "@/components/MediaOverlay";
 import type { Deck } from "@/lib/deck";
-import { DEFAULT_PEN_STYLE, DEFAULT_HIGHLIGHTER_STYLE, hasAnyStrokes, type LaserPoint, type PenStyle, type Stroke, type Tool } from "@/lib/annotations";
+import type { PluginHostState } from "@/lib/plugins/usePluginHost";
+import { PluginBackgrounds, PluginButtons, PluginTile } from "@/components/plugins/PresenterPlugins";
+import { SettingsFileSection } from "@/components/SettingsFileSection";
+import { SettingsDialog } from "@/components/controller/SettingsDialog";
+import { AddPluginPage, PluginPage } from "@/components/plugins/PluginSettings";
+import { pluginLabel, useInstalledPlugins } from "@/lib/plugins/installed";
+import type { PluginManifest } from "@/lib/plugins/manifest";
 
 // How long a pending "j<number>" jump waits for another digit before it
 // commits on its own. Long enough to type a second digit, short enough that the
@@ -87,13 +90,10 @@ interface ControllerViewProps {
   onSyncAll: () => void;
   onEnd: () => void;
   onSynced: () => void;
-  onSaveNotes: (slide: number, notes: string) => Promise<void>;
   onReplacePdf: (file: File, handle?: FileSystemFileHandle) => Promise<void>;
   currentCanvasRef: React.RefObject<HTMLDivElement | null>;
   blanked: boolean;
   onBlankToggle: () => void;
-  showCode: boolean;
-  onShowCodeToggle: () => void;
   /** The deck on screen, shown in the header's deck control. */
   filename: string;
   /** Live-reload preference, or null when this deck can't be watched. */
@@ -105,20 +105,11 @@ interface ControllerViewProps {
   /** A URL-backed deck's source PDF was republished (see Presentation). */
   remoteDeckUpdate: boolean;
   onRemoteDeckApply: () => void;
-  mediaState: MediaState;
-  onMediaControl: (id: string, action: "play" | "pause" | "reset") => void;
-  onMediaTime: (id: string, t: number, playing: boolean, sampledAt: number) => void;
-  muted: boolean;
-  audioState: AudioState;
-  onAudioChange: (next: { muted: boolean; target: AudioState["target"] }) => void;
-  onLaserMove: (pt: LaserPoint | null) => void;
-  onStrokeProgress: (stroke: Stroke | null) => void;
-  onStrokeCommit: (stroke: Stroke) => void;
-  onStrokeUndo: () => void;
-  onAnnotationsClear: () => void;
-  onSaveDrawing: () => void;
-  onLoadDrawing: (file: File) => void;
+  plugins: PluginHostState;
 }
+
+/** The Settings page for an installed plugin, by its URL. */
+const pluginPageId = (url: string) => `plugin:${url}`;
 
 export function ControllerView({
   id,
@@ -129,13 +120,10 @@ export function ControllerView({
   onSyncAll,
   onEnd,
   onSynced,
-  onSaveNotes,
   onReplacePdf,
   currentCanvasRef,
   blanked,
   onBlankToggle,
-  showCode,
-  onShowCodeToggle,
   filename,
   deckWatchMode,
   deckWatchStatus,
@@ -144,22 +132,9 @@ export function ControllerView({
   onDeckWatchResume,
   remoteDeckUpdate,
   onRemoteDeckApply,
-  mediaState,
-  onMediaControl,
-  onMediaTime,
-  muted,
-  audioState,
-  onAudioChange,
-  onLaserMove,
-  onStrokeProgress,
-  onStrokeCommit,
-  onStrokeUndo,
-  onAnnotationsClear,
-  onSaveDrawing,
-  onLoadDrawing,
+  plugins,
 }: ControllerViewProps) {
-  const { totalSlides, annotations } = deck;
-  const mediaPlacements = deck.mediaBySlide.get(currentSlide) ?? [];
+  const { totalSlides } = deck;
   const slideLinks = deck.linksBySlide.get(currentSlide) ?? [];
   const isMobile = useIsMobile();
   // A window wide enough for the dashboard but not for the full toolbars: the
@@ -174,8 +149,10 @@ export function ControllerView({
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [timerSettingsOpen, setTimerSettingsOpen] = useState(false);
-  const [keymap, setKeymap] = useState<Keymap>(loadKeymap);
+  // Which Settings page is showing; kept across opens so the dialog comes back
+  // where the presenter left it.
+  const [settingsCategory, setSettingsCategory] = useState<string | undefined>(undefined);
+  const [keymap, setKeymap] = useSetting("keybindings");
   const [viewerBlocked, setViewerBlocked] = useState(false);
   const [viewerPromptDismissed, setViewerPromptDismissed] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -184,61 +161,6 @@ export function ControllerView({
   const [passphraseDialogOpen, setPassphraseDialogOpen] = useState(false);
   // First-run tutorial for the controller. Shown before the viewer prompt.
   const [onboardingOpen, setOnboardingOpen] = useState(() => !hasCompletedControllerOnboarding());
-  // Active annotation tool for the current-slide card (laser pointer etc.).
-  const [tool, setTool] = useState<Tool>("none");
-  // Floating tool palette visibility (device preference, toggled in the card
-  // header). Hiding it also drops the active tool so the slide is click-through.
-  const [toolsOpen, setToolsOpen] = useState(() => lsGetString(STORAGE_KEYS.annotationToolbar) !== "false");
-  const toggleTools = useCallback(() => {
-    setToolsOpen((open) => {
-      const next = !open;
-      lsSetString(STORAGE_KEYS.annotationToolbar, String(next));
-      if (!next) setTool("none");
-      return next;
-    });
-  }, []);
-  // Speaker-notes text size multiplier (device preference).
-  const [notesScale, setNotesScale] = useState(() => lsGet(STORAGE_KEYS.notesFontScale, 1));
-  const changeNotesScale = useCallback((scale: number) => {
-    setNotesScale(scale);
-    lsSet(STORAGE_KEYS.notesFontScale, scale);
-  }, []);
-  // Optional wall-clock display on the timer card (device preference).
-  const [showClock, setShowClock] = useState(() => lsGetString(STORAGE_KEYS.timerShowClock) === "true");
-  const changeShowClock = useCallback((show: boolean) => {
-    setShowClock(show);
-    lsSetString(STORAGE_KEYS.timerShowClock, String(show));
-  }, []);
-  // Timer mode/duration/warning (device preference).
-  const [timerSettings, setTimerSettings] = useState<TimerSettings>(() =>
-    lsGet<TimerSettings>(STORAGE_KEYS.timerSettings, { mode: "up", duration: null, threshold: null })
-  );
-  const changeTimerSettings = useCallback((s: TimerSettings) => {
-    setTimerSettings(s);
-    lsSet(STORAGE_KEYS.timerSettings, s);
-  }, []);
-  // Drawing color/width per tool, remembered across presentations.
-  const [penStyle, setPenStyle] = useState<PenStyle>(() => lsGet(STORAGE_KEYS.penStyle, DEFAULT_PEN_STYLE));
-  const [highlighterStyle, setHighlighterStyle] = useState<PenStyle>(() =>
-    lsGet(STORAGE_KEYS.highlighterStyle, DEFAULT_HIGHLIGHTER_STYLE)
-  );
-  const activeStyle = tool === "highlighter" ? highlighterStyle : penStyle;
-  const changeActiveStyle = useCallback(
-    (style: PenStyle) => {
-      if (tool === "highlighter") {
-        setHighlighterStyle(style);
-        lsSet(STORAGE_KEYS.highlighterStyle, style);
-      } else {
-        setPenStyle(style);
-        lsSet(STORAGE_KEYS.penStyle, style);
-      }
-    },
-    [tool]
-  );
-
-  // Hidden file input for loading a saved drawing from Settings.
-  const drawingFileRef = useRef<HTMLInputElement | null>(null);
-
   // Deck replacement: pick a PDF, confirm, then hand it to the orchestrator.
   // The File is held in state between the picker and the confirmation dialog.
   const replaceFileRef = useRef<HTMLInputElement | null>(null);
@@ -294,8 +216,6 @@ export function ControllerView({
 
   const { user } = useAuth();
   const loggedIn = !!user;
-  // Drawing and notes editing are purely local (canvas state / IndexedDB), so
-  // they're never gated on an account. Login is only for sharing online.
   const { syncing, syncError, sync } = useClaim(id);
 
   // One-time email list prompt after a few minutes of presenting. Waits for
@@ -331,12 +251,12 @@ export function ControllerView({
     lsGetString(viewerOpenedKey(id)) !== "true";
 
   // Tap the left/right half of the current slide to go back/forward on touch
-  // devices. Disabled while a drawing tool is active so a stroke is never
-  // mistaken for a tap, and while pinch-zoom is active so panning or lifting
-  // fingers off a zoomed slide never flips pages.
+  // devices. Disabled while pinch-zoom is active so panning or lifting
+  // fingers off a zoomed slide never flips pages. (A plugin layer taking the
+  // slide's input — a drawing tool — gets the taps instead.)
   const [slideZoomActive, setSlideZoomActive] = useState(false);
   useSlideTapNav(currentCanvasRef, {
-    enabled: tool === "none" && !slideZoomActive,
+    enabled: !slideZoomActive,
     onPrev: () => onGoTo(currentSlide - 1),
     onNext: () => onGoTo(currentSlide + 1),
   });
@@ -396,6 +316,10 @@ export function ControllerView({
   // Never leave a pending jump's timer running past unmount.
   useEffect(() => cancelJump, [cancelJump]);
 
+  const { host: pluginHost, plugins: runningPlugins } = plugins;
+  // Plugins show the presenter's keys in their tooltips (presio.shortcut).
+  useEffect(() => pluginHost.setKeymap(keymap), [pluginHost, keymap]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -436,15 +360,22 @@ export function ControllerView({
         onGoTo(currentSlide - 1);
       } else if (matchesBinding(e, keymap.toggleBlank)) {
         onBlankToggle();
-      } else if (matchesBinding(e, keymap.toggleCode)) {
-        // The join code is only meaningful for synced sessions, which have a
-        // remote audience; local sessions can't be joined elsewhere.
-        if (!local) onShowCodeToggle();
+      } else if (!e.repeat) {
+        // Plugins' keybindings, after Presio's own: a key both claim is ours.
+        for (const plugin of runningPlugins) {
+          const { id: pluginId, contributes } = plugin.manifest;
+          const hit = contributes.keybindings.find((kb) => matchesBinding(e, pluginBindings(keymap, pluginId, kb)));
+          if (hit) {
+            e.preventDefault();
+            pluginHost.runCommand(pluginId, hit.command);
+            return;
+          }
+        }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [currentSlide, totalSlides, onGoTo, onBlankToggle, onShowCodeToggle, local, keymap, pendingJump, armJump, commitJump, cancelJump]);
+  }, [currentSlide, totalSlides, onGoTo, onBlankToggle, local, keymap, pendingJump, armJump, commitJump, cancelJump, runningPlugins, pluginHost]);
 
   const onMosaicChange = useCallback((node: MosaicNode<string> | null) => {
     setMosaic(node);
@@ -562,77 +493,75 @@ export function ControllerView({
   };
 
   // Dashboard card content + optional toolbar action for each key.
+  // Running plugins that contribute a dashboard tile, and every card the
+  // Layout settings can toggle.
+  const tilePlugins = plugins.plugins.filter((p) => p.manifest.surfaces.includes("tile"));
+  const pluginErrors = useMemo(() => ({ ...plugins.errors, ...plugins.viewerErrors }), [plugins.errors, plugins.viewerErrors]);
+  const installedPlugins = useInstalledPlugins(pluginErrors);
+  // A plugin some viewers couldn't load: worth a look, but only in Settings.
+  const viewerFailedUrl = Object.keys(plugins.viewerErrors)[0];
+  // Enabled plugins' shortcuts in order: an earlier one wins a shared key.
+  const pluginShortcuts = installedPlugins.flatMap(({ entry, manifest }) =>
+    entry.enabled && manifest ? [{ id: manifest.id, name: manifest.name, keybindings: manifest.contributes.keybindings }] : []
+  );
+  // Switching on a plugin with a tile is asking to see it.
+  const showPluginTile = (manifest: PluginManifest) => {
+    const key = pluginTileKey(manifest.id);
+    if (manifest.surfaces.includes("tile") && !visible.has(key)) toggleCard(key);
+  };
+  const layoutKeys = [...CARD_KEYS, ...tilePlugins.map((p) => pluginTileKey(p.manifest.id))];
+  const cardLabel = (key: string) =>
+    CARD_LABELS[key] ?? tilePlugins.find((p) => pluginTileKey(p.manifest.id) === key)?.manifest.name ?? key;
+
   const cardContent: Record<string, CardEntry> = {
     currentSlide: {
       content: (
         <CurrentSlideCard
           ref={currentCanvasRef}
-          local={local}
-          mediaPlacements={mediaPlacements}
           links={slideLinks}
           onLinkGoTo={onGoTo}
-          mediaState={mediaState}
-          onMediaControl={onMediaControl}
-          onMediaTime={onMediaTime}
-          muted={muted}
-          audioState={audioState}
-          onAudioChange={onAudioChange}
-          tool={tool}
-          toolbarVisible={toolsOpen}
-          onToolChange={setTool}
-          onLaserMove={onLaserMove}
-          penStyle={activeStyle}
-          onPenStyleChange={changeActiveStyle}
-          strokes={annotations[currentSlide] ?? []}
-          onStrokeProgress={onStrokeProgress}
-          onStrokeCommit={onStrokeCommit}
-          onStrokeUndo={onStrokeUndo}
-          onAnnotationsClear={onAnnotationsClear}
           onZoomActiveChange={setSlideZoomActive}
+          plugins={plugins}
+          slide={currentSlide}
         />
       ),
-      action: (
-        <button
-          type="button"
-          data-testid="toolbar-toggle"
-          title={toolsOpen ? "Hide drawing tools" : "Show drawing tools"}
-          aria-pressed={toolsOpen}
-          onClick={toggleTools}
-          className={`inline-flex items-center justify-center h-5 w-5 rounded transition-colors ${
-            toolsOpen
-              ? "text-foreground bg-accent"
-              : "text-muted-foreground hover:text-foreground hover:bg-accent"
-          }`}
-        >
-          <PenLine size={13} />
-        </button>
-      ),
+      // Plugins' buttons for the slide (the drawing tools' toggle).
+      action: <PluginButtons host={plugins.host} plugins={plugins.plugins} location="controller.currentSlide" />,
     },
     nextSlide: {
-      content: <NextSlideCard deck={deck} currentSlide={currentSlide} />,
-    },
-    timer: {
-      content: <TimerCard id={id} settings={timerSettings} showClock={showClock} />,
-      action: <TimerAction open={timerSettingsOpen} onToggle={() => setTimerSettingsOpen(!timerSettingsOpen)} />,
-    },
-    notes: {
-      content: (
-        <SpeakerNotesCard
-          notes={deck.notes.get(currentSlide) ?? ""}
-          currentSlide={currentSlide}
-          onSave={onSaveNotes}
-          fontScale={notesScale}
-        />
-      ),
-      action: <NotesSizeAction scale={notesScale} onChange={changeNotesScale} />,
+      content: <NextSlideCard deck={deck} currentSlide={currentSlide} plugins={plugins} />,
     },
     thumbnails: {
-      content: <ThumbnailsCard deck={deck} currentSlide={currentSlide} onGoTo={onGoTo} />,
+      content: <ThumbnailsCard deck={deck} currentSlide={currentSlide} onGoTo={onGoTo} plugins={plugins} />,
     },
+    // Each running plugin with a tile surface gets a card of its own.
+    ...Object.fromEntries(
+      tilePlugins.map((plugin) => [
+        pluginTileKey(plugin.manifest.id),
+        { title: plugin.manifest.name, content: <PluginTile host={plugins.host} plugin={plugin} /> },
+      ])
+    ),
   };
+  // The saved layout can name tiles of plugins that aren't running (switched
+  // off, or still loading); draw only what exists.
+  const shownMosaic = restrictLayout(mosaic, Object.keys(cardContent));
 
   const desktopActions = (
     <>
+      {viewerFailedUrl && (
+        <button
+          type="button"
+          onClick={() => {
+            setSettingsCategory(pluginPageId(viewerFailedUrl));
+            setSettingsOpen(true);
+          }}
+          title={plugins.viewerErrors[viewerFailedUrl]}
+          data-testid="plugin-viewer-errors"
+          className="inline-flex items-center justify-center h-8 w-8 rounded-md text-amber-500 hover:bg-amber-500/10 transition-colors"
+        >
+          <TriangleAlert size={15} />
+        </button>
+      )}
       <button
         type="button"
         onClick={() => setSettingsOpen(true)}
@@ -669,11 +598,9 @@ export function ControllerView({
       onOpen={() => setMenuOpen(true)}
       onClose={() => setMenuOpen(false)}
       deck={deck}
+      pluginHost={plugins.host}
       canSharePassphrase={canSharePassphrase}
-      canShowCode={!local}
-      showingCode={showCode}
       onShare={() => setShareDialogOpen(true)}
-      onToggleCode={onShowCodeToggle}
       onShowPassphrase={() => { setPassphraseDialogOpen(true); void requestPassphrase(); }}
       onSwitchToViewer={isMobile ? () => navigate(`/s/${id}?role=viewer`, { replace: true }) : undefined}
       onReplaceClick={openReplacePicker}
@@ -693,11 +620,11 @@ export function ControllerView({
         isMobile ? "h-dvh" : "h-screen"
       )}
     >
+      <PluginBackgrounds host={plugins.host} plugins={plugins.plugins} />
       <ControllerHeader
         id={id}
         local={local}
         blanked={blanked}
-        showingCode={showCode && !local}
         compact={isMobile}
         filename={filename}
         deckWatchMode={deckWatchMode}
@@ -713,7 +640,7 @@ export function ControllerView({
       />
 
       <ControllerDashboard
-        value={mosaic}
+        value={shownMosaic}
         onChange={onMosaicChange}
         cards={cardContent}
         onHideCard={toggleCard}
@@ -722,7 +649,6 @@ export function ControllerView({
       {isMobile ? (
         <div className="border-t px-3 py-3 space-y-2">
           <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
-            <MobileTimer id={id} settings={timerSettings} />
             <SlideCounter
               className="text-xs text-muted-foreground"
               currentSlide={currentSlide}
@@ -735,6 +661,7 @@ export function ControllerView({
                 Sync All
               </Button>
             )}
+            <PluginButtons host={plugins.host} plugins={plugins.plugins} location="controller.toolbar" />
           </div>
           <ControllerNav
             size="lg"
@@ -763,22 +690,10 @@ export function ControllerView({
               Sync All
             </Button>
           )}
-          {!local && (
-            <Button
-              variant={showCode ? "default" : "ghost"}
-              size="sm"
-              onClick={onShowCodeToggle}
-              title="Show the join code & QR on all viewers' screens"
-            >
-              <QrCode size={14} className={narrow ? undefined : "mr-1"} />
-              <span className={narrow ? "sr-only" : undefined}>
-                {showCode ? "Hide Code" : "Show Code"}
-              </span>
-            </Button>
-          )}
+          <PluginButtons host={plugins.host} plugins={plugins.plugins} location="controller.toolbar" />
           {!narrow && (
             <div className="ml-auto flex items-center gap-2">
-              <DownloadButton deck={deck} />
+              <DownloadButton deck={deck} plugins={plugins.host} />
               <Button variant="destructive" size="sm" onClick={() => setConfirmEnd(true)}>
                 End Presentation
               </Button>
@@ -811,190 +726,180 @@ export function ControllerView({
       {loginOpen && <LoginDialog onClose={() => setLoginOpen(false)} />}
 
       {settingsOpen && (
-        <DialogOverlay onClose={() => setSettingsOpen(false)} maxWidth="max-w-md">
-          <h2 className="text-lg font-semibold">Settings</h2>
-
-          {authEnabled && (
-            <>
-              <AccountControl variant="section" />
-              <Separator />
-            </>
-          )}
-
-          <section className="space-y-2">
-            <h3 className="text-sm font-medium">Layout</h3>
-            <div className="space-y-0.5">
-              {CARD_KEYS.map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => toggleCard(key)}
-                  className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded hover:bg-accent transition-colors text-left"
-                >
-                  <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${visible.has(key) ? "bg-primary border-primary text-primary-foreground" : "border-input"
-                    }`}>
-                    {visible.has(key) && <Check size={11} strokeWidth={3} />}
-                  </span>
-                  {CARD_LABELS[key]}
-                </button>
-              ))}
-            </div>
-            <div className="space-y-1.5 pt-1">
-              <label
-                htmlFor="layout-preset"
-                className="text-xs font-medium text-muted-foreground"
-              >
-                Preset
-              </label>
-              <select
-                id="layout-preset"
-                // "Custom" isn't a preset you can pick — it is what the field
-                // reads once the cards have been dragged away from one.
-                value={activePreset ?? "custom"}
-                onChange={(e) => applyPreset(e.target.value as LayoutForm)}
-                className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              >
-                {activePreset === undefined && (
-                  <option value="custom" disabled>
-                    Custom
-                  </option>
-                )}
-                {LAYOUT_PRESETS.map((preset) => (
-                  <option key={preset.form} value={preset.form} title={preset.hint}>
-                    {preset.label}
-                    {preset.form === layoutForm ? " (default for this screen)" : ""}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-muted-foreground">
-                {LAYOUT_PRESETS.find((p) => p.form === activePreset)?.hint ??
-                  "Your own arrangement — pick a preset to start over."}
+        <SettingsDialog
+          onClose={() => setSettingsOpen(false)}
+          activeId={settingsCategory}
+          onActiveChange={setSettingsCategory}
+          footer={
+            appVersion && (
+              <p className="text-xs font-mono text-muted-foreground" data-testid="app-version">
+                {appVersion}
               </p>
-            </div>
-            <div className="flex flex-wrap gap-2 pt-1">
-              <Button size="sm" variant="outline" onClick={savePreferredLayout}>
-                Save as preferred
-              </Button>
-              {hasPreferred && (
-                <Button size="sm" variant="outline" onClick={restorePreferredLayout}>
-                  Restore preferred
-                </Button>
-              )}
-              <Button size="sm" variant="outline" onClick={resetLayout}>
-                Reset to default
-              </Button>
-            </div>
-          </section>
-
-          <Separator />
-
-          <section className="space-y-2">
-            <h3 className="text-sm font-medium">Drawing</h3>
-            <p className="text-xs text-muted-foreground">
-              Save the drawings made on the slides to a file, or load a previously saved drawing.
-            </p>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                data-testid="drawing-save"
-                disabled={!hasAnyStrokes(annotations)}
-                onClick={onSaveDrawing}
-              >
-                <Save size={14} className="mr-1" />
-                Save drawing
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                data-testid="drawing-load"
-                onClick={() => drawingFileRef.current?.click()}
-              >
-                <FolderOpen size={14} className="mr-1" />
-                Load drawing
-              </Button>
-              <input
-                ref={drawingFileRef}
-                type="file"
-                accept=".json,application/json"
-                className="hidden"
-                data-testid="drawing-load-input"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) onLoadDrawing(file);
-                  e.target.value = "";
-                }}
-              />
-            </div>
-          </section>
-
-          {canSharePassphrase && (
-            <>
-              <Separator />
-              <section className="space-y-2">
-                <h3 className="text-sm font-medium">Controller Passphrase</h3>
-                <p className="text-xs text-muted-foreground">
-                  Share this passphrase to grant controller access
-                </p>
-                {passphrase ? (
-                  <CopyField label="" value={passphrase} />
-                ) : (
-                  <div className="space-y-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={passphraseBusy}
-                      onClick={requestPassphrase}
-                    >
-                      {passphraseBusy ? "Creating…" : "Create passphrase"}
-                    </Button>
-                    {passphraseError && (
-                      <p className="text-xs text-destructive">{passphraseError}</p>
-                    )}
+            )
+          }
+          categories={[
+            ...(authEnabled
+              ? [{ id: "account", label: "Account", icon: User, content: <AccountControl variant="section" /> }]
+              : []),
+            {
+              id: "layout",
+              label: "Layout",
+              icon: LayoutGrid,
+              description: "Which cards the dashboard shows, and how they're arranged.",
+              content: (
+                <div className="space-y-2">
+                  <div className="space-y-0.5">
+                    {layoutKeys.map((key) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => toggleCard(key)}
+                        className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded hover:bg-accent transition-colors text-left"
+                      >
+                        <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${visible.has(key) ? "bg-primary border-primary text-primary-foreground" : "border-input"
+                          }`}>
+                          {visible.has(key) && <Check size={11} strokeWidth={3} />}
+                        </span>
+                        {cardLabel(key)}
+                      </button>
+                    ))}
                   </div>
-                )}
-              </section>
-            </>
-          )}
-
-          <Separator />
-
-          <section className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium">Keyboard Shortcuts</h3>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => { setKeymap(DEFAULT_KEYMAP); saveKeymap(DEFAULT_KEYMAP); }}
-              >
-                Reset defaults
-              </Button>
-            </div>
-            <ShortcutsEditor
-              keymap={keymap}
-              onChange={(km) => { setKeymap(km); saveKeymap(km); }}
-            />
-          </section>
-
-          <Button className="w-full" variant="ghost" onClick={() => setSettingsOpen(false)}>
-            Close
-          </Button>
-
-          {appVersion && (
-            <p className="text-center text-xs font-mono text-muted-foreground" data-testid="app-version">
-              {appVersion}
-            </p>
-          )}
-        </DialogOverlay>
-      )}
-
-      {timerSettingsOpen && (
-        <TimerSettingsDialog
-          settings={timerSettings}
-          onSettingsChange={changeTimerSettings}
-          showClock={showClock}
-          onShowClockChange={changeShowClock}
-          onClose={() => setTimerSettingsOpen(false)}
+                  <div className="space-y-1.5 pt-1">
+                    <label
+                      htmlFor="layout-preset"
+                      className="text-xs font-medium text-muted-foreground"
+                    >
+                      Preset
+                    </label>
+                    <select
+                      id="layout-preset"
+                      // "Custom" isn't a preset you can pick — it is what the field
+                      // reads once the cards have been dragged away from one.
+                      value={activePreset ?? "custom"}
+                      onChange={(e) => applyPreset(e.target.value as LayoutForm)}
+                      className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    >
+                      {activePreset === undefined && (
+                        <option value="custom" disabled>
+                          Custom
+                        </option>
+                      )}
+                      {LAYOUT_PRESETS.map((preset) => (
+                        <option key={preset.form} value={preset.form} title={preset.hint}>
+                          {preset.label}
+                          {preset.form === layoutForm ? " (default for this screen)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground">
+                      {LAYOUT_PRESETS.find((p) => p.form === activePreset)?.hint ??
+                        "Your own arrangement — pick a preset to start over."}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button size="sm" variant="outline" onClick={savePreferredLayout}>
+                      Save as preferred
+                    </Button>
+                    {hasPreferred && (
+                      <Button size="sm" variant="outline" onClick={restorePreferredLayout}>
+                        Restore preferred
+                      </Button>
+                    )}
+                    <Button size="sm" variant="outline" onClick={resetLayout}>
+                      Reset to default
+                    </Button>
+                  </div>
+                </div>
+              ),
+            },
+            ...(canSharePassphrase
+              ? [{
+                id: "control",
+                label: "Shared control",
+                icon: KeyRound,
+                description: "Share this passphrase to grant controller access.",
+                content: (
+                  <>
+                    {passphrase ? (
+                      <CopyField label="" value={passphrase} />
+                    ) : (
+                      <div className="space-y-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={passphraseBusy}
+                          onClick={requestPassphrase}
+                        >
+                          {passphraseBusy ? "Creating…" : "Create passphrase"}
+                        </Button>
+                        {passphraseError && (
+                          <p className="text-xs text-destructive">{passphraseError}</p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ),
+              }]
+              : []),
+            {
+              id: "shortcuts",
+              label: "Keyboard shortcuts",
+              icon: Keyboard,
+              action: (
+                <Button size="sm" variant="ghost" onClick={() => setKeymap(DEFAULT_KEYMAP)}>
+                  Reset defaults
+                </Button>
+              ),
+              content: (
+                <ShortcutsEditor
+                  keymap={keymap}
+                  onChange={setKeymap}
+                  plugins={pluginShortcuts}
+                />
+              ),
+            },
+            {
+              id: "file",
+              label: "Settings file",
+              icon: FileJson,
+              description: "All of these settings, plugins' included, as one settings.json — to back up or use in another browser.",
+              content: <SettingsFileSection />,
+            },
+            // One page per installed plugin, then one to add another.
+            ...installedPlugins.map((plugin) => ({
+              id: pluginPageId(plugin.entry.url),
+              group: "Plugins",
+              label: pluginLabel(plugin),
+              icon: Puzzle,
+              dimmed: !plugin.entry.enabled,
+              description: plugin.manifest?.description,
+              content: (
+                <PluginPage
+                  plugin={plugin}
+                  host={plugins.host}
+                  running={plugins.plugins.find((p) => p.url === plugin.entry.url)}
+                  onEnabled={showPluginTile}
+                  shortcutsBefore={pluginShortcuts.slice(0, Math.max(0, pluginShortcuts.findIndex((p) => p.id === plugin.manifest?.id)))}
+                />
+              ),
+            })),
+            {
+              id: "add-plugin",
+              group: "Plugins",
+              label: "Add plugin",
+              icon: Plus,
+              description:
+                "Load a plugin from its URL — its own site, or your dev server while you build one. Plugins can do anything Presio can, so only add ones you trust.",
+              content: (
+                <AddPluginPage
+                  onAdded={(url, manifest) => {
+                    showPluginTile(manifest);
+                    setSettingsCategory(pluginPageId(url));
+                  }}
+                />
+              ),
+            },
+          ]}
         />
       )}
 

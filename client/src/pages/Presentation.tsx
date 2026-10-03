@@ -1,21 +1,10 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useSearchParams, useNavigate, useLocation, Link } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { loadPdf, loadPdfData, freshPdfUrl, loadLatestPdf, renderPage, clearCache, openPdf, destroyPdf } from "@/lib/pdf";
-import { loadDeckInfo, type Deck, type DeckInfo } from "@/lib/deck";
+import { loadDeck, type Deck } from "@/lib/deck";
 import { useRenderTargetWidth } from "@/hooks/useRenderTargetWidth";
-import { setSlideNotes } from "@/lib/notesAttach";
-import { defaultAudioState, isMutedForRole, type MediaState, type MediaTimeSync, type AudioState } from "@/lib/media";
-import { hasAnyStrokes, parseDrawing, serializeDrawing, type AnnotationsBySlide, type LaserPoint, type Stroke } from "@/lib/annotations";
-import {
-  lsGet,
-  lsSet,
-  lsRemove,
-  lsGetString,
-  lsSetString,
-  annotationsKey,
-  deckWatchKey,
-} from "@/lib/storage";
+import { lsGetString, lsSetString, deckWatchKey } from "@/lib/storage";
 import { socket } from "@/lib/socket";
 import { useLatestRef } from "@/hooks/useLatestRef";
 import { startClockSync } from "@/lib/clock";
@@ -35,6 +24,7 @@ import { ConfirmDeckReloadDialog } from "@/components/controller/ConfirmDeckRelo
 import { track, sha256Hex } from "@/lib/analytics";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { usePluginHost } from "@/lib/plugins/usePluginHost";
 import { ControllerView } from "./ControllerView";
 import { ViewerView } from "./ViewerView";
 
@@ -66,39 +56,18 @@ export default function Presentation() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [blanked, setBlanked] = useState(false);
-  // Whether all viewers are currently showing the join code / QR overlay.
-  const [showCode, setShowCode] = useState(false);
-  const [mediaState, setMediaState] = useState<MediaState>({ id: null, action: "pause", seq: 0 });
-  const [mediaTime, setMediaTime] = useState<MediaTimeSync | null>(null);
-  const [audioState, setAudioState] = useState<AudioState>(defaultAudioState);
-  // Laser pointer position streamed from the controller (null = hidden).
-  const [laser, setLaser] = useState<LaserPoint | null>(null);
-  // Committed drawings per slide. The controller seeds from localStorage so a
-  // reload (or a server restart, via annotations_sync) doesn't lose them.
-  const [annotations, setAnnotations] = useState<AnnotationsBySlide>(() =>
-    requestedRole === "controller" ? lsGet(annotationsKey(id!), {}) : {}
-  );
-  // In-progress stroke streamed from the controller (viewer windows).
-  const [remoteDraft, setRemoteDraft] = useState<{ slide: number; stroke: Stroke | null } | null>(null);
-  const annotationsRef = useLatestRef(annotations);
 
-  // Everything extracted from the loaded PDF (notes, media, attachments…),
+  // Everything extracted from the loaded PDF (links, attachments…),
   // re-derived whenever the document is swapped (e.g. after a notes edit).
-  const [deckInfo, setDeckInfo] = useState<DeckInfo | null>(null);
+  const [deck, setDeck] = useState<Deck | null>(null);
   useEffect(() => {
     if (!pdf) return;
     let cancelled = false;
-    loadDeckInfo(pdf, pdfUrl, filename).then((info) => {
-      if (!cancelled) setDeckInfo(info);
+    loadDeck(pdf, pdfUrl, filename).then((loaded) => {
+      if (!cancelled) setDeck(loaded);
     });
     return () => { cancelled = true; };
   }, [pdf, pdfUrl, filename]);
-
-  // The one object the views work with: the PDF bundle plus live drawings.
-  const deck = useMemo<Deck | null>(
-    () => (deckInfo ? { ...deckInfo, annotations } : null),
-    [deckInfo, annotations]
-  );
 
   const currentCanvasRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
@@ -112,16 +81,21 @@ export default function Presentation() {
   const outOfSync = isViewer && viewerSlide !== null;
   const displaySlide = outOfSync ? viewerSlide! : currentSlide;
 
+  const plugins = usePluginHost({
+    id: id!,
+    local,
+    isPresenter: role === "controller",
+    pdf,
+    currentSlide: displaySlide,
+    totalSlides,
+  });
+
   // Latest broadcastable state, for replying to a local window's state_request
   // without re-subscribing the channel on every slide change.
   const stateRef = useLatestRef({
     currentSlide,
     totalSlides,
     blanked,
-    showCode,
-    annotations,
-    mediaState,
-    audioState,
   });
 
   // Mirror of pdfUrl for callbacks that must not re-subscribe the socket
@@ -158,12 +132,14 @@ export default function Presentation() {
   const deckWatchModeRef = useLatestRef(deckWatchMode);
   // A detected deck change waiting on the presenter: "watch" from the file
   // watcher (prompt mode only), "remote" from the URL-republish poller. Both
-  // clear drawings and Presio-edited notes, so both get the same warning.
+  // replace the deck (dropping edits saved into it here, and what plugins
+  // hung off its slides), so both get the same warning.
   const [reloadPrompt, setReloadPrompt] = useState<"watch" | "remote" | null>(null);
   const [applyingWatch, setApplyingWatch] = useState(false);
-  // Speaker notes edited in Presio live in the current PDF's bytes, so a
-  // recompiled file replaces them. Tracked to warn before that happens.
-  const [notesEdited, setNotesEdited] = useState(false);
+  // Edits a plugin saved into the deck (e.g. speaker notes) live in the
+  // current PDF's bytes, so a recompiled file replaces them. Tracked to warn
+  // before that happens.
+  const [deckEdited, setDeckEdited] = useState(false);
 
   // A URL-backed deck's source PDF was republished (remote-version polling
   // below); held until the presenter applies it or the poller replaces it
@@ -233,25 +209,6 @@ export default function Presentation() {
     setDeckWatchMode(mode);
   }, []);
 
-  // Persist the controller's drawings across reloads.
-  useEffect(() => {
-    if (role === "controller") lsSet(annotationsKey(id!), annotations);
-  }, [annotations, role, id]);
-
-  // Shared stroke mutations, applied identically whether the change originated
-  // locally (controller) or arrived over the socket / BroadcastChannel.
-  const applyCommit = useCallback((slide: number, stroke: Stroke) => {
-    setAnnotations((prev) => ({ ...prev, [slide]: [...(prev[slide] ?? []), stroke] }));
-  }, []);
-  const applyUndo = useCallback((slide: number) => {
-    setAnnotations((prev) =>
-      prev[slide]?.length ? { ...prev, [slide]: prev[slide].slice(0, -1) } : prev
-    );
-  }, []);
-  const applyClear = useCallback((slide: number) => {
-    setAnnotations((prev) => (prev[slide]?.length ? { ...prev, [slide]: [] } : prev));
-  }, []);
-
   // The deck swap currently being loaded, if any. A replacement uploaded from
   // this window is announced to it twice — by the upload's own response and by
   // the server's `deck_updated` broadcast, the one every viewer acts on — and
@@ -263,10 +220,11 @@ export default function Presentation() {
 
   // Swap in a replacement deck: announced over the wire (socket `deck_updated`
   // for synced sessions, a BroadcastChannel `deck_update` for local ones) or by
-  // the reply to this window's own replace. Drawings are dropped wholesale:
-  // they are keyed by slide number and the new document renumbers every slide
-  // after an insertion. Slide clamping needs no extra work here: the deckInfo
-  // effect adopts the new document's page count once it loads.
+  // the reply to this window's own replace. What plugins retained for the old
+  // deck (retain: "deck" — drawings, keyed by slide number, which the new
+  // document may renumber) is dropped wholesale, and they hear it's a new
+  // document. Slide clamping needs no extra work here: the deck effect
+  // adopts the new document's page count once it loads.
   const applyDeckUpdate = useCallback(
     ({ filename, totalSlides }: { filename: string; totalSlides: number }): Promise<void> => {
       const key = `${totalSlides}:${filename}`;
@@ -274,10 +232,9 @@ export default function Presentation() {
       if (inFlight?.key === key) return inFlight.done;
 
       setFilename(filename);
-      setAnnotations({});
-      lsRemove(annotationsKey(id!));
-      // Whatever notes were edited here lived in the outgoing PDF's bytes.
-      setNotesEdited(false);
+      plugins.host.forgetDeckRetained();
+      // Whatever was saved into the deck here lived in the outgoing PDF's bytes.
+      setDeckEdited(false);
       setTotalSlides(totalSlides);
       setCurrentSlide((slide) => Math.min(Math.max(slide, 1), totalSlides));
       const done = (async () => {
@@ -323,7 +280,7 @@ export default function Presentation() {
       });
       return done;
     },
-    [local, id, externalPdfRef, pdfUrlRef]
+    [local, id, externalPdfRef, pdfUrlRef, plugins.host]
   );
 
   useEffect(() => {
@@ -406,8 +363,8 @@ export default function Presentation() {
   // the current slide back into range, and refresh whatever stored count
   // remains (IndexedDB record / session row) so every device agrees.
   useEffect(() => {
-    if (!deckInfo) return;
-    const docTotal = deckInfo.totalSlides;
+    if (!deck) return;
+    const docTotal = deck.totalSlides;
     if (totalSlides === docTotal) return;
     // Reconciling with the document itself, which only exists once it has
     // finished loading — there is no render-time value to derive this from.
@@ -423,7 +380,7 @@ export default function Presentation() {
       // the document-derived count either way.
       socket.emit("total_slides_change", { totalSlides: docTotal });
     }
-  }, [deckInfo, totalSlides, local, role, id]);
+  }, [deck, totalSlides, local, role, id]);
 
   useEffect(() => {
     if (!filename) return;
@@ -441,16 +398,6 @@ export default function Presentation() {
       const { type, payload } = e.data;
       if (type === "slide_update") setCurrentSlide(payload.slideNumber);
       else if (type === "blank_update") setBlanked(payload.blanked);
-      else if (type === "code_update") setShowCode(payload.showCode);
-      else if (type === "media_update") setMediaState(payload);
-      else if (type === "media_time_update") setMediaTime(payload);
-      else if (type === "audio_update") setAudioState(payload);
-      else if (type === "laser_update") setLaser(payload);
-      else if (type === "stroke_progress") setRemoteDraft(payload);
-      else if (type === "stroke_commit") applyCommit(payload.slide, payload.stroke);
-      else if (type === "stroke_undo") applyUndo(payload.slide);
-      else if (type === "annotations_clear") applyClear(payload.slide);
-      else if (type === "annotations_state") setAnnotations(payload);
       else if (type === "deck_update") void applyDeckUpdate(payload);
       else if (type === "session_ended") navigate("/", { replace: true });
       else if (type === "rekeyed") {
@@ -470,19 +417,6 @@ export default function Presentation() {
         setCurrentSlide(payload.currentSlide);
         if (payload.totalSlides) setTotalSlides(payload.totalSlides);
         setBlanked(payload.blanked);
-        setShowCode(!!payload.showCode);
-        if (requestedRole !== "controller") {
-          if (payload.annotations) setAnnotations(payload.annotations);
-          // Adopt media/audio too, so a window opened mid-playback doesn't
-          // sit paused/muted while everyone else is watching a video. The
-          // sync also moves displaySlide, which would trip the slide-change
-          // media reset below and wipe what we just adopted — flag it off.
-          if (payload.mediaState) {
-            skipMediaResetForRef.current = payload.currentSlide;
-            setMediaState(payload.mediaState);
-          }
-          if (payload.audioState) setAudioState(payload.audioState);
-        }
       }
     };
 
@@ -548,22 +482,9 @@ export default function Presentation() {
       }
     }, RECONNECT_EVERY_MS);
 
-    socket.on("session_state", ({ currentSlide, totalSlides, role: grantedRole, annotations: serverAnnotations }) => {
+    socket.on("session_state", ({ currentSlide, totalSlides, role: grantedRole }) => {
       setCurrentSlide(currentSlide);
       setTotalSlides(totalSlides);
-      if (serverAnnotations && Object.keys(serverAnnotations).length) {
-        setAnnotations(serverAnnotations);
-      } else if (requestedRole === "controller") {
-        // The server has no drawings for this session (fresh boot / restart);
-        // reseed it from this controller's persisted copy.
-        if (hasAnyStrokes(annotationsRef.current)) {
-          socket.emit("annotations_sync", annotationsRef.current);
-        }
-      } else {
-        // Viewers mirror the server unconditionally — keeping a stale local
-        // copy when the server has none would resurrect cleared drawings.
-        setAnnotations({});
-      }
       if (grantedRole && grantedRole !== requestedRole) {
         applyRole(grantedRole);
         setSearchParams({ role: grantedRole }, { replace: true });
@@ -589,46 +510,6 @@ export default function Presentation() {
 
     socket.on("blank_update", ({ blanked }: { blanked: boolean }) => {
       setBlanked(blanked);
-    });
-
-    socket.on("code_update", ({ showCode }: { showCode: boolean }) => {
-      setShowCode(showCode);
-    });
-
-    socket.on("media_update", (payload: MediaState) => {
-      setMediaState(payload);
-    });
-
-    socket.on("media_time_update", (payload: MediaTimeSync) => {
-      setMediaTime(payload);
-    });
-
-    socket.on("audio_update", (payload: AudioState) => {
-      setAudioState(payload);
-    });
-
-    socket.on("laser_update", (payload: LaserPoint | null) => {
-      setLaser(payload);
-    });
-
-    socket.on("stroke_progress", (payload: { slide: number; stroke: Stroke | null }) => {
-      setRemoteDraft(payload);
-    });
-
-    socket.on("stroke_commit", ({ slide, stroke }: { slide: number; stroke: Stroke }) => {
-      applyCommit(slide, stroke);
-    });
-
-    socket.on("stroke_undo", ({ slide }: { slide: number }) => {
-      applyUndo(slide);
-    });
-
-    socket.on("annotations_clear", ({ slide }: { slide: number }) => {
-      applyClear(slide);
-    });
-
-    socket.on("annotations_state", (bySlide: AnnotationsBySlide) => {
-      setAnnotations(bySlide);
     });
 
     // The controller replaced the deck (server broadcast from the replace
@@ -667,23 +548,13 @@ export default function Presentation() {
       socket.off("total_slides_update");
       socket.off("sync_all");
       socket.off("blank_update");
-      socket.off("code_update");
-      socket.off("media_update");
-      socket.off("media_time_update");
-      socket.off("audio_update");
-      socket.off("laser_update");
-      socket.off("stroke_progress");
-      socket.off("stroke_commit");
-      socket.off("stroke_undo");
-      socket.off("annotations_clear");
-      socket.off("annotations_state");
       socket.off("deck_updated");
       socket.off("controller_replaced");
       socket.off("error");
       socket.off("session_ended");
       socket.disconnect();
     };
-  }, [id, local, requestedRole, navigate, setSearchParams, applyRole, applyCommit, applyUndo, applyClear, applyDeckUpdate, annotationsRef, stateRef]);
+  }, [id, local, requestedRole, navigate, setSearchParams, applyRole, applyDeckUpdate, stateRef]);
 
   // Report the settled role to analytics. The `?role=` query param is already
   // in every tracked URL, but Umami's Pages report keys on the path alone, so
@@ -699,31 +570,19 @@ export default function Presentation() {
     track("session-role", { role: settledRole, mode: local ? "local" : "server" });
   }, [settledRole, local]);
 
-  // The slide whose media state arrived with a state_sync, so the reset below
-  // doesn't immediately discard what was just adopted. Naming the slide rather
-  // than raising a flag keeps it to that one sync: any other slide change
-  // resets as usual, with nothing to clear afterwards.
-  const skipMediaResetForRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (skipMediaResetForRef.current === displaySlide) return;
-    setMediaState((s) => (s.id === null ? s : { id: null, action: "pause", seq: Date.now() }));
-    setMediaTime(null);
-  }, [displaySlide]);
-
   // The canvas is rendered at the container's pixel size, so anything that
   // changes that size or scale — entering fullscreen, dragging the viewer onto
   // a projector, browser zoom, a move to a differently scaled monitor — has to
   // re-render, or the slide stays an upscaled canvas from the old size.
-  const viewWidth = useRenderTargetWidth(currentCanvasRef, !!deckInfo);
+  const viewWidth = useRenderTargetWidth(currentCanvasRef, !!deck);
 
   useEffect(() => {
     if (!pdf || !currentCanvasRef.current || !viewWidth) return;
     const container = currentCanvasRef.current;
     // renderPage resolves out of order (cached pages are near-instant, fresh
     // ones aren't), so a rapid slide change could leave a stale page on screen
-    // — with the annotation overlay drawing the new slide's strokes over it.
-    // Drop any render that finishes after the effect has moved on.
+    // — with plugins' layers already showing the new slide over it. Drop any
+    // render that finishes after the effect has moved on.
     let stale = false;
     renderPage(pdf, displaySlide, { targetWidth: viewWidth }).then((canvas) => {
       if (stale) return;
@@ -734,9 +593,9 @@ export default function Presentation() {
       container.appendChild(canvas);
     });
     return () => { stale = true; };
-    // deckInfo gates mounting of the view that owns the container, and refs
+    // deck gates mounting of the view that owns the container, and refs
     // don't trigger effects — re-run once the container actually exists.
-  }, [pdf, displaySlide, role, deckInfo, viewWidth]);
+  }, [pdf, displaySlide, role, deck, viewWidth]);
 
   // Mirror a local state change outward: always to other same-browser windows
   // (BroadcastChannel) and, for synced sessions, to the server (socket). The
@@ -761,7 +620,6 @@ export default function Presentation() {
         { event: "slide_change", payload: { slideNumber: slide } }
       );
       setCurrentSlide(slide);
-      setMediaState({ id: null, action: "pause", seq: Date.now() });
     },
     [totalSlides, broadcast]
   );
@@ -988,15 +846,20 @@ export default function Presentation() {
     }
   }, [remoteUpdate, applyingWatch, id, pdfWriteAuth]);
 
-  // Persist edited speaker notes by writing them back into the PDF as a JSON
-  // sidecar (matching presio's format), then swap in the updated document so
-  // further edits build on it. Local sessions update IndexedDB; synced ones
-  // re-upload to the owner's stored PDF.
-  const saveNotes = useCallback(
-    async (slide: number, text: string) => {
-      if (!pdf) return;
-      const original = await pdf.getData();
-      const updated = await setSlideNotes(original, slide, text);
+  // Save an edited PDF over the deck (a plugin's presio.deck.save), then swap
+  // in the updated document so further edits build on it. Local sessions
+  // update IndexedDB; synced ones re-upload to the owner's stored PDF. Only
+  // edits in place: a different page count is a replace, not an edit.
+  const saveDeck = useCallback(
+    async (updated: Uint8Array) => {
+      if (!pdf) throw new Error("The deck hasn't loaded yet");
+      // A copy: pdf.js transfers what it's given to its worker, detaching it.
+      const doc = await loadPdfData(updated.slice()).catch(() => {
+        throw new Error("That isn't a PDF Presio can open");
+      });
+      if (doc.numPages !== pdf.numPages) {
+        throw new Error("An edited deck must keep the same slides");
+      }
       // Coerce to a plain ArrayBuffer slice so Blob's BlobPart typing is happy.
       const buf = updated.buffer.slice(
         updated.byteOffset,
@@ -1019,25 +882,16 @@ export default function Presentation() {
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || "Failed to save notes");
+          throw new Error(body.error || "Failed to save the deck");
         }
       }
 
       // These edits live in this PDF's bytes, so a recompiled file would drop
       // them. Remembered so the live-reload prompt can say so.
-      setNotesEdited(true);
+      setDeckEdited(true);
 
-      // Reflect the edit immediately; the deck re-derives from the new pdf.
-      setDeckInfo((info) => {
-        if (!info) return info;
-        const notes = new Map(info.notes);
-        const trimmed = text.trim();
-        if (trimmed) notes.set(slide, trimmed);
-        else notes.delete(slide);
-        return { ...info, notes };
-      });
-
-      const doc = await loadPdfData(updated);
+      // Same pages, edited: plugins keep what they hang off them.
+      plugins.host.expectDeckEdit();
       setPdf(doc);
       if (local) {
         const url = URL.createObjectURL(blob);
@@ -1046,8 +900,11 @@ export default function Presentation() {
         setPdfUrl(url);
       }
     },
-    [pdf, local, id, filename, pdfWriteAuth]
+    [pdf, local, id, filename, pdfWriteAuth, plugins.host]
   );
+  useEffect(() => {
+    plugins.host.setDeckWriter(role === "controller" ? saveDeck : null);
+  }, [plugins.host, role, saveDeck]);
 
   // Replace this presentation's PDF with a new file, keeping the session id,
   // code, controller token and passphrase. Mirrors saveNotes' local/synced
@@ -1173,154 +1030,6 @@ export default function Presentation() {
     void watcherRef.current?.resume();
   }, []);
 
-  const onMediaControl = useCallback(
-    (id: string, action: "play" | "pause" | "reset") => {
-      const next: MediaState = { id, action, seq: Date.now() };
-      broadcast(
-        { type: "media_update", payload: next },
-        { event: "media_control", payload: { id, action } }
-      );
-      setMediaState(next);
-    },
-    [broadcast]
-  );
-
-  const onMediaTime = useCallback(
-    (id: string, t: number, playing: boolean, sampledAt: number) => {
-      // Local sessions sync over the BroadcastChannel; both windows share the
-      // same Date.now() clock, so sampledAt-based latency comp still holds.
-      if (local) {
-        channelRef.current?.postMessage({
-          type: "media_time_update",
-          payload: { id, t, playing, sampledAt, seq: Date.now() },
-        });
-      } else {
-        socket.emit("media_time", { id, t, playing, sampledAt });
-      }
-    },
-    [local]
-  );
-
-  // Stream the controller's laser pointer to every other window. High-frequency
-  // and transient, so it goes straight out without touching component state.
-  const onLaserMove = useCallback(
-    (pt: LaserPoint | null) => {
-      broadcast(
-        { type: "laser_update", payload: pt },
-        { event: "laser_move", payload: pt }
-      );
-    },
-    [broadcast]
-  );
-
-  // --- Drawing (controller side) ---
-
-  const onStrokeProgress = useCallback(
-    (stroke: Stroke | null) => {
-      const payload = { slide: currentSlide, stroke };
-      broadcast(
-        { type: "stroke_progress", payload },
-        { event: "stroke_progress", payload }
-      );
-    },
-    [currentSlide, broadcast]
-  );
-
-  const onStrokeCommit = useCallback(
-    (stroke: Stroke) => {
-      applyCommit(currentSlide, stroke);
-      const payload = { slide: currentSlide, stroke };
-      broadcast(
-        { type: "stroke_commit", payload },
-        { event: "stroke_commit", payload }
-      );
-    },
-    [currentSlide, broadcast, applyCommit]
-  );
-
-  const onStrokeUndo = useCallback(() => {
-    applyUndo(currentSlide);
-    const payload = { slide: currentSlide };
-    broadcast({ type: "stroke_undo", payload }, { event: "stroke_undo", payload });
-  }, [currentSlide, broadcast, applyUndo]);
-
-  const onAnnotationsClear = useCallback(() => {
-    applyClear(currentSlide);
-    const payload = { slide: currentSlide };
-    broadcast({ type: "annotations_clear", payload }, { event: "annotations_clear", payload });
-  }, [currentSlide, broadcast, applyClear]);
-
-  const onAnnotationsReplace = useCallback(
-    (bySlide: AnnotationsBySlide) => {
-      setAnnotations(bySlide);
-      broadcast(
-        { type: "annotations_state", payload: bySlide },
-        { event: "annotations_sync", payload: bySlide }
-      );
-    },
-    [broadcast]
-  );
-
-  const triggerDownload = (blob: Blob, name: string) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
-  const onSaveDrawing = useCallback(() => {
-    triggerDownload(
-      new Blob([serializeDrawing(annotationsRef.current)], { type: "application/json" }),
-      `${filename || "slides"}-drawing.json`
-    );
-  }, [filename, annotationsRef]);
-
-  const onLoadDrawing = useCallback(
-    async (file: File) => {
-      try {
-        onAnnotationsReplace(parseDrawing(await file.text()));
-      } catch (e) {
-        window.alert(e instanceof Error ? e.message : "Failed to load drawing");
-      }
-    },
-    [onAnnotationsReplace]
-  );
-
-  const onAudioChange = useCallback(
-    (next: { muted: boolean; target: AudioState["target"] }) => {
-      const payload: AudioState = { ...next, seq: Date.now() };
-      broadcast(
-        { type: "audio_update", payload },
-        { event: "audio_change", payload: next }
-      );
-      setAudioState(payload);
-    },
-    [broadcast]
-  );
-
-  const effectiveMuted = isMutedForRole(role === "controller" ? "controller" : "viewer", audioState);
-
-  const currentMedia = deck?.mediaBySlide.get(displaySlide) ?? [];
-
-  // When the controller lands on a slide whose media is marked autoplay, start
-  // it through the shared mediaState. This makes the controller the time-sync
-  // source so it and all viewers play in lockstep — otherwise the viewer would
-  // autoplay on its own (via the autostart path) while the controller stays
-  // paused, and the two would drift out of sync.
-  useEffect(() => {
-    if (role !== "controller") return;
-    const auto = currentMedia.find((p) => p.autoplay);
-    // Driving playback, an external system, from the slide the deck landed on.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (auto) onMediaControl(auto.id, "play");
-    // displaySlide drives currentMedia; re-run on slide change or once media loads.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displaySlide, role, deckInfo]);
-
   if (loading || (!error && !deck)) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -1358,17 +1067,11 @@ export default function Presentation() {
         deck={deck!}
         canvasRef={currentCanvasRef}
         blanked={blanked}
-        mediaState={mediaState}
-        mediaTime={mediaTime}
-        muted={effectiveMuted}
         currentSlide={displaySlide}
-        showCode={showCode}
         outOfSync={outOfSync}
         onViewerGoTo={viewerGoTo}
         onResync={resync}
-        laser={laser}
-        strokes={annotations[displaySlide] ?? []}
-        draft={remoteDraft && remoteDraft.slide === displaySlide ? remoteDraft.stroke : null}
+        plugins={plugins}
       />
     );
   }
@@ -1379,10 +1082,7 @@ export default function Presentation() {
         <ConfirmDeckReloadDialog
           filename={filename}
           source={reloadPrompt}
-          annotatedSlides={
-            Object.values(annotations).filter((strokes) => strokes.length > 0).length
-          }
-          notesEdited={notesEdited}
+          deckEdited={deckEdited}
           busy={applyingWatch}
           onConfirm={reloadPrompt === "watch" ? applyDeckWatchUpdate : applyRemoteDeckUpdate}
           // Dismissed, not declined: the header keeps the "Deck updated" chip
@@ -1399,7 +1099,6 @@ export default function Presentation() {
         onSyncAll={syncAll}
         onEnd={endPresentation}
         onSynced={() => setLocal(false)}
-        onSaveNotes={saveNotes}
         onReplacePdf={replacePdf}
         currentCanvasRef={currentCanvasRef}
         blanked={blanked}
@@ -1418,26 +1117,7 @@ export default function Presentation() {
           if (local) setBlanked(next);
           broadcast({ type: "blank_update", payload: { blanked: next } }, { event: "blank_toggle" });
         }}
-        showCode={showCode}
-        onShowCodeToggle={() => {
-          const next = !showCode;
-          // Same echo asymmetry as blanking: local mode sets it directly.
-          if (local) setShowCode(next);
-          broadcast({ type: "code_update", payload: { showCode: next } }, { event: "code_toggle" });
-        }}
-        mediaState={mediaState}
-        onMediaControl={onMediaControl}
-        onMediaTime={onMediaTime}
-        muted={effectiveMuted}
-        audioState={audioState}
-        onAudioChange={onAudioChange}
-        onLaserMove={onLaserMove}
-        onStrokeProgress={onStrokeProgress}
-        onStrokeCommit={onStrokeCommit}
-        onStrokeUndo={onStrokeUndo}
-        onAnnotationsClear={onAnnotationsClear}
-        onSaveDrawing={onSaveDrawing}
-        onLoadDrawing={onLoadDrawing}
+        plugins={plugins}
       />
     </>
   );

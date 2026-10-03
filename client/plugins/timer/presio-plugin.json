@@ -1,0 +1,50 @@
+{
+  "id": "timer",
+  "name": "Timer",
+  "version": "1.0.0",
+  "author": "Presio",
+  "description": "A talk timer on your dashboard, counting up or down, with a warning as time runs out. Only you see it.",
+  "main": "index.html",
+  "surfaces": ["background", "tile"],
+  "activation": ["always"],
+  "permissions": [],
+  "contributes": {
+    "buttons": [
+      {
+        "id": "toggle",
+        "label": "00:00",
+        "icon": "timer",
+        "tooltip": "Start or stop the talk timer",
+        "location": "controller.toolbar"
+      }
+    ],
+    "settings": {
+      "mode": {
+        "type": "enum",
+        "values": ["up", "down"],
+        "labels": ["Count up", "Count down"],
+        "default": "up",
+        "description": "Count the talk up from zero, or down from the countdown length."
+      },
+      "durationMinutes": {
+        "type": "number",
+        "default": null,
+        "minimum": 0.1,
+        "maximum": 999,
+        "description": "Countdown length in minutes (2.5 is 2:30), when counting down."
+      },
+      "warningMinutes": {
+        "type": "number",
+        "default": null,
+        "minimum": 0.1,
+        "maximum": 999,
+        "description": "Turn the timer red at this many minutes: remaining when counting down, elapsed when counting up. Leave empty for no warning."
+      },
+      "showClock": {
+        "type": "boolean",
+        "default": false,
+        "description": "Also show the current time on the card."
+      }
+    }
+  }
+}

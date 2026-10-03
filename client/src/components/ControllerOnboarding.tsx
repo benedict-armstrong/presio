@@ -131,8 +131,8 @@ function buildSteps(onOpenViewer: () => void): Step[] {
             </div>
           </div>
           <p className="text-center text-xs">
-            Drawing tools are available when you're logged in. Save or reload
-            your drawings anytime from Settings.
+            Save your drawings to a file, or load them back, from the pen's
+            options in the same palette.
           </p>
         </div>
       ),

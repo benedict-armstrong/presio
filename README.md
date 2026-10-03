@@ -1,7 +1,9 @@
 # Presio
 
-Present PDFs from your browser — try it at **[presio.ch](https://presio.ch)** or
+Present PDFs from your browser. Try it at **[presio.ch](https://presio.ch)** or
 **[presio.xyz](https://presio.xyz)**.
+
+A modern no-install alternative to [Pympress](https://github.com/Cimbali/pympress) with more features!
 
 Upload a PDF presentation, get a short link, and control the slideshow from one browser window while viewers watch in another. Presio is a hosted service; this repository is its source code.
 

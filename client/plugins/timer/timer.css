@@ -1,0 +1,4 @@
+.timer { box-sizing: border-box; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 8px; }
+.elapsed { font: 600 24px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; transition: color .5s; }
+.clock { font: 14px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; color: var(--muted); }
+.row { display: flex; gap: 6px; }

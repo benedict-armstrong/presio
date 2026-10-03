@@ -162,7 +162,7 @@ needs so generated links come out `https://`.
 ### Serving the app on two domains
 
 Every public router takes an optional second hostname via an `_ALT` variable —
-`APP_HOST_ALT`, `SUPABASE_HOST_ALT`, `UMAMI_HOST_ALT`, `UPTIME_HOST_ALT`. What
+`APP_HOST_ALT`, `SUPABASE_HOST_ALT`. What
 each one is *for* differs, and the table below spells that out.
 
 The rule is two matchers OR'd together, **not** ``Host(`a`, `b`)`` — the
@@ -188,19 +188,28 @@ hostname answering while clients still hold it.
 | --- | --- | --- | --- |
 | app | `APP_HOST` | `APP_HOST_ALT` | genuinely serving both domains |
 | Supabase (Kong) | `SUPABASE_HOST` | `SUPABASE_HOST_ALT` | a cached service worker or installed PWA still calling the old API host |
-| Umami | `UMAMI_HOST` | `UMAMI_HOST_ALT` | the tracking script beacons back to the origin it was loaded from |
-| Uptime Kuma | `UPTIME_HOST` | `UPTIME_HOST_ALT` | bookmarks and external status links |
 
-All four default back to their primary when the `_ALT` is empty, so a
+Both default back to their primary when the `_ALT` is empty, so a
 single-domain deployment needs no change.
 
 The analytics one is the easy one to get wrong. `ANALYTICS_URL` has to name the
 same host `client/index.html` loads the tracking script from — the CSP
 `script-src` is derived from it, so a mismatch blocks analytics with no error
 anyone will notice. And because the built client is service-worker precached,
-moving `UMAMI_HOST` without setting `UMAMI_HOST_ALT` silently drops the hits
-from every visitor still running a pre-move bundle, for as long as that cache
-lives.
+an analytics hostname must keep answering after a move, or the hits from every
+visitor still running a pre-move bundle are silently dropped for as long as
+that cache lives.
+
+### Analytics and uptime monitoring live outside this stack
+
+Umami and Uptime Kuma are shared by every app on the host, so they run in a
+stack of their own next to the proxy (`~/ops` on the presio host), with
+Umami's own Postgres. Traefik routes **every** `analytics.*` hostname to Umami
+and every `uptime.*` hostname to Kuma, so all of `analytics.presio.xyz`,
+`analytics.presio.ch` and any later domain answer without per-app config —
+which also covers the hostname-move problem above. This stack only carries
+`ANALYTICS_URL`. (Until 2026-09-30 both were services here, with Umami's data
+in this stack's Postgres.)
 
 Because `VITE_SUPABASE_URL` is a **build arg**, changing it needs
 `docker compose up -d --build`. A plain restart keeps the old bundle.
@@ -235,9 +244,35 @@ the same effect. That is what makes `Cf-Connecting-Ip` trustworthy at the edge:
 it is an ordinary header, so it is only meaningful while the edge is
 unavoidable.
 
+### A separate origin for viewers
+
+Audiences can watch on their own hostname, e.g. `viewer.presio.ch` beside
+`presio.ch`. The presenter's plugins run on every audience device; on the
+viewer origin they can't reach what Presio keeps in an audience member's
+browser for the app origin — their login, the controller tokens of their own
+decks. With it unset, viewers use the app hostnames as before (self-hosting,
+local mode).
+
+1. Add a DNS record per viewer hostname, pointing where the app's does
+   (proxied through Cloudflare). Keep each one level under the domain —
+   `viewer.presio.ch`, `staging-viewer.presio.xyz` — so the `*.domain`
+   origin certificates already cover it.
+2. Set `VIEWER_HOST` (and `VIEWER_HOST_ALT` when dual-homed; they pair with
+   `APP_HOST` / `APP_HOST_ALT` in order) in the stack `.env`, and add their
+   `https://` origins to `ALLOWED_ORIGIN` — `gen-env.sh` does both from
+   `VIEWER_DOMAIN` / `VIEWER_DOMAIN_ALT`. Staging takes `STAGING_VIEWER_HOST`
+   (and `_ALT`).
+3. Redeploy. Join links and QR codes now point at the viewer host; old viewer
+   links on the app host redirect there, and "Switch to Controller" hands back
+   to the app host to ask for the passphrase.
+
+The isolation relies on Presio keeping auth out of domain-wide cookies — a
+subdomain shares those. Its auth lives in localStorage and request headers.
+
 ## Monitoring certificate expiry
 
-Uptime Kuma runs in the stack. Two monitors are worth having:
+Uptime Kuma runs host-wide (see above), on the shared `web` network, so it
+reaches `presio-cert-expiry` by name. Two monitors are worth having:
 
 | Monitor | Type | Target |
 | --- | --- | --- |

@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://presio.xyz/schema/plugin-manifest.json",
+  "title": "Presio plugin manifest",
+  "description": "presio-plugin.json, served next to the plugin's HTML. See /plugins.md.",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "version"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+      "description": "Stable identifier; also the message namespace."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "main": {
+      "type": "string",
+      "default": "index.html",
+      "description": "The plugin's single-file HTML, relative to the manifest."
+    },
+    "surfaces": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "background",
+          "tile",
+          "viewer",
+          "slide"
+        ]
+      },
+      "description": "background: hidden on the presenter's device; handles buttons, keybindings and state. tile: a card of its own on the presenter's dashboard. viewer: a full-screen layer on every viewer screen, hidden until the plugin shows it. slide: a layer over the slide itself, sized to the page, on the presenter's current slide and every viewer; lets input through unless the plugin claims it."
+    },
+    "slideSurface": {
+      "enum": ["page", "area"],
+      "default": "page",
+      "description": "What the slide surface covers. page: the page itself, so fractions of the layer are page positions. area: the whole slide area around it (the viewer's screen, the current slide card), letterbox bars included; presio.ui.page says where the page is within it."
+    },
+    "activation": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(always|attachment:.+)$"
+      },
+      "description": "When the plugin runs: \"always\", or \"attachment:<glob>\" for decks embedding a matching attachment."
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "deck",
+          "editDeck",
+          "history"
+        ]
+      },
+      "description": "deck: read the PDF (its bytes and embedded attachments). editDeck: save an edited PDF over the deck (presenter's device only). history: keep an edit history for the deck, shared with every device, and blobs (presio.history, presio.blobs)."
+    },
+    "contributes": {
+      "type": "object",
+      "properties": {
+        "buttons": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label",
+              "location"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 24
+              },
+              "icon": {
+                "enum": [
+                  "qr-code",
+                  "bar-chart",
+                  "message",
+                  "users",
+                  "timer",
+                  "bell",
+                  "star",
+                  "sparkles",
+                  "hand",
+                  "check",
+                  "eye",
+                  "megaphone",
+                  "pen",
+                  "download",
+                  "upload"
+                ]
+              },
+              "tooltip": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "location": {
+                "enum": [
+                  "controller.toolbar",
+                  "controller.currentSlide",
+                  "settings"
+                ]
+              },
+              "accept": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "Ask the presenter for a file of these types (an <input accept> value) first; the press arrives with it."
+              }
+            }
+          },
+          "description": "Buttons Presio draws natively; presses reach the background surface (or the tile)."
+        },
+        "keybindings": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "required": [
+              "command",
+              "label",
+              "keys"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 48
+              },
+              "keys": {
+                "type": "array",
+                "maxItems": 3,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "key"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32,
+                      "description": "A KeyboardEvent.key value, e.g. \"k\" or \"ArrowUp\"."
+                    },
+                    "meta": {
+                      "type": "boolean",
+                      "description": "Needs ⌘ (Meta) held."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "description": "Keyboard shortcuts for the presenter's controller, rebindable in Settings (stored as \"<id>.<command>\" in the keybindings setting). Presses reach presio.onCommand on the background surface (or the tile). Presio's own shortcuts win where keys overlap."
+        },
+        "settings": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "type",
+              "default"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "boolean",
+                  "number",
+                  "string",
+                  "enum"
+                ]
+              },
+              "default": {},
+              "description": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "minimum": {
+                "type": "number"
+              },
+              "maximum": {
+                "type": "number"
+              },
+              "maxLength": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "description": "Settings stored as \"<id>.<name>\" in the presenter's settings file."
+        }
+      }
+    }
+  }
+}

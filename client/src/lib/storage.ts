@@ -6,10 +6,12 @@
 // hand-rolled `try { JSON.parse(localStorage.getItem(...)) } catch {}` dance
 // that was duplicated across the app.
 
-/** Static localStorage keys. Per-session keys (timer, session auth) are built
+/** Static localStorage keys. Per-session keys (plugin state, session auth) are built
  *  from an id, so they're kept as factory functions rather than constants. */
 export const STORAGE_KEYS = {
-  keymap: "presio_keymap",
+  // The user's settings document (lib/settings.ts). Preferences live there;
+  // the keys below are app state.
+  settings: "presio_settings",
   // Mosaic binary-tree layout for the controller dashboard. A card is "visible"
   // iff it appears as a leaf in the tree, so visibility no longer needs its own
   // key (replaces the legacy controllerLayout/controllerCards array format).
@@ -25,33 +27,16 @@ export const STORAGE_KEYS = {
   // Whether the add-to-home-screen prompt has been seen/actioned. Shown on
   // touch devices while presenting, never on the landing page.
   installPromptSeen: "presio_install_prompt_seen",
-  // Hidden ?desktop=1 escape hatch: force the desktop layout on mobile.
-  forceDesktop: "presio_force_desktop",
-  // Last-used drawing color/width for the annotation tools.
-  penStyle: "presio_pen_style",
-  highlighterStyle: "presio_highlighter_style",
-  // Whether the floating drawing/laser toolbar is shown on the current slide.
-  annotationToolbar: "presio_annotation_toolbar",
-  // Whether the timer card also shows the current wall-clock time.
-  timerShowClock: "presio_timer_show_clock",
-  // Timer mode/duration/warning — a device preference, not synced anywhere.
-  timerSettings: "presio_timer_settings",
-  // Font-size multiplier for the speaker notes card.
-  notesFontScale: "presio_notes_font_scale",
   // Email list prompt: "subscribed" | "dismissed" (absent = not asked yet).
   newsletterStatus: "presio_newsletter_status",
   // Test hook: override the prompt delay (ms).
   newsletterDelayOverride: "presio_newsletter_delay_ms",
-  // The presenter machine's LAN address, entered once on the share screen when
-  // Presio is opened over localhost (see lib/joinUrl.ts).
-  lanAddress: "presio_lan_address",
-  // Landing page stripped back to just the drop zone / URL / join code, for
-  // returning users who don't need the explainer again.
-  homeMinimal: "presio_home_minimal",
 } as const;
 
-export const timerKey = (id: string) => `presio_timer_${id}`;
-export const annotationsKey = (id: string) => `presio_annotations_${id}`;
+/** Plugins' presio.storage for one session: { [pluginId]: { [key]: value } }. */
+export const pluginStateKey = (id: string) => `presio_plugin_state_${id}`;
+/** The presenter's retained plugin messages for one session (lib/plugins/host.ts). */
+export const pluginRetainedKey = (id: string) => `presio_plugin_retained_${id}`;
 export const sessionKey = (id: string) => `session_${id}`;
 /** Live-reload preference for a local deck: "off" | "prompt" | "auto". A device
  *  preference (the file being watched is on this machine), not session state. */
@@ -107,12 +92,13 @@ export function lsRemove(key: string): void {
 /** Move a deck's per-session state from one id to another. Sharing a local deck
  *  mints its real join code server-side, so the deck is re-keyed — and anything
  *  stored under the old id would be silently lost at exactly the moment the
- *  presenter shares. Drawings are the one that hurts; the timer and the
- *  viewer-opened flag are moved for the same reason (a running timer resetting,
- *  or the "open the viewer" prompt reappearing, mid-presentation). */
+ *  presenter shares. Plugins' retained state is the one that hurts (it holds
+ *  the drawings); their storage and the viewer-opened flag are moved for the
+ *  same reason (a running timer resetting, or the "open the viewer" prompt
+ *  reappearing, mid-presentation). */
 export function rekeySessionStorage(oldId: string, newId: string): void {
   if (oldId === newId) return;
-  for (const key of [annotationsKey, timerKey, viewerOpenedKey]) {
+  for (const key of [pluginRetainedKey, pluginStateKey, viewerOpenedKey]) {
     const value = lsGetString(key(oldId), "");
     if (value) lsSetString(key(newId), value);
     lsRemove(key(oldId));

@@ -1,11 +1,11 @@
 // Strict sidecar inspection for the PDF checker tool.
-// Unlike loadNotesFromAttachments / loadMediaPlacements (which silently skip
-// bad attachments for the presenter), this reports every issue so the user can
+// Unlike the notes and media plugins' readers (which silently skip bad
+// attachments for the presenter), this reports every issue so the user can
 // fix their Typst source.
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { readAttachments } from "./pdf";
-import { typstAstToMarkdown } from "./typstNotes";
+import { notesToMarkdown } from "./typstNotes";
 
 export type Validity = "valid" | "warning" | "invalid";
 
@@ -100,16 +100,7 @@ function inspectNotesJson(
       }
 
       try {
-        if (typeof notes === "string") {
-          previewText = notes;
-        } else if (Array.isArray(notes)) {
-          previewText = notes
-            .map((n) => typstAstToMarkdown(n))
-            .filter((s) => s.length > 0)
-            .join("\n\n---\n\n");
-        } else {
-          previewText = typstAstToMarkdown(notes);
-        }
+        previewText = notesToMarkdown(notes);
       } catch {
         issues.push({ level: "warning", message: "Could not render notes preview (AST may be non-standard)" });
       }

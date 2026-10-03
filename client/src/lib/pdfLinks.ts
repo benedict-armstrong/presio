@@ -3,8 +3,8 @@
 // before: the slide is painted to a canvas, which has no notion of a clickable
 // region, so links were dead on screen.
 //
-// Positions use the same convention as MediaPlacement — a fraction of the page,
-// top-left origin — so an overlay can place them over the rendered canvas.
+// Positions use the same convention as plugins' layers — a fraction of the
+// page, top-left origin — so an overlay can place them over the rendered canvas.
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
@@ -26,7 +26,7 @@ export interface PdfLink {
 // the media sidecars these URLs end up in an <a href> that a presenter clicks.
 // An allow-list is the only safe shape here: it drops `javascript:` and friends,
 // and incidentally drops presio's own `note:` annotations, which share the URL
-// field but are speaker notes rather than links (see extractSpeakerNotes).
+// field but are speaker notes rather than links (the notes plugin reads them).
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 
 export function safeLinkUrl(value: unknown): string | null {

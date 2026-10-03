@@ -21,7 +21,6 @@ export function AccountControl({ variant = "compact" }: { variant?: "compact" | 
     return (
       <>
         <section className="space-y-2">
-          <h3 className="text-sm font-medium">Account</h3>
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm text-muted-foreground truncate">
               {user ? user.email : "Not signed in"}

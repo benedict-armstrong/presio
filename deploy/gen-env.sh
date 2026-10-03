@@ -17,16 +17,14 @@ OUT="${1:-../.env}"
 # SUPABASE_DOMAIN. Empty (the default) produces an ordinary one-domain env.
 : "${APP_DOMAIN_ALT:=}"
 : "${SUPABASE_DOMAIN:=https://supabase.presio.xyz}"
+# Optional viewer domains, paired with APP_DOMAIN / APP_DOMAIN_ALT: where
+# audiences watch (see VIEWER_HOST in .env.example). Empty = no split.
+: "${VIEWER_DOMAIN:=}"
+: "${VIEWER_DOMAIN_ALT:=}"
 # Optional former API domain, kept routed so cached service workers still
 # calling the old host don't hard-fail after a move.
 : "${SUPABASE_DOMAIN_ALT:=}"
 : "${ANALYTICS_DOMAIN:=https://analytics.presio.xyz}"
-# Optional former analytics domain, kept routed so a service-worker-precached
-# client still beaconing the old host keeps being counted after a move.
-: "${ANALYTICS_DOMAIN_ALT:=}"
-# Uptime Kuma dashboard, and an optional former hostname for it.
-: "${UPTIME_DOMAIN:=https://uptime.presio.xyz}"
-: "${UPTIME_DOMAIN_ALT:=}"
 : "${GITHUB_CLIENT_ID:=REPLACE_ME}"
 : "${GITHUB_SECRET:=REPLACE_ME}"
 : "${GITHUB_ENABLED:=true}"
@@ -60,8 +58,6 @@ PG_META_CRYPTO_KEY=$(rand 16)
 MINIO_ROOT_PASSWORD=$(rand 24)
 S3_PROTOCOL_ACCESS_KEY_ID=$(rand 16)
 S3_PROTOCOL_ACCESS_KEY_SECRET=$(rand 32)
-UMAMI_DB_PASSWORD=$(rand 32)
-UMAMI_APP_SECRET=$(rand 32)
 
 override() {  # echo a replacement value for $1, or return 1 if no override
   case "$1" in
@@ -71,6 +67,8 @@ override() {  # echo a replacement value for $1, or return 1 if no override
     SUPABASE_HOST_ALT)        [ -n "$SUPABASE_DOMAIN_ALT" ] && hostonly "$SUPABASE_DOMAIN_ALT" || echo "" ;;
     SUPABASE_PUBLIC_URL|API_EXTERNAL_URL) echo "$SUPABASE_DOMAIN" ;;
     SITE_URL)                 echo "$APP_DOMAIN" ;;
+    VIEWER_HOST)              [ -n "$VIEWER_DOMAIN" ] && hostonly "$VIEWER_DOMAIN" || echo "" ;;
+    VIEWER_HOST_ALT)          [ -n "$VIEWER_DOMAIN_ALT" ] && hostonly "$VIEWER_DOMAIN_ALT" || echo "" ;;
     # The app domain first: it is the canonical origin for generated links.
     PUBLIC_BASE_URLS)         echo "$APP_DOMAIN${APP_DOMAIN_ALT:+,$APP_DOMAIN_ALT}" ;;
     # /** wildcard suffix required: GoTrue falls back to SITE_URL for any
@@ -78,8 +76,9 @@ override() {  # echo a replacement value for $1, or return 1 if no override
     ADDITIONAL_REDIRECT_URLS) echo "$APP_DOMAIN/**${APP_DOMAIN_ALT:+,$APP_DOMAIN_ALT/**},http://localhost:5173/**" ;;
     # Browsers send Origin even on same-origin fetch/WebSocket, so set this to
     # the app URL so the server's CORS check allows it. Both domains when
-    # dual-homed, or the second one's requests are refused.
-    ALLOWED_ORIGIN)           echo "$APP_DOMAIN${APP_DOMAIN_ALT:+,$APP_DOMAIN_ALT}" ;;
+    # dual-homed, or the second one's requests are refused — and the viewer
+    # domains, whose pages talk to this same server.
+    ALLOWED_ORIGIN)           echo "$APP_DOMAIN${APP_DOMAIN_ALT:+,$APP_DOMAIN_ALT}${VIEWER_DOMAIN:+,$VIEWER_DOMAIN}${VIEWER_DOMAIN_ALT:+,$VIEWER_DOMAIN_ALT}" ;;
     ANALYTICS_URL)            echo "$ANALYTICS_DOMAIN" ;;
     GITHUB_ENABLED)           echo "$GITHUB_ENABLED" ;;
     ENABLE_EMAIL_AUTOCONFIRM) echo "$ENABLE_EMAIL_AUTOCONFIRM" ;;
@@ -96,12 +95,6 @@ override() {  # echo a replacement value for $1, or return 1 if no override
     S3_PROTOCOL_ACCESS_KEY_SECRET) echo "$S3_PROTOCOL_ACCESS_KEY_SECRET" ;;
     GITHUB_CLIENT_ID)         echo "$GITHUB_CLIENT_ID" ;;
     GITHUB_SECRET)            echo "$GITHUB_SECRET" ;;
-    UMAMI_HOST)               hostonly "$ANALYTICS_DOMAIN" ;;
-    UMAMI_HOST_ALT)           [ -n "$ANALYTICS_DOMAIN_ALT" ] && hostonly "$ANALYTICS_DOMAIN_ALT" || echo "" ;;
-    UPTIME_HOST)              hostonly "$UPTIME_DOMAIN" ;;
-    UPTIME_HOST_ALT)          [ -n "$UPTIME_DOMAIN_ALT" ] && hostonly "$UPTIME_DOMAIN_ALT" || echo "" ;;
-    UMAMI_DB_PASSWORD)        echo "$UMAMI_DB_PASSWORD" ;;
-    UMAMI_APP_SECRET)         echo "$UMAMI_APP_SECRET" ;;
     *) return 1 ;;
   esac
 }

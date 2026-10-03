@@ -1,0 +1,31 @@
+.notes { box-sizing: border-box; height: 100%; overflow-y: auto; padding: 8px 12px; cursor: text; position: relative; }
+.notes.editing { display: flex; flex-direction: column; gap: 8px; cursor: auto; overflow: hidden; }
+.empty { margin: 0; font-size: 12px; color: var(--muted); }
+.error { margin: 0; font-size: 12px; color: var(--danger); }
+.actions { display: flex; justify-content: flex-end; gap: 8px; }
+textarea { flex: 1; min-height: 0; width: 100%; box-sizing: border-box; resize: none; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--fg); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; outline: none; }
+textarea:focus { box-shadow: 0 0 0 1px var(--muted); }
+
+/* Text size: tucked in the corner, out of the way until wanted. */
+.size { position: sticky; top: 0; float: right; display: flex; gap: 2px; margin-left: 8px; opacity: .5; transition: opacity .15s; }
+.notes:hover .size { opacity: 1; }
+.size button { height: 22px; padding: 0 6px; font-size: 11px; color: var(--muted); }
+.size button:hover:not(:disabled) { color: var(--fg); }
+
+/* Markdown, after Tailwind Typography's prose-sm that the card used. */
+.prose { line-height: 1.6; overflow-wrap: anywhere; }
+.prose > :first-child { margin-top: 0; }
+.prose > :last-child { margin-bottom: 0; }
+.prose p, .prose ul, .prose ol, .prose blockquote, .prose pre { margin: .9em 0; }
+.prose h1, .prose h2, .prose h3, .prose h4 { margin: 1.2em 0 .5em; line-height: 1.3; font-weight: 600; }
+.prose h1 { font-size: 1.6em; } .prose h2 { font-size: 1.35em; } .prose h3 { font-size: 1.15em; } .prose h4 { font-size: 1em; }
+.prose ul, .prose ol { padding-left: 1.4em; }
+.prose li { margin: .25em 0; }
+.prose strong { font-weight: 600; }
+.prose a { color: inherit; text-decoration: underline; }
+.prose code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .875em; font-weight: 600; }
+.prose pre { padding: .7em 1em; border-radius: 6px; background: var(--hover); overflow-x: auto; }
+.prose pre code { font-weight: 400; }
+.prose blockquote { padding-left: 1em; border-left: 3px solid var(--border); color: var(--muted); font-style: italic; }
+.prose hr { border: 0; border-top: 1px solid var(--border); margin: 1.5em 0; }
+.prose img { max-width: 100%; }

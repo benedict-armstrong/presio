@@ -15,16 +15,16 @@ import {
 import { STORAGE_KEYS } from "./storage";
 
 describe("controllerLayout helpers", () => {
-  it("DEFAULT_LAYOUT exposes every card as a leaf", () => {
-    expect(visibleKeys(DEFAULT_LAYOUT).sort()).toEqual([...CARD_KEYS].sort());
+  it("DEFAULT_LAYOUT exposes every card, and the built-in plugins' tiles, as a leaf", () => {
+    expect(visibleKeys(DEFAULT_LAYOUT).sort()).toEqual([...CARD_KEYS, "plugin:notes", "plugin:timer"].sort());
   });
 
   it("removeLeaf drops a card and neighbours remain", () => {
-    const without = removeLeaf(DEFAULT_LAYOUT, "timer");
+    const without = removeLeaf(DEFAULT_LAYOUT, "plugin:timer");
     const keys = visibleKeys(without);
-    expect(keys).not.toContain("timer");
+    expect(keys).not.toContain("plugin:timer");
     expect(keys).toContain("nextSlide");
-    expect(keys).toHaveLength(CARD_KEYS.length - 1);
+    expect(keys).toHaveLength(visibleKeys(DEFAULT_LAYOUT).length - 1);
   });
 
   it("removeLeaf of the sole tile yields null", () => {
@@ -32,11 +32,11 @@ describe("controllerLayout helpers", () => {
   });
 
   it("addLeaf restores a hidden card and is idempotent", () => {
-    const without = removeLeaf(DEFAULT_LAYOUT, "notes");
-    const back = addLeaf(without, "notes");
-    expect(visibleKeys(back)).toContain("notes");
+    const without = removeLeaf(DEFAULT_LAYOUT, "thumbnails");
+    const back = addLeaf(without, "thumbnails");
+    expect(visibleKeys(back)).toContain("thumbnails");
     // Adding an already-present card is a no-op (no duplicate leaves).
-    expect(visibleKeys(addLeaf(back, "notes"))).toHaveLength(CARD_KEYS.length);
+    expect(visibleKeys(addLeaf(back, "thumbnails"))).toHaveLength(visibleKeys(DEFAULT_LAYOUT).length);
   });
 });
 
@@ -64,9 +64,10 @@ describe("layouts saved by react-mosaic v6", () => {
     localStorage.setItem(STORAGE_KEYS.controllerMosaic, JSON.stringify(legacy));
     const loaded = loadLayout("desktop");
 
-    // Not the fallback — the user's own arrangement survived.
+    // Not the fallback — the user's own arrangement survived, with the old
+    // timer and notes cards now the built-in plugins' tiles.
     expect(loaded).not.toEqual(DEFAULT_LAYOUT);
-    expect(visibleKeys(loaded).sort()).toEqual(["currentSlide", "notes", "timer"]);
+    expect(visibleKeys(loaded).sort()).toEqual(["currentSlide", "plugin:notes", "plugin:timer"]);
 
     // And it came back in the n-ary shape the new Mosaic understands.
     expect(loaded).toMatchObject({ type: "split", direction: "row" });

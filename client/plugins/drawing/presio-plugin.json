@@ -1,0 +1,107 @@
+{
+  "id": "drawing",
+  "name": "Drawing",
+  "version": "1.0.0",
+  "author": "Presio",
+  "description": "A pen, a highlighter and a laser pointer on your current slide, drawn live on every screen, shown in your previews and kept in the PDF you download. With a pen (Apple Pencil) it also erases, selects and moves, and snaps lines and boxes.",
+  "main": "index.html",
+  "surfaces": ["background", "slide"],
+  "slideSurface": "area",
+  "activation": ["always"],
+  "permissions": ["deck", "history"],
+  "contributes": {
+    "buttons": [
+      {
+        "id": "palette",
+        "label": "Drawing tools",
+        "icon": "pen",
+        "tooltip": "Show or hide the drawing tools",
+        "location": "controller.currentSlide"
+      },
+      {
+        "id": "saveFile",
+        "label": "Save to file",
+        "icon": "download",
+        "tooltip": "Download every slide's drawings as a JSON file",
+        "location": "settings"
+      },
+      {
+        "id": "loadFile",
+        "label": "Load from file",
+        "icon": "upload",
+        "tooltip": "Replace the drawings with a saved file's",
+        "location": "settings",
+        "accept": ".json,application/json"
+      }
+    ],
+    "keybindings": [
+      { "command": "pen", "label": "Pen", "keys": [{ "key": "p" }] },
+      { "command": "highlighter", "label": "Highlighter", "keys": [{ "key": "h" }] },
+      { "command": "laser", "label": "Laser pointer", "keys": [{ "key": "l" }] },
+      { "command": "pointer", "label": "No tool (pointer)", "keys": [{ "key": "Escape" }] },
+      { "command": "eraser", "label": "Eraser", "keys": [{ "key": "e" }] },
+      { "command": "lasso", "label": "Lasso (select and move)", "keys": [] },
+      { "command": "undo", "label": "Undo the last stroke", "keys": [{ "key": "z", "meta": true }] },
+      { "command": "redo", "label": "Redo", "keys": [{ "key": "y", "meta": true }] },
+      { "command": "toggleDrawings", "label": "Hide or show the drawings", "keys": [] },
+      { "command": "clear", "label": "Clear the slide's drawings", "keys": [] }
+    ],
+    "settings": {
+      "toolbar": {
+        "type": "boolean",
+        "default": true,
+        "description": "Show the drawing tools on the current slide."
+      },
+      "advanced": {
+        "type": "boolean",
+        "default": false,
+        "description": "Advanced tools: the eraser, the lasso, and snapping a stroke held still at its end to a line or a box. Turned on the first time you draw with a pen."
+      },
+      "hidden": {
+        "type": "boolean",
+        "default": false,
+        "description": "Hide the drawings on every screen (they're kept, and still in the PDF you download)."
+      },
+      "laserSize": {
+        "type": "number",
+        "default": 16,
+        "minimum": 4,
+        "maximum": 48,
+        "description": "The laser pointer's size, in pixels on a 960px-wide slide."
+      },
+      "laserTrail": {
+        "type": "boolean",
+        "default": false,
+        "description": "On a touch screen, the laser leaves a fading line rather than showing a dot. A mouse always shows the dot, and the line while pressed."
+      },
+      "penColor": {
+        "type": "enum",
+        "values": ["#111111", "#e11d48", "#2563eb", "#16a34a", "#f59e0b", "#9333ea"],
+        "labels": ["Black", "Red", "Blue", "Green", "Amber", "Purple"],
+        "default": "#e11d48",
+        "description": "The pen's color."
+      },
+      "penSize": {
+        "type": "number",
+        "default": 3,
+        "minimum": 1,
+        "maximum": 48,
+        "description": "The pen's width, in pixels on a 960px-wide slide."
+      },
+      "highlighterColor": {
+        "type": "enum",
+        "values": ["#facc15", "#a3e635", "#22d3ee", "#f472b6", "#fb923c", "#c084fc"],
+        "labels": ["Yellow", "Lime", "Cyan", "Pink", "Orange", "Violet"],
+        "default": "#facc15",
+        "description": "The highlighter's color."
+      },
+      "highlighterSize": {
+        "type": "number",
+        "default": 14,
+        "minimum": 1,
+        "maximum": 48,
+        "description": "The highlighter's width, in pixels on a 960px-wide slide."
+      }
+    }
+  }
+}

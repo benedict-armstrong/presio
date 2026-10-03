@@ -1,0 +1,31 @@
+html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+body { font: 13px/1.2 system-ui, -apple-system, sans-serif; }
+#root { position: absolute; inset: 0; }
+
+/* One item's box on the page. */
+.item { position: absolute; }
+.item > .poster, .player { position: absolute; inset: 0; width: 100%; height: 100%; }
+.poster { object-fit: cover; pointer-events: none; user-select: none; }
+.player { overflow: hidden; opacity: 0; transition: opacity .2s; }
+.ready > .player { opacity: 1; }
+.player video, .player img, .player iframe { display: block; width: 100%; height: 100%; border: 0; object-fit: cover; }
+.player img { user-select: none; }
+
+/* A viewer's embed only follows the presenter; it takes no input. */
+.tap-audio { position: absolute; inset: 0; border: 0; background: rgba(0,0,0,.55); color: #fff; font: 500 14px system-ui, -apple-system, sans-serif; cursor: pointer; }
+
+/* The presenter's controls, on the item. */
+.controls { position: absolute; top: 6px; left: 6px; display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: rgba(0,0,0,.6); opacity: .75; transition: opacity .15s; }
+.controls:hover, .item:hover .controls { opacity: 1; }
+.controls > button { width: 28px; height: 28px; padding: 5px; border: 0; border-radius: 6px; background: transparent; color: #fff; cursor: pointer; }
+.controls > button.narrow { width: 18px; padding: 5px 1px; margin-left: -2px; }
+.controls > button:hover { background: rgba(255,255,255,.18); }
+.controls > button.on { color: #4ade80; }
+.controls svg { display: block; width: 100%; height: 100%; }
+
+.menu { position: absolute; top: 100%; left: 0; margin-top: 4px; min-width: 180px; padding: 4px; border-radius: 8px; background: #18181b; color: #fafafa; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.menu.up { top: auto; bottom: 100%; margin: 0 0 4px; }
+.menu .heading { padding: 4px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #a1a1aa; }
+.menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.menu button:hover { background: #27272a; }
+.menu svg { width: 14px; height: 14px; flex: none; }

@@ -58,7 +58,8 @@ const sessionRow = (id: string, deck: "example" | "links" = "example") => ({
 const fake = new FakeSupabase([sessionRow(SESSION_ID)]);
 
 const io = new Server();
-const inner = createApp({ supabase: fake as unknown as SupabaseClient, io });
+const socketState = createSocketState();
+const inner = createApp({ supabase: fake as unknown as SupabaseClient, io, socketState });
 
 // Wrap createApp so the example PDF route is matched before its catch-all.
 const app = express();
@@ -72,7 +73,7 @@ app.get("/links.pdf", (_req, res) => {
 // Test-only: mint an isolated session.
 //
 // Playwright runs `fullyParallel`, and a session carries mutable state the
-// specs care about — current slide, annotations, timer. Sharing one id across
+// specs care about — current slide, drawings, timer. Sharing one id across
 // concurrent tests made them fail only when run together (a second controller
 // joining mid-test), which is the worst kind of flake. Each spec takes a fresh
 // id instead, so nothing carries between tests or across workers.
@@ -88,7 +89,7 @@ app.use(inner);
 
 const server = http.createServer(app);
 io.attach(server);
-registerSocketHandlers(io, fake as unknown as SupabaseClient, createSocketState());
+registerSocketHandlers(io, fake as unknown as SupabaseClient, socketState);
 
 server.listen(port, () => {
   console.log(`E2E harness on http://localhost:${port}`);

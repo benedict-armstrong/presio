@@ -2,16 +2,18 @@ import { test, expect, type Page } from "@playwright/test";
 import { jumpToSlide, newSession, openController, openViewer, waitForSlide } from "./helpers";
 
 // Media rides along inside the PDF: the deck's sidecar attachments carry the
-// bytes, the client extracts them and hands each one to the page as a blob URL.
-// That whole path — attachment -> blob -> the right slide, in both windows — is
-// what makes an animated deck work on the projector, and none of it was covered.
+// bytes, and the built-in media plugin extracts them and plays each one on its
+// slide as a blob URL, in its "slide" surface over the page. That whole path —
+// attachment -> blob -> the right slide, in both windows — is what makes an
+// animated deck work on the projector.
 //
 // The fixture's slide 3 holds an embedded GIF. Its other media slides point at
 // YouTube, Vimeo and Wikimedia, so they are deliberately left alone: a test
 // that needs the public internet is a test that fails on a bad day in CI.
 
-/** Media the client extracted from the PDF, as opposed to anything remote. */
-const embedded = (page: Page) => page.locator('img[src^="blob:"]');
+/** Media the plugin extracted from the PDF, as opposed to anything remote. */
+const embedded = (page: Page) =>
+  page.frameLocator('[data-testid="plugin-frame-media-slide"]').locator('img[src^="blob:"]');
 
 test("media embedded in the PDF plays on the slide it belongs to, in both windows", async ({
   browser,

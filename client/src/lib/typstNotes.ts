@@ -66,3 +66,16 @@ function walk(node: unknown): string {
 export function typstAstToMarkdown(node: unknown): string {
   return walk(node).replace(/\n{3,}/g, "\n\n").trim();
 }
+
+/** A notes sidecar's `notes` value — markdown, a Typst AST, or a list of
+ *  either (one per note, shown separated by rules) — as markdown. */
+export function notesToMarkdown(notes: unknown): string {
+  if (typeof notes === "string") return notes;
+  if (Array.isArray(notes)) {
+    return notes
+      .map((n) => typstAstToMarkdown(n))
+      .filter((s) => s.length > 0)
+      .join("\n\n---\n\n");
+  }
+  return typstAstToMarkdown(notes);
+}
