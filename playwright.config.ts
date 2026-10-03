@@ -20,6 +20,13 @@ export default defineConfig({
       // download on machines that already have Chrome.
       use: { ...devices["Desktop Chrome"], channel: process.env.PW_CHANNEL || undefined },
     },
+    {
+      // Safari's engine, for the compat smoke test only: the full suite's
+      // timing-sensitive specs are tuned for Chromium.
+      name: "webkit",
+      testMatch: "compat.spec.ts",
+      use: { ...devices["Desktop Safari"] },
+    },
   ],
   webServer: {
     // The harness serves the built client, so build it first.

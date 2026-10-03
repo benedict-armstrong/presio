@@ -71,3 +71,11 @@ export default defineConfig([
   },
 ])
 ```
+
+## Browser support
+
+The floor is the `browserslist` entry in `package.json` (Chrome/Edge 109, Firefox 115, Safari/iOS 16.4); `build.target` in `vite.config.ts` must match it. Syntax is lowered by the build; missing APIs are polyfilled in `src/polyfills.ts`, which is also imported by the pdf.js worker.
+
+- `npm run check:compat` (after `npm run build`) checks `dist/` for syntax above ES2022 and for watched APIs (see `scripts/check-compat.mjs`) the floor lacks and nothing polyfills. pdf.js upgrades are what usually trip it.
+- `eslint-plugin-compat` flags DOM/Web APIs in our own source. It doesn't know JS builtins, which is why the bundle check exists.
+- `e2e/compat.spec.ts` runs on Chromium and WebKit, once as-is and once with the polyfilled APIs deleted, failing on any uncaught error.
