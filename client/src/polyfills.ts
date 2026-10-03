@@ -9,3 +9,12 @@ if (!MapProto.getOrInsertComputed) {
     return value;
   };
 }
+
+// pdf.js 6 calls Uint8Array.prototype.toHex() to fingerprint documents; older
+// Android WebViews/Chromium lack it. Also loaded by the pdf.js worker.
+const U8Proto = Uint8Array.prototype as Uint8Array & { toHex?: () => string };
+if (typeof U8Proto.toHex !== "function") {
+  U8Proto.toHex = function (this: Uint8Array) {
+    return Array.from(this, (b) => b.toString(16).padStart(2, "0")).join("");
+  };
+}

@@ -1,5 +1,5 @@
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from "pdfjs-dist";
-import pdfWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
+import pdfWorker from "./pdfWorker.ts?worker&url";
 import { typstAstToMarkdown } from "./typstNotes";
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
